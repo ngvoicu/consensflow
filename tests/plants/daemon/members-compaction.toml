@@ -671,7 +671,7 @@ find = "        if (now_ === 'busy') {\n"
 replace = "        if (context?.isIdle?.() !== true) break\n        if (now_ === 'busy') {\n"
 
 [[plant]]
-name = "members compaction: the extension sends a delivery while its own compaction runs"
+name = "members compaction: a handover waits unanswered, not refused busy, while the extension's own compaction runs"
 meant = "refuses every delivery as busy while ours compaction runs, and delivers exactly one after it ends (complete)"
 runs = ["mc-pi-extension"]
 

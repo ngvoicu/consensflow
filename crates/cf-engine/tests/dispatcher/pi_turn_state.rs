@@ -10,6 +10,7 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use cf_base::env::Env;
 use cf_engine::testing::Context;
@@ -137,8 +138,11 @@ impl Window {
         }
     }
 
-    /// One look of the reader, given to the fake window, and one pass; the clock then moves
-    /// on 3.1 s, the reader's and the engine's.
+    /// One look of the reader, given to the fake window whole, and one pass; the clock then
+    /// moves on 3.1 s, the reader's and the engine's. Everything the real reader publishes goes
+    /// to the window: its items (after the brief the fake delivered, which the recorded session
+    /// holds in its own words), quota, failure and its kind, whether it takes words, and the run
+    /// that ended beside the present, likewise.
     fn pass(&mut self) {
         let reading = self.reader.look(&self.options, self.now);
         assert!(
@@ -150,23 +154,53 @@ impl Window {
             unreachable!()
         };
         let delivered = self.delivered.clone();
-        self.context.adapter.with("zeus", |agent| {
-            agent.items = delivered;
-            agent.items.extend(
+        let bridged = |record: &records::Record| -> Vec<records::Item> {
+            let mut items = delivered.clone();
+            items.extend(
                 record
                     .items
                     .iter()
-                    .filter(|item| item.role == Role::Assistant)
+                    .filter(|item| matches!(item.role, Role::Assistant | Role::Custom | Role::Tool))
                     .cloned(),
             );
+            items
+        };
+        let items = bridged(record);
+        let ended = record.lines.ended.as_deref().map(|ended| match ended {
+            Reading::Known(ended) => {
+                let mut ended = ended.clone();
+                ended.items = bridged(&ended);
+                Arc::new(Reading::Known(ended))
+            }
+            other => Arc::new(other.clone()),
+        });
+        self.context.adapter.with("zeus", |agent| {
+            agent.items = items;
             agent.settled = observed.settled;
+            agent.takes_words = Some(observed.takes_words);
             agent.over = observed.over;
             agent.failed = observed.failed;
+            agent.failure.clone_from(&record.failure);
+            agent.failure_kind.clone_from(&record.failure_kind);
+            agent.quota.clone_from(&observed.quota);
             agent.said_at_work = record.lines.said_at_work;
+            agent.ended = ended;
         });
         self.context.pass().unwrap();
         self.context.advance(3_100);
         self.now += 3_100;
+    }
+
+    /// The session growing to `text` a line a look (from what the file held), with the word as
+    /// `word` says all along: the reader reads every prefix, as the daemon would.
+    fn grows(&mut self, text: &str, word: Option<&Value>) {
+        let file = self.dir.path().join("hazy-ridge.jsonl");
+        let had = fs::read_to_string(&file).map_or(0, |had| had.lines().count());
+        let lines: Vec<&str> = text.lines().collect();
+        for upto in (had + 1)..=lines.len() {
+            self.shows(Some(&format!("{}\n", lines[..upto].join("\n"))), word);
+            self.pass();
+        }
     }
 
     fn passes(&mut self, count: usize) {
@@ -248,13 +282,12 @@ fn both_field_pauses_take_one_key_no_note_and_are_paid_with_or_without_the_word(
                 let mut window = Window::new();
                 // The model writes: at work, by the word or by the file's open user message.
                 let writing = before_the_step(&text);
-                window.shows(Some(&writing), with_word.then(|| working(&word)).as_ref());
-                window.pass();
+                window.grows(&writing, with_word.then(|| working(&word)).as_ref());
                 window.pause();
                 window.pass();
                 assert_eq!(window.escapes(), 1, "{what}: one key into the run at work");
                 // Pi ends the run in the abort; its extension writes the end, then `rest`.
-                window.shows(Some(&text), with_word.then_some(&word));
+                window.grows(&text, with_word.then_some(&word));
                 // With the word at once; without it, after the file's quiet (no key, no note
                 // before it).
                 window.passes(if with_word { 3 } else { 45 });
@@ -285,14 +318,16 @@ fn without_the_word_nothing_is_pressed_or_said_before_the_quiet_has_passed() {
         let (text, _) = moment(version, &format!("escape-call-{form}"), "01-interrupted");
         let text = text.unwrap();
         let mut window = Window::new();
-        window.shows(Some(&before_the_step(&text)), None);
-        window.pass();
+        window.grows(&before_the_step(&text), None);
         window.pause();
         window.pass();
-        window.shows(Some(&text), None);
-        // 110 s of looks: neither at rest nor at work. Nothing paid: the Resume waits.
+        window.grows(&text, None);
+        // Looks until a second short of the quiet after the last entry (the replay's own looks
+        // count toward it): neither at rest nor at work. Nothing paid: the Resume waits.
         let before = window.resume();
-        window.passes(35);
+        while window.now + 3_100 < newest(&text) + 119_000 {
+            window.pass();
+        }
         assert_eq!(window.escapes(), 1, "{version} {form}");
         assert!(window.told().is_empty(), "{version} {form}");
         assert_eq!(
@@ -398,41 +433,305 @@ fn a_run_pi_itself_says_is_on_after_every_round_is_kept_and_said_so() {
     }
 }
 
+/// The results the chief was given for T-1.
+fn results(window: &Window) -> Vec<String> {
+    window
+        .context
+        .inbox(window.context.id(window.project, "chief"))
+        .into_iter()
+        .filter(|message| message.kind == "result")
+        .map(|message| message.body)
+        .collect()
+}
+
 #[test]
-fn a_task_pi_recovered_by_its_own_retry_returns_only_the_retrys_words() {
-    // Pi's first attempt failed with words and a call begun; Pi omitted it and retried, and the
-    // retry answered. The attempt Pi dropped is no word of the result, with or without the word.
+fn a_task_pi_recovered_by_its_own_retry_keeps_it_and_returns_only_the_retrys_words() {
+    // Finding 1 and R5: Pi's first attempt failed with a 503 (a refusal for a moment) and words
+    // and a call begun; Pi omitted it and retried, and the retry answered. While Pi's word says
+    // the run is on, the 503 is no turn's: the task is neither paused nor requeued, and its
+    // result is the retry's words alone. The session grows a line a look, everything forwarded.
     for form in FORMS {
         let (version, form) = form.split_once('|').unwrap();
-        let (text, word) = moment(version, &format!("retry-{form}"), "02-retried");
+        let case = format!("retry-{form}");
+        let (during, at_work) = moment(version, &case, "01-second-request");
+        let (text, word) = moment(version, &case, "02-retried");
+        let what = format!("{version} {form}");
+        let mut window = Window::new();
+        window.grows(&during.unwrap(), Some(&at_work));
+        let task = window.context.task(window.project, 1).task;
+        assert_eq!(
+            task.state, "working",
+            "{what}: the 503 in the run is Pi's to handle"
+        );
+        window.grows(&text.unwrap(), Some(&word));
+        window.passes(3);
+        let task = window.context.task(window.project, 1).task;
+        assert_eq!(task.state, "done", "{what}");
+        let results = results(&window);
+        assert_eq!(results.len(), 1, "{what}: {results:?}");
+        assert!(
+            results[0].contains("Retry finished."),
+            "{what}: {}",
+            results[0]
+        );
+        assert!(
+            !results[0].contains("Running the script now."),
+            "{what}: {}",
+            results[0]
+        );
+    }
+}
+
+#[test]
+fn a_refusal_that_ends_a_run_reaches_the_dispatcher_with_that_end() {
+    // R5: the run's last step is a 503 Pi does not retry (its retries spent): that run's end
+    // carries the refusal, and the task is held for it, not done.
+    for form in FORMS {
+        let (version, form) = form.split_once('|').unwrap();
+        let (text, word) = moment(version, &format!("final-error-{form}"), "01-failed");
+        let text = text.unwrap().replace(
+            "400 Invalid request.",
+            "503 Service Unavailable: overloaded",
+        );
+        let what = format!("{version} {form}");
+        let mut window = Window::new();
+        window.grows(&before_the_step(&text), Some(&working(&word)));
+        window.grows(&text, Some(&word));
+        window.passes(3);
+        let task = window.context.task(window.project, 1).task;
+        assert_ne!(
+            task.state, "working",
+            "{what}: the refusal reached the dispatcher"
+        );
+        assert_ne!(task.state, "done", "{what}");
+        assert!(results(&window).is_empty(), "{what}");
+    }
+}
+
+#[test]
+fn a_pause_during_a_run_whose_earlier_end_is_unread_presses_the_key_into_that_run() {
+    // R1 (finding 3): run 1 ended and its end not yet read; run 2 is on. The stop is for run 2.
+    for form in FORMS {
+        let (version, form) = form.split_once('|').unwrap();
+        let (text, word) = moment(
+            version,
+            &format!("triggered-after-settle-{form}"),
+            "01-two-ends",
+        );
         let text = text.unwrap();
-        for with_word in [true, false] {
-            let what = format!("{version} {form}, word {with_word}");
+        let what = format!("{version} {form}");
+        let mut window = Window::new();
+        let mut none = word.clone();
+        none["state"] = json!("working");
+        none["begun"] = json!(1);
+        none["ended"] = json!(0);
+        none["ends"] = json!([]);
+        let run2 = before_the_step(&text);
+        window.grows(&before_the_step(&run2), Some(&none));
+        // Run 1 ended, run 2 began, before the next look.
+        let mut on = word.clone();
+        on["state"] = json!("working");
+        on["begun"] = json!(2);
+        on["ended"] = json!(1);
+        on["ends"] = json!([word["ends"][0]]);
+        window.pause();
+        window.grows(&run2, Some(&on));
+        window.pass();
+        assert!(
+            window.escapes() >= 1,
+            "{what}: a key into run 2: {}",
+            window.escapes()
+        );
+    }
+}
+
+#[test]
+fn a_rest_whose_leaf_the_file_lacks_takes_no_key_and_is_paid() {
+    // R1 (finding 3): Pi's word rests at a leaf the file has not written yet.
+    for form in FORMS {
+        let (version, form) = form.split_once('|').unwrap();
+        let (text, word) = moment(version, &format!("stop-{form}"), "02-answered");
+        let text = text.unwrap();
+        let what = format!("{version} {form}");
+        let mut window = Window::new();
+        window.grows(&before_the_step(&text), Some(&working(&word)));
+        window.pause();
+        window.shows(Some(&before_the_step(&text)), Some(&word));
+        window.passes(3);
+        assert_eq!(window.escapes(), 0, "{what}: no key into a window at rest");
+        assert!(window.told().is_empty(), "{what}");
+        let before = window.resume();
+        window.passes(2);
+        assert_eq!(
+            window.delivered(),
+            before + 1,
+            "{what}: paid, the Resume delivered"
+        );
+    }
+}
+
+#[test]
+fn without_the_word_a_refusal_in_a_retry_holds_the_task_as_on_main() {
+    // R5's limit: a window opened before the word (no extension of this release) reads the
+    // 503 of a retry as its file shows it, as main does: the task is held for it, and the
+    // retry's answer is not its result. Written down, not built.
+    let (during, _) = moment("1.6.1", "retry-plain", "01-second-request");
+    let (text, _) = moment("1.6.1", "retry-plain", "02-retried");
+    let mut window = Window::new();
+    window.grows(&during.unwrap(), None);
+    let held = window.context.task(window.project, 1).task.state;
+    window.grows(&text.unwrap(), None);
+    window.passes(45);
+    let task = window.context.task(window.project, 1).task;
+    eprintln!(
+        "without the word: at the 503 {held}; after the retry {}; results {:?}",
+        task.state,
+        results(&window)
+    );
+    assert_ne!(held, "working", "the limit as it is: held at the 503");
+}
+
+#[test]
+fn an_ended_run_beside_a_run_at_work_gives_its_result() {
+    // R1 and D3: run 1 answered and ended, a run a person's extension triggered from its end is
+    // on, and run 1's end is read only now. Its result is taken from it, as of its own leaf.
+    for form in FORMS {
+        let (version, form) = form.split_once('|').unwrap();
+        let (text, word) = moment(
+            version,
+            &format!("triggered-after-settle-{form}"),
+            "01-two-ends",
+        );
+        let text = text.unwrap();
+        let what = format!("{version} {form}");
+        let mut window = Window::new();
+        let run2 = before_the_step(&text);
+        let mut none = word.clone();
+        none["state"] = json!("working");
+        none["begun"] = json!(1);
+        none["ended"] = json!(0);
+        none["ends"] = json!([]);
+        window.grows(&before_the_step(&run2), Some(&none));
+        let mut on = word.clone();
+        on["state"] = json!("working");
+        on["begun"] = json!(2);
+        on["ended"] = json!(1);
+        on["ends"] = json!([word["ends"][0]]);
+        window.grows(&run2, Some(&on));
+        window.pass();
+        let task = window.context.task(window.project, 1).task;
+        assert_eq!(task.state, "done", "{what}");
+        let results = results(&window);
+        assert_eq!(results.len(), 1, "{what}: {results:?}");
+        assert!(
+            results[0].contains("First answer done."),
+            "{what}: {}",
+            results[0]
+        );
+    }
+}
+
+#[test]
+fn a_later_omission_of_an_ended_runs_answer_leaves_its_result() {
+    // R2 (finding 5): run 1 answered and ended; before its end is read, an entry after it
+    // omits that answer. Its result is the answer as of its own leaf.
+    for form in FORMS {
+        let (version, form) = form.split_once('|').unwrap();
+        let (text, word) = moment(
+            version,
+            &format!("triggered-after-settle-{form}"),
+            "01-two-ends",
+        );
+        let text = text.unwrap();
+        let what = format!("{version} {form}");
+        let mut window = Window::new();
+        let mut none = word.clone();
+        none["state"] = json!("working");
+        none["begun"] = json!(1);
+        none["ended"] = json!(0);
+        none["ends"] = json!([]);
+        window.grows(&before_the_step(&before_the_step(&text)), Some(&none));
+        let first = text
+            .lines()
+            .map(|line| serde_json::from_str::<Value>(line).unwrap())
+            .find(|row| row["message"]["role"] == "assistant")
+            .unwrap()["id"]
+            .clone();
+        let omission = json!({ "type": "context_edit", "id": "later-edit", "parentId": word["leaf"], "timestamp": "2026-11-27T10:00:00.000Z", "targetId": first, "replacement": null });
+        let mut later = word.clone();
+        later["leaf"] = json!("later-edit");
+        window.grows(&format!("{text}{omission}\n"), Some(&later));
+        window.passes(3);
+        let results = results(&window);
+        assert_eq!(results.len(), 1, "{what}: {results:?}");
+        assert!(
+            results[0].contains("First answer done."),
+            "{what}: {}",
+            results[0]
+        );
+    }
+}
+
+#[test]
+fn a_rest_after_a_persons_tree_navigation_returns_the_branchs_answer() {
+    // R2 (finding 7): an answer, a later failure, then Pi's `/tree` back to the answer with a
+    // label. The window rests on the answer's branch: not failed, and its words are the result.
+    for version in ["1.6.0", "1.6.1"] {
+        for form in ["plain", "extras"] {
+            let (text, word) = moment(version, &format!("tree-{form}"), "01-navigated");
+            let what = format!("{version} {form}");
             let mut window = Window::new();
-            window.shows(Some(&text), with_word.then(|| working(&word)).as_ref());
-            window.pass();
-            window.shows(Some(&text), with_word.then_some(&word));
-            window.passes(if with_word { 3 } else { 45 });
+            window.grows(&text.unwrap(), Some(&word));
+            window.passes(3);
             let task = window.context.task(window.project, 1).task;
             assert_eq!(task.state, "done", "{what}");
-            let results: Vec<String> = window
-                .context
-                .inbox(window.context.id(window.project, "chief"))
-                .into_iter()
-                .filter(|message| message.kind == "result")
-                .map(|message| message.body)
-                .collect();
-            assert_eq!(results.len(), 1, "{what}: {results:?}");
+            let results = results(&window);
             assert!(
-                results[0].contains("Retry finished."),
-                "{what}: {}",
-                results[0]
+                results.iter().any(|r| r.contains("First answer")),
+                "{what}: {results:?}"
             );
             assert!(
-                !results[0].contains("Running the script now."),
-                "{what}: {}",
-                results[0]
+                !results.iter().any(|r| r.contains("Partial answer")),
+                "{what}: {results:?}"
             );
         }
+    }
+}
+
+#[test]
+fn on_an_older_pi_a_board_run_whose_start_a_person_holds_past_the_allowance_still_returns_its_answer(
+) {
+    // R4's limit, recorded on Pi 0.87.0: a person's `before_agent_start` holds the board's own
+    // run 3.6 s. Three timer passes and 3 s end it as dropped, at the leaf before the board's
+    // message; its answer, later, adds no end. The dropped end reads no answer and moves nothing;
+    // the rest after the answer gives the task its result.
+    for form in ["plain", "extras"] {
+        let (text, word) = moment("0.87.0", &format!("board-start-held-{form}"), "01-answered");
+        let text = text.unwrap();
+        let drop = word["ends"][0]["leaf"].as_str().unwrap().to_owned();
+        let lines: Vec<&str> = text.lines().collect();
+        let cut = 1 + lines
+            .iter()
+            .position(|line| line.contains(&format!("\"id\":\"{drop}\"")))
+            .unwrap();
+        let before = format!("{}\n", lines[..cut].join("\n"));
+        let mut window = Window::new();
+        let mut on = word.clone();
+        on["state"] = json!("working");
+        on["ended"] = json!(0);
+        on["ends"] = json!([]);
+        on["leaf"] = json!(drop);
+        window.grows(&before, Some(&on));
+        let mut dropped = word.clone();
+        dropped["leaf"] = json!(drop);
+        window.shows(Some(&before), Some(&dropped));
+        window.pass();
+        let at_drop = window.context.task(window.project, 1).task.state;
+        window.grows(&text, Some(&word));
+        window.passes(3);
+        let task = window.context.task(window.project, 1).task;
+        assert_eq!(at_drop, "working", "{form}");
+        assert_eq!(task.state, "done", "{form}");
+        assert_eq!(results(&window), vec!["Board answer".to_owned()], "{form}");
     }
 }

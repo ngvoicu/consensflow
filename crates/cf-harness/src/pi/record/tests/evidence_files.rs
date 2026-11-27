@@ -37,7 +37,8 @@ pub(super) fn put(stage: &Stage, name: &str, contents: impl AsRef<[u8]>) {
 }
 
 /// The word the extension writes: `state` at the leaf `leaf`, with `ends` ended runs, each
-/// `(n, leaf, aborted)`, the last of them the count of runs ended.
+/// `(n, leaf, aborted)`, the last of them the count of runs ended; `working` with one run more
+/// begun than ended (a run on).
 pub(super) fn word(
     launch: &str,
     session: &str,
@@ -48,7 +49,7 @@ pub(super) fn word(
     let ended = ends.last().map_or(0, |(n, _, _)| *n);
     json!({
         "launchId": launch, "sessionId": session, "state": state, "leaf": leaf,
-        "begun": ended, "ended": ended,
+        "begun": ended + u64::from(state == "working"), "ended": ended,
         "ends": ends.iter().map(|(n, leaf, aborted)| json!({ "n": n, "leaf": leaf, "aborted": aborted })).collect::<Vec<_>>(),
         "n": 1, "at": 1
     })

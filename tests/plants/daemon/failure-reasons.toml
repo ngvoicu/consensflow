@@ -1216,8 +1216,8 @@ runs = ["failure-reason-pi"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/pi/record.rs"
-find = '''                        self.last_call = Some(line);'''
-replace = '''                        let _ = line;'''
+find = '''                            self.last_call = Some(Arc::clone(&line));'''
+replace = '''                            let _ = &line;'''
 
 [[plant]]
 name = "failure reason: Pi's reader does not say its last tool call"
@@ -1228,6 +1228,11 @@ runs = ["failure-reason-pi"]
 file = "crates/cf-harness/src/pi/record.rs"
 find = "        record.last_call.clone_from(last_call);"
 replace = "        let _ = last_call;"
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/record.rs"
+find = "        record.last_call.clone_from(&self.last_call);"
+replace = "        let _ = &self.last_call;"
 
 [[plant]]
 name = "failure reason: Devin's reader does not say its last tool call"

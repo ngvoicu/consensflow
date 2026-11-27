@@ -1080,6 +1080,21 @@ pub struct Observed {
 }
 
 impl Observed {
+    /// The look of a run that ended and that this look reports for the first time, read as of
+    /// its own end: what its result is taken from, apart from what the window does now (Pi's,
+    /// whose extension counts each run's end: a run another began meanwhile is the window's
+    /// present). None from a harness that says no such thing, and where none is to report.
+    pub fn ended(&self) -> Option<Observed> {
+        match self.reading.as_deref() {
+            Some(Reading::Known(record)) => record
+                .lines
+                .ended
+                .clone()
+                .map(|ended| crate::shared::record_state::observed_from(ended, None)),
+            _ => None,
+        }
+    }
+
     /// The conversation's items: none where its record could not be read.
     pub fn items(&self) -> &[Item] {
         match self.reading.as_deref() {

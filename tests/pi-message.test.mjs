@@ -88,6 +88,8 @@ async function setup(
   ctx.hasPendingMessages = () => false
   ctx.ui = { getEditorText: () => editor }
   await pi.handlers.get('session_start')({}, ctx)
+  // The timer's first pass: `session_start` itself sends nothing.
+  await extension.pass(true)
   const targetFor = (overrides = {}) => ({
     session: 'native-pi-session',
     pane: 'chief-pane',

@@ -76,8 +76,12 @@ const ENDS_KEPT = 8
  * another extension's `input` handler handled it, or that it was refused for its model or login.
  */
 const IN_HAND_MS = 30_000
-/** On a Pi that marks a run only at its first request, how many idle polls in a row end one. */
+/**
+ * On a Pi that marks a run only at its first request, how many passes of the timer in a row must
+ * find Pi idle, and how long since the run began, for it to be taken as dropped.
+ */
 const LATE_IDLE_POLLS = 3
+const LATE_IDLE_MS = 3_000
 
 /**
  * Install the delivery extension against Pi's ExtensionAPI.
@@ -95,15 +99,21 @@ const LATE_IDLE_POLLS = 3
  * first of `before_agent_start`, `agent_start` or `turn_start` since the last end, and `ended`
  * at `agent_settled`, the handler writing the end at once. A prompt is in hand from the `input`
  * hook, or from this extension's own send, while no run is on, until the next begin (or
- * {@link IN_HAND_MS}). A run Pi dropped (begun, and Pi idle with no settle) is ended by an
- * idle poll: on a Pi that marks a run only at its first request (before 1.2.0, told by finding
- * Pi idle at this extension's `before_agent_start`), by the third in a row.
+ * {@link IN_HAND_MS}). A run Pi dropped (begun, and Pi idle with no settle) is ended by a pass of
+ * the 1 s timer that finds Pi idle, never by an inbox event's pass: on a Pi that marks a run only
+ * at its first request (before 1.2.0, told by finding Pi idle at this extension's
+ * `before_agent_start`), by the third in a row and three seconds after it began. A run is ended
+ * once: a late hook of a run taken as dropped takes it up again, uncounted.
+ *
+ * The counts are the launch's. The word stays at `session_shutdown`, and the instance Pi starts
+ * next in the launch (`/reload`, a new session, a switch) goes on from its counts, and from its
+ * ends where the session is the same; a new session's ends are its own.
  *
  * The state is `working` while a run is on; else `busy` while a prompt is in hand or Pi is not
  * idle; else `rest`. It is written when it changes, at every hook and every pass of the poll;
  * **`rest` is written only by a pass of the poll** (and at `session_start`), never inside a
- * handler, which keeps the state it had. The inbox consumer sends only in a pass whose state is
- * `rest`. This extension's own compaction for the project's size is asked by the pass that writes
+ * handler, which keeps the state it had. The inbox consumer sends only in a pass of the poll or of
+ * an inbox event whose state is `rest`: never from a handler, `session_start` included. This extension's own compaction for the project's size is asked by the pass that writes
  * `rest` after a run's end: its word (`<launchId>.compacting.json`, `{launchId, sessionId,
  * startedAt}`) is written before `rest` and the ask made after it, so the engine never finds the
  * window free before the word that holds a done task's close (T-1475).
@@ -162,6 +172,11 @@ export function createDeliveryExtension(
   let ends = []
   let inHand = null
   let idlePolls = 0
+  // When the run now on began, and whether the last end was a run a poll took as dropped: a
+  // late hook of that run then takes it up again, and it is not ended twice.
+  let startedAt = 0
+  let dropped = false
+  let revived = false
   // This Pi marks a run only at its first request (Pi before 1.2.0).
   let late = false
   let state = null
@@ -210,7 +225,7 @@ export function createDeliveryExtension(
     }
   }
 
-  const runOn = () => begun > ended
+  const runOn = () => begun > ended || revived
   const idle = () => {
     try {
       return context?.isIdle?.() === true
@@ -225,11 +240,12 @@ export function createDeliveryExtension(
     if (inHand !== null || compacting || !idle()) return 'busy'
     return 'rest'
   }
-  const end = (aborted) => {
+  const end = (aborted, drop = false) => {
     ended += 1
     ends.push({ n: ended, leaf: frontierOf(context)?.id ?? null, aborted })
     if (ends.length > ENDS_KEPT) ends = ends.slice(-ENDS_KEPT)
     idlePolls = 0
+    dropped = drop
   }
 
   // The word's writes, one after another, in the order they were asked.
@@ -261,16 +277,6 @@ export function createDeliveryExtension(
         logError(`could not record Pi's run state: ${cause?.message ?? String(cause)}`)
       })
     return writing
-  }
-
-  const takeWordBack = async () => {
-    lastWord = null
-    await writing
-    if (stateFile === null) return
-    await unlink(stateFile).catch((cause) => {
-      if (cause?.code !== 'ENOENT')
-        logError(`could not take back Pi's run state: ${cause?.message ?? String(cause)}`)
-    })
   }
 
   const writeShown = async () => {
@@ -361,10 +367,17 @@ export function createDeliveryExtension(
 
   // A run begins: the first of its beginning hooks since the last end. Written first thing,
   // and awaited, so the word says `working` before any later extension's handler runs.
-  const begin = (_event, ctx) => {
+  const begin = (hook, ctx) => {
     context = ctx ?? context
     if (!runOn()) {
-      begun += 1
+      // A late hook of a run a poll took as dropped takes that run up again, uncounted: a run
+      // is ended once. Only `before_agent_start` begins a run of its own for certain.
+      if (dropped && hook !== 'before_agent_start') revived = true
+      else {
+        begun += 1
+        startedAt = now()
+      }
+      dropped = false
       inHand = null
       idlePolls = 0
     }
@@ -477,13 +490,24 @@ export function createDeliveryExtension(
 
   // One pass of the poll (also on an inbox event): the notes a poll may change, the word, the
   // compaction a rest asks for, and the inbox.
-  const onePass = async () => {
+  const onePass = async (fromTimer) => {
     if (shut || context === undefined) return
     try {
       if (inHand !== null && now() - inHand >= inHandMs) inHand = null
-      if (runOn() && idle()) {
+      // A run Pi dropped is told by the timer's passes alone, never by an inbox event's: on a Pi
+      // that marks a run only at its first request, by three of them and three seconds since it
+      // began.
+      if (!fromTimer) {
+        // nothing of a dropped run
+      } else if (runOn() && idle()) {
         idlePolls += 1
-        if (idlePolls >= (late ? LATE_IDLE_POLLS : 1)) end(null)
+        const gone = late
+          ? idlePolls >= LATE_IDLE_POLLS && now() - startedAt >= LATE_IDLE_MS
+          : idlePolls >= 1
+        if (gone && revived) {
+          revived = false
+          idlePolls = 0
+        } else if (gone) end(null, true)
       } else {
         idlePolls = 0
       }
@@ -511,14 +535,30 @@ export function createDeliveryExtension(
   // ask until it begins, and its promise is its end.
   let passes = Promise.resolve()
   let next = null
-  const pass = () => {
+  let timerAsked = false
+  const pass = (fromTimer = false) => {
+    if (fromTimer) timerAsked = true
     if (next !== null) return next
     next = passes.then(() => {
       next = null
-      return onePass()
+      const timer = timerAsked
+      timerAsked = false
+      return onePass(timer)
     })
     passes = next
     return next
+  }
+
+  // The word this launch wrote before, by an instance of this extension that Pi replaced
+  // (`/reload`, a new session, a switch): its counts go on, and in the same session its ends.
+  const carried = async () => {
+    if (stateFile === null) return null
+    try {
+      const word = JSON.parse(await readFile(stateFile, 'utf8'))
+      return word?.launchId === launchId && Number.isSafeInteger(word.ended) ? word : null
+    } catch {
+      return null
+    }
   }
 
   pi.on('session_start', async (_event, ctx) => {
@@ -527,21 +567,30 @@ export function createDeliveryExtension(
     watcher?.close()
     clearInterval(poller)
     await writeShown()
-    // The notes cleared: no run of this conversation is on, no prompt in hand, no end to take.
-    // The counts go on: they are the launch's.
+    // The notes cleared: no run of this conversation is on, no prompt in hand. The counts go on:
+    // they are the launch's, from the word an instance before this one wrote; its ends too where
+    // the session is the same (a `/reload`), so that a reader still takes them.
+    const before = await carried()
+    if (before !== null && before.ended > ended) ended = before.ended
     begun = ended
-    ends = []
+    ends =
+      before !== null && before.sessionId === sessionIdOf(ctx) && Array.isArray(before.ends)
+        ? before.ends.filter((end) => Number.isSafeInteger(end?.n)).slice(-ENDS_KEPT)
+        : []
     inHand = null
     idlePolls = 0
+    dropped = false
+    revived = false
     restAfter = ended
+    lastWord = null
+    // The word at once; the timer's first pass reads the inbox: nothing is sent from a handler.
     await say(true)
     if (typeof inbox === 'string' && typeof ack === 'string') {
       await mkdir(inbox, { recursive: true })
       watcher = watchInbox(inbox, () => void pass())
     }
-    poller = setInterval(() => void pass(), pollMs)
+    poller = setInterval(() => void pass(true), pollMs)
     poller.unref?.()
-    await pass()
   })
   pi.on('input', (_event, ctx) => {
     context = ctx ?? context
@@ -549,20 +598,25 @@ export function createDeliveryExtension(
     inHand = now()
     return say(false).then(() => undefined)
   })
-  pi.on('before_agent_start', (event, ctx) => {
+  pi.on('before_agent_start', (_event, ctx) => {
     context = ctx ?? context
     // Idle here: this Pi marks a run only at its first request (before 1.2.0).
     if (!runOn() && idle()) late = true
-    return begin(event, ctx).then(() => undefined)
+    return begin('before_agent_start', ctx).then(() => undefined)
   })
-  pi.on('agent_start', begin)
-  pi.on('turn_start', begin)
+  pi.on('agent_start', (_event, ctx) => begin('agent_start', ctx))
+  pi.on('turn_start', (_event, ctx) => begin('turn_start', ctx))
   pi.on('message_start', observeMessage)
   pi.on('agent_settled', async (event, ctx) => {
     context = ctx ?? context
-    // A run whose beginning this extension did not see is still a run that ended.
-    if (!runOn()) begun += 1
-    end(typeof event?.aborted === 'boolean' ? event.aborted : null)
+    if (revived) {
+      // The run a poll took as dropped, and ended then: not ended again.
+      revived = false
+    } else {
+      // A run whose beginning this extension did not see is still a run that ended.
+      if (!runOn()) begun += 1
+      end(typeof event?.aborted === 'boolean' ? event.aborted : null)
+    }
     await say(false)
   })
 
@@ -654,7 +708,10 @@ export function createDeliveryExtension(
       if (entry.timer !== null) clearTimeout(entry.timer)
     }
     pending.clear()
-    await takeWordBack()
+    // The word stays: the instance Pi starts next in this launch (`/reload`, a new session, a
+    // switch) goes on from it.
+    lastWord = null
+    await writing
     context = undefined
   })
 

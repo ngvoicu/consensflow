@@ -27,7 +27,9 @@ use cf_harness::contract::{
     Opening, Over, Prepared, Readiness, Skill, Specs, Trusts, TurnLeft, Used, Waiting, Window,
     Work,
 };
-use cf_harness::records::{Command, Item, LastCall, ModelMoved, Monitor, Pending, Quota, Role};
+use cf_harness::records::{
+    Command, Item, LastCall, ModelMoved, Monitor, Pending, Quota, Reading, Role,
+};
 use cf_proto::panes::{Servers, SilentPaste};
 use cf_proto::specs::{Variant, DEFAULT_FOLDER};
 use serde_json::{json, Value};
@@ -127,6 +129,11 @@ pub struct FakeAgent {
     /// Its record reads at work by its harness's own word (`Lines::said_at_work`: Pi's
     /// extension says a run is on).
     pub said_at_work: bool,
+    /// Whether its prompt takes words, where its harness says so apart from `settled` (Pi's
+    /// word at rest with its result still to come): none takes `settled`'s answer.
+    pub takes_words: Option<bool>,
+    /// A run that ended and that its record reports beside the present (`Lines::ended`, Pi's).
+    pub ended: Option<Arc<Reading>>,
     /// What its harness says of `at_work` when asked again (`Window::recheck`): none
     /// leaves the word as it was.
     pub at_work_after_recheck: Option<bool>,
@@ -1339,6 +1346,8 @@ impl Asked {
             at_prompt: false,
             at_work: false,
             said_at_work: false,
+            takes_words: None,
+            ended: None,
             at_work_after_recheck: None,
             rechecked: 0,
             shared: false,

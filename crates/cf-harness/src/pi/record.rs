@@ -110,15 +110,16 @@ impl Look for Reader {
 /// What a look says of the turn.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Turn {
-    /// At work: by the extension's word (`said`), or by a file that is behind the word.
-    AtWork { said: bool },
-    /// The word says `busy`: neither at rest nor at work.
+    /// At work, by the extension's word: a run is on.
+    AtWork,
+    /// The word says `busy`, or a run's end is being written (Pi cleared its run and the word
+    /// does not say `rest` yet): neither at rest nor at work.
     Busy,
-    /// A run ended, read up to the leaf `upto` (the file's end where none), with Pi's flag.
-    Ended {
-        upto: Option<Arc<str>>,
-        flag: Option<bool>,
-    },
+    /// The word says `rest`, and what the result is read from is not there yet: an end the
+    /// reader has still to take, or the leaf it rests at not yet in the file.
+    Rested,
+    /// A run ended, with Pi's flag.
+    Ended { flag: Option<bool> },
     /// No word: the file leaves a run open.
     Open,
     /// No word: the file ended a run, and is at rest at `settles_at` if nothing moves the clock.
@@ -140,65 +141,95 @@ impl Reader {
                 None => Ok(Reading::missing(&format!("pi session {}", self.session))),
             };
         };
-        let turn = turn(
-            &mut self.taken,
-            &word,
-            read.as_ref().map(|read| &*read.state),
-        );
-        Ok(Reading::Known(match read {
-            Some(read) => {
-                if read.state.records == 0 {
-                    return Err(format!("empty pi session {}", self.session));
-                }
-                let mut record = read.state.reading(&turn);
-                record.lines.lost = read.lost;
-                record
+        let session = match read.as_ref() {
+            Some(read) if read.state.records == 0 => {
+                return Err(format!("empty pi session {}", self.session));
             }
-            // Pi writes a session's file at its first conversation: nothing to read yet.
-            None => Session::nothing(&turn),
-        }))
+            Some(read) => Some(&*read.state),
+            None => None,
+        };
+        let (ended, pending) = take_end(&mut self.taken, &word, session);
+        let mut record = present(&word, session, pending);
+        record.lines.ended = ended.map(|ended| Arc::new(Reading::Known(ended)));
+        if let Some(read) = read {
+            record.lines.lost = read.lost;
+        }
+        Ok(Reading::Known(record))
     }
 }
 
-/// The turn the word says, the file `session` as read (none where there is no file yet): the
-/// oldest end not yet reported (`taken` counts those reported) first, one a look.
-fn turn(taken_so_far: &mut Option<(String, u64)>, word: &Word, session: Option<&Session>) -> Turn {
-    let holds = |leaf: Option<&String>| match (leaf, session) {
-        (Some(leaf), Some(session)) => session.marks.contains_key(leaf.as_str()),
-        _ => true,
-    };
-    let taken = match &*taken_so_far {
+/// Whether the file `session` holds what is read as of `leaf`: none where there is no file yet;
+/// no leaf named is nothing to read, which is there.
+fn holds(session: Option<&Session>, leaf: Option<&String>) -> bool {
+    match (leaf, session) {
+        (None, _) => true,
+        (Some(leaf), Some(session)) => session.index.contains_key(leaf.as_str()),
+        (Some(_), None) => false,
+    }
+}
+
+/// The oldest end of the word's that the reader has not taken (`taken` counts those taken), read
+/// as of its own leaf, where the file holds it; and whether an end is still to take after this
+/// look. An end whose leaf is not in the file yet is not taken: its result waits. More ends than
+/// the word keeps between two looks are taken together as the oldest kept. A reader made new
+/// starts from the word's count.
+fn take_end(
+    taken_so_far: &mut Option<(String, u64)>,
+    word: &Word,
+    session: Option<&Session>,
+) -> (Option<Record>, bool) {
+    let mut taken = match &*taken_so_far {
         Some((launch, taken)) if *launch == word.launch => (*taken).min(word.ended),
         _ => word.ended,
     };
+    let mut ended = None;
     if word.ended > taken {
-        // The oldest end kept that is not reported; more than the word keeps between two
-        // looks are merged into the oldest kept.
-        if let Some(end) = word.ends.iter().find(|end| end.n > taken) {
-            if !holds(end.leaf.as_ref()) {
-                *taken_so_far = Some((word.launch.clone(), taken));
-                return Turn::AtWork { said: false };
+        match word.ends.iter().find(|end| end.n > taken) {
+            Some(end) if holds(session, end.leaf.as_ref()) => {
+                ended = Some(match session {
+                    Some(session) => {
+                        session.as_of(end.leaf.as_deref(), &Turn::Ended { flag: end.aborted })
+                    }
+                    None => Session::nothing(&Turn::Ended { flag: end.aborted }),
+                });
+                taken = end.n;
             }
-            *taken_so_far = Some((word.launch.clone(), end.n));
-            return Turn::Ended {
-                upto: end.leaf.as_deref().map(Arc::from),
-                flag: end.aborted,
-            };
+            Some(_) => {}
+            // The ends between are no longer kept: nothing to read of them.
+            None => taken = word.ended,
         }
     }
-    *taken_so_far = Some((word.launch.clone(), word.ended));
-    match word.state {
-        State::Working => Turn::AtWork { said: true },
-        State::Busy => Turn::Busy,
-        State::Rest if !holds(word.leaf.as_ref()) => Turn::AtWork { said: false },
+    *taken_so_far = Some((word.launch.clone(), taken));
+    (ended, taken < word.ended)
+}
+
+/// The window as Pi's word says it is now, with the file as read: at work only while a run is
+/// on (`working`, with more runs begun than ended); `busy`, and the moment a run's end is being
+/// written, neither; `rest` at rest, read along its leaf's own parents, where the file holds that
+/// leaf and no end waits to be taken.
+fn present(word: &Word, session: Option<&Session>, pending: bool) -> Record {
+    let turn = match word.state {
+        State::Working if word.begun > word.ended => Turn::AtWork,
+        State::Working | State::Busy => Turn::Busy,
+        // No file and no end to take: a new session at its empty prompt, at rest (D5).
+        State::Rest if pending || (session.is_some() && !holds(session, word.leaf.as_ref())) => {
+            Turn::Rested
+        }
         State::Rest => Turn::Ended {
-            upto: word.leaf.as_deref().map(Arc::from),
             flag: word
                 .ends
                 .last()
                 .filter(|end| end.n == word.ended)
                 .and_then(|end| end.aborted),
         },
+    };
+    match (session, &turn) {
+        (None, _) => Session::nothing(&turn),
+        (Some(session), Turn::Ended { .. }) => session.as_of(word.leaf.as_deref(), &turn),
+        (Some(session), Turn::Rested) if holds(Some(session), word.leaf.as_ref()) => {
+            session.as_of(word.leaf.as_deref(), &turn)
+        }
+        (Some(session), _) => session.whole(&turn),
     }
 }
 
@@ -234,13 +265,28 @@ struct Taken {
     tail: Tail,
 }
 
-/// The session as it stood at one entry: what a look up to that leaf reads.
+/// What one entry of the file gave the conversation: its items and the history's, and what it
+/// says of a run. A reading along a chain of entries is made from them alone.
 #[derive(Clone)]
-struct Mark {
-    items: usize,
-    beside: usize,
-    step: Option<Step>,
-    last_call: Option<Arc<LastCall>>,
+struct Entry {
+    items: std::ops::Range<usize>,
+    beside: std::ops::Range<usize>,
+    effect: Effect,
+}
+
+/// What an entry says of a run.
+#[derive(Clone)]
+enum Effect {
+    Nothing,
+    /// A user message with words: a new turn.
+    User,
+    /// An assistant's step, and the line of its last call that ran.
+    Assistant {
+        step: Step,
+        last_call: Option<Arc<LastCall>>,
+    },
+    /// Pi's own omission of an entry (a `context_edit` with no replacement).
+    Omits(Arc<str>),
 }
 
 /// What a session said so far.
@@ -274,8 +320,13 @@ struct Session {
     /// What the latest user message took out of view, with its id: given back where that
     /// message is not on the path to the leaf (the retry belongs to another branch).
     taken: Option<(Arc<str>, Taken)>,
-    /// The session at each entry, by its id.
-    marks: HashMap<Arc<str>, Mark>,
+    /// Every entry, in the file's order, and the place of each by its id.
+    entries: Vec<Entry>,
+    index: HashMap<Arc<str>, usize>,
+    /// What the entry being read says of a run.
+    effect: Effect,
+    /// Every omission in the file (its target): what a reading of the whole file leaves out.
+    omitted: HashSet<Arc<str>>,
     records: usize,
     keys: Keys,
     /// The items only the history shows (a step's thinking, a compaction), each with the
@@ -303,7 +354,10 @@ impl Session {
             leaf: None,
             linear: false,
             taken: None,
-            marks: HashMap::new(),
+            entries: Vec::new(),
+            index: HashMap::new(),
+            effect: Effect::Nothing,
+            omitted: HashSet::new(),
             records: 0,
             keys: Keys::default(),
             beside: Vec::new(),
@@ -424,6 +478,7 @@ impl Session {
                 ));
                 self.push(id, Role::User, text, true, at);
                 self.tail = Tail::User;
+                self.effect = Effect::User;
             }
             Some("toolResult") => {
                 let call = self.keys.of(field("toolCallId"));
@@ -455,6 +510,7 @@ impl Session {
         let made = millis(&at);
         let stop = field("stopReason").and_then(Value::as_str);
         let abandoned = matches!(stop, Some("aborted" | "error"));
+        let mut line_of_call = None;
         if let Some(Value::Array(blocks)) = field("content") {
             for (place, block) in blocks.iter().enumerate() {
                 match block.get("type").and_then(Value::as_str) {
@@ -469,7 +525,8 @@ impl Session {
                         }
                         let name = block.get("name").and_then(Value::as_str);
                         if let Some(line) = describe(name, block.get("arguments")) {
-                            self.last_call = Some(line);
+                            self.last_call = Some(Arc::clone(&line));
+                            line_of_call = Some(line);
                         }
                         if call.truthy() {
                             self.open_tools.insert(call);
@@ -558,6 +615,10 @@ impl Session {
             Some("deferred") => step.failure_kind = Some("the provider deferred the member's reply; no result was returned"),
             _ => {}
         }
+        self.effect = Effect::Assistant {
+            step: step.clone(),
+            last_call: line_of_call,
+        };
         self.step = Some(step);
         Ok(())
     }
@@ -572,20 +633,12 @@ impl Session {
         let Some(target) = record.get("targetId").and_then(Value::as_str) else {
             return;
         };
-        if let Some(item) = self
-            .items
-            .iter_mut()
-            .rev()
-            .find(|item| &*item.id == target && item.role == Role::Assistant)
-        {
-            // No words of the conversation's any more: no answer holds them (`commentary`,
-            // which a result leaves out) and none takes them for the member's (`synthetic`).
-            item.commentary = true;
-            item.synthetic = true;
-        }
-        if let Some(step) = self.step.as_mut().filter(|step| &*step.id == target) {
+        let target: Arc<str> = Arc::from(target);
+        self.omitted.insert(Arc::clone(&target));
+        if let Some(step) = self.step.as_mut().filter(|step| step.id == target) {
             step.omitted = true;
         }
+        self.effect = Effect::Omits(target);
     }
 
     /// What the history draws of a tool's result: the call's name and header, how it
@@ -621,31 +674,100 @@ impl Session {
         detail
     }
 
-    /// The reading of the turn `turn`, read up to the leaf it names (the file's end where none, or
-    /// where the file has no such entry).
-    fn reading(&self, turn: &Turn) -> Record {
-        let upto = match turn {
-            Turn::Ended {
-                upto: Some(leaf), ..
-            } => self.marks.get(leaf),
-            _ => None,
-        };
-        let (items, beside, step, last_call) = match upto {
-            Some(mark) => (mark.items, mark.beside, mark.step.as_ref(), &mark.last_call),
-            None => (
-                self.items.len(),
-                self.beside.len(),
-                self.step.as_ref(),
-                &self.last_call,
-            ),
+    /// The reading of the whole file, in its order, every omission in it applied: what a turn
+    /// at work shows, and the reading with no word.
+    fn whole(&self, turn: &Turn) -> Record {
+        let mut record = Record::new();
+        record.items = self.items.clone();
+        record.lines.places = Some(self.places.clone());
+        record.beside = self.beside.clone();
+        leave_out(&mut record.items, &self.omitted);
+        record.last_call.clone_from(&self.last_call);
+        let step = self.step.as_ref();
+        // While Pi's word says a run is on, or rests with its end still to take, a refusal is
+        // no turn's yet: Pi handles it (its retry). With no word, the file's last step's, as it
+        // stands.
+        if !matches!(turn, Turn::AtWork | Turn::Busy | Turn::Rested) {
+            record.quota = step.and_then(|step| step.quota.clone());
+        }
+        of_turn(&mut record, turn, step);
+        record
+    }
+
+    /// The entries from the first to `leaf` along its own parents (the file's order where the
+    /// session names no parents): the branch Pi was on there. None where the file has no such
+    /// entry.
+    fn chain(&self, leaf: &str) -> Option<Vec<usize>> {
+        let last = *self.index.get(leaf)?;
+        if self.linear {
+            return Some((0..=last).collect());
+        }
+        let mut chain = vec![last];
+        let mut at: Option<Arc<str>> = Some(Arc::from(leaf));
+        while let Some(parent) = at.and_then(|id| self.parents.get(&id).cloned().flatten()) {
+            let Some(&place) = self.index.get(&parent) else {
+                break;
+            };
+            if chain.len() > self.entries.len() {
+                break;
+            }
+            chain.push(place);
+            at = Some(parent);
+        }
+        chain.reverse();
+        Some(chain)
+    }
+
+    /// The reading as of the leaf `leaf`, along its own parents: what that branch said there,
+    /// and how its run ended, with only the omissions on it applied. A refusal is the reading's
+    /// only where it is the step the run ended at and Pi did not omit it. No leaf named, or one the
+    /// file lacks: the whole file.
+    fn as_of(&self, leaf: Option<&str>, turn: &Turn) -> Record {
+        let Some(chain) = leaf.and_then(|leaf| self.chain(leaf)) else {
+            return self.whole(turn);
         };
         let mut record = Record::new();
-        record.items = self.items[..items].to_vec();
-        record.lines.places = Some(self.places[..items].to_vec());
-        record.beside = self.beside[..beside].to_vec();
-        record.last_call.clone_from(last_call);
-        record.quota = step.and_then(|step| step.quota.clone());
-        of_turn(&mut record, turn, step);
+        let mut places = Vec::new();
+        let mut step: Option<Step> = None;
+        let mut omitted = HashSet::new();
+        for &at in &chain {
+            let entry = &self.entries[at];
+            for place in entry.beside.clone() {
+                let (_, item) = &self.beside[place];
+                record.beside.push((record.items.len(), item.clone()));
+            }
+            for place in entry.items.clone() {
+                record.items.push(self.items[place].clone());
+                places.push(self.places[place]);
+            }
+            match &entry.effect {
+                Effect::Nothing => {}
+                Effect::User => step = None,
+                Effect::Assistant {
+                    step: of,
+                    last_call,
+                    ..
+                } => {
+                    step = Some(of.clone());
+                    if last_call.is_some() {
+                        record.last_call.clone_from(last_call);
+                    }
+                }
+                Effect::Omits(target) => {
+                    omitted.insert(Arc::clone(target));
+                    if let Some(step) = step.as_mut().filter(|step| step.id == *target) {
+                        step.omitted = true;
+                    }
+                }
+            }
+        }
+        leave_out(&mut record.items, &omitted);
+        record.lines.places = Some(places);
+        record.quota = step
+            .as_ref()
+            .filter(|step| !step.omitted)
+            .and_then(|step| step.quota.clone());
+        of_turn(&mut record, turn, step.as_ref());
         record
     }
 
@@ -668,10 +790,7 @@ impl Session {
         }
         let open =
             !self.open_tools.is_empty() || matches!(self.tail, Tail::User | Tail::ToolResult);
-        let ended = Turn::Ended {
-            upto: None,
-            flag: None,
-        };
+        let ended = Turn::Ended { flag: None };
         let turn = if open {
             Turn::Open
         } else {
@@ -693,7 +812,18 @@ impl Session {
                 _ => ended,
             }
         };
-        Ok(self.reading(&turn))
+        Ok(self.whole(&turn))
+    }
+}
+
+/// The items Pi omitted, as no words of the conversation's any more: no answer holds them
+/// (`commentary`, which a result leaves out) and none takes them for the member's (`synthetic`).
+fn leave_out(items: &mut [Item], omitted: &HashSet<Arc<str>>) {
+    for item in items {
+        if item.role == Role::Assistant && omitted.contains(&item.id) {
+            item.commentary = true;
+            item.synthetic = true;
+        }
     }
 }
 
@@ -701,14 +831,18 @@ impl Session {
 /// assistant step at or before the run's leaf, since the last user message).
 fn of_turn(record: &mut Record, turn: &Turn, step: Option<&Step>) {
     match turn {
-        Turn::AtWork { said } => {
+        Turn::AtWork => {
             record.in_flight = true;
             record.settlement = Settlement::InFlight;
-            record.lines.said_at_work = *said;
+            record.lines.said_at_work = true;
         }
         Turn::Busy => {
             record.settlement = Settlement::Unknown;
             record.lines.busy = true;
+        }
+        Turn::Rested => {
+            record.settlement = Settlement::Unknown;
+            record.lines.rested = true;
         }
         Turn::Open => {
             record.in_flight = true;
@@ -748,6 +882,8 @@ impl Parser for Session {
         }
         let seq = Value::from(index);
         let mut entry = None;
+        let (items_before, beside_before) = (self.items.len(), self.beside.len());
+        self.effect = Effect::Nothing;
         if let Some(id) = record
             .get("id")
             .and_then(Value::as_str)
@@ -796,16 +932,13 @@ impl Parser for Session {
             _ => {}
         }
         if let Some(entry) = entry {
-            self.marks.insert(
-                entry,
-                Mark {
-                    items: self.items.len(),
-                    beside: self.beside.len(),
-                    step: self.step.clone(),
-                    last_call: self.last_call.clone(),
-                },
-            );
+            self.index.insert(entry, self.entries.len());
         }
+        self.entries.push(Entry {
+            items: items_before..self.items.len(),
+            beside: beside_before..self.beside.len(),
+            effect: std::mem::replace(&mut self.effect, Effect::Nothing),
+        });
         Ok(())
     }
 }

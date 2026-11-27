@@ -11,6 +11,12 @@
 # the dispatcher's (`crates/cf-engine/tests/dispatcher/pi_turn_state.rs`). The extension's cases
 # against each published Pi's loop (`tests/pi-loop/drive.mjs`) need Pi installed and run apart.
 #
+# Round 2 (T-2386's review): the present is the word's alone, a key only while a run is on; each
+# end read along its own leaf's parents and taken once its leaf is in the file; a refusal only
+# with its run's end; the counts and a reload's ends carried through Pi's own new instances;
+# dropped runs on an older Pi by the timer's passes and three seconds; nothing sent from a
+# handler.
+#
 # Every name holds `pi turn state`, so `cargo xtask plants daemon "pi turn state"` runs them all.
 
 [run]
@@ -37,7 +43,7 @@ runs = ["pts-extension"]
 
 [[plant.edit]]
 file = "hosts/pi-extension/consensflow-delivery.mjs"
-find = "    return begin(event, ctx).then(() => undefined)\n"
+find = "    return begin('before_agent_start', ctx).then(() => undefined)\n"
 replace = "    return undefined\n"
 
 [[plant]]
@@ -47,8 +53,8 @@ runs = ["pts-extension"]
 
 [[plant.edit]]
 file = "hosts/pi-extension/consensflow-delivery.mjs"
-find = "    end(typeof event?.aborted === 'boolean' ? event.aborted : null)\n"
-replace = "    // no end\n"
+find = "      end(typeof event?.aborted === 'boolean' ? event.aborted : null)\n"
+replace = "      // no end\n"
 
 [[plant]]
 name = "pi turn state: a poll starts a run"
@@ -92,48 +98,118 @@ runs = ["pts-extension"]
 
 [[plant.edit]]
 file = "hosts/pi-extension/consensflow-delivery.mjs"
-find = "    begun = ended\n    ends = []\n"
-replace = "    if (ctx.sessionManager?.getLeafEntry?.()?.message?.stopReason === 'stop') begun = ended\n    else begun = ended + 1\n    ends = []\n"
+find = "    // The word at once; the timer's first pass reads the inbox: nothing is sent from a handler.\n    await say(true)\n"
+replace = "    // The word at once; the timer's first pass reads the inbox: nothing is sent from a handler.\n    if (ctx.sessionManager?.getLeafEntry?.()?.message?.stopReason === 'stop') await say(true)\n"
 
 [[plant]]
-name = "pi turn state: the reader lets a quiet file overrule working"
-meant = "every_recorded_moment_reads_with_the_word_as_pi_said_and_without_it_by_the_clock"
-runs = ["pts-reader", "pts-window"]
+name = "pi turn state: session_start sends a waiting message"
+meant = "sends nothing from session_start: a message waiting then goes at the timer pass after it"
+runs = ["pts-extension"]
 
 [[plant.edit]]
-file = "crates/cf-harness/src/pi/record.rs"
-find = "        State::Working => Turn::AtWork { said: true },\n"
-replace = "        State::Working if session.is_none() => Turn::AtWork { said: true },\n        State::Working => Turn::Ended { upto: None, flag: None },\n"
+file = "hosts/pi-extension/consensflow-delivery.mjs"
+find = "    poller.unref?.()\n"
+replace = "    poller.unref?.()\n    await pass()\n"
 
 [[plant]]
-name = "pi turn state: the reader holds rest for an open call"
-meant = "a_resume_onto_a_leaf_of_each_kind_is_at_rest_by_the_word"
+name = "pi turn state: a new instance in the launch counts from nought"
+meant = "keeps the last eight ends, and the counts and ends through an instance Pi starts again in the session"
+runs = ["pts-extension"]
+
+[[plant.edit]]
+file = "hosts/pi-extension/consensflow-delivery.mjs"
+find = "    if (before !== null && before.ended > ended) ended = before.ended\n"
+replace = ""
+
+[[plant]]
+name = "pi turn state: a reload clears the ends a reader has not taken"
+meant = "keeps the last eight ends, and the counts and ends through an instance Pi starts again in the session"
+runs = ["pts-extension"]
+
+[[plant.edit]]
+file = "hosts/pi-extension/consensflow-delivery.mjs"
+find = "        ? before.ends.filter((end) => Number.isSafeInteger(end?.n)).slice(-ENDS_KEPT)\n"
+replace = "        ? []\n"
+
+[[plant]]
+name = "pi turn state: an inbox event's pass ends a dropped run"
+meant = "ends a run Pi dropped at the first timer pass that finds Pi idle, never at an inbox pass"
+runs = ["pts-extension"]
+
+[[plant.edit]]
+file = "hosts/pi-extension/consensflow-delivery.mjs"
+find = "      if (!fromTimer) {\n"
+replace = "      if (false) {\n"
+
+[[plant]]
+name = "pi turn state: three timer passes end a run on an older Pi in under three seconds"
+meant = "on a Pi that marks a run at its first request, ends a dropped run at three timer passes and three seconds, once"
+runs = ["pts-extension"]
+
+[[plant.edit]]
+file = "hosts/pi-extension/consensflow-delivery.mjs"
+find = "          ? idlePolls >= LATE_IDLE_POLLS && now() - startedAt >= LATE_IDLE_MS\n"
+replace = "          ? idlePolls >= LATE_IDLE_POLLS\n"
+
+[[plant]]
+name = "pi turn state: a late hook of a dropped run ends it twice"
+meant = "on a Pi that marks a run at its first request, ends a dropped run at three timer passes and three seconds, once"
+runs = ["pts-extension"]
+
+[[plant.edit]]
+file = "hosts/pi-extension/consensflow-delivery.mjs"
+find = "      if (dropped && hook !== 'before_agent_start') revived = true\n"
+replace = "      if (false) revived = true\n"
+
+[[plant]]
+name = "pi turn state: a working word with as many ends as runs is at work"
+meant = "each_ended_run_is_taken_once_in_order_read_as_of_its_own_leaf_beside_the_present"
 runs = ["pts-reader"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/pi/record.rs"
-find = "        State::Rest if !holds(word.leaf.as_ref()) => Turn::AtWork { said: false },\n"
-replace = "        State::Rest if !holds(word.leaf.as_ref()) || session.is_some_and(|s| !s.open_tools.is_empty()) => Turn::AtWork { said: false },\n"
+find = "        State::Working if word.begun > word.ended => Turn::AtWork,\n"
+replace = "        State::Working if word.begun >= word.ended => Turn::AtWork,\n"
 
 [[plant]]
-name = "pi turn state: the reader holds rest for a session with no file"
-meant = "with_no_file_yet_the_word_says_the_turn_and_no_word_says_no_session"
+name = "pi turn state: an end is read in the file's order, not along its leaf's parents"
+meant = "a_rest_after_a_persons_tree_navigation_is_read_along_its_branch"
 runs = ["pts-reader"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/pi/record.rs"
-find = "            None => Session::nothing(&turn),\n"
-replace = "            None => Session::nothing(&Turn::AtWork { said: false }),\n"
+find = "        if self.linear {\n"
+replace = "        if self.linear || !self.linear {\n"
 
 [[plant]]
-name = "pi turn state: an ended run is reported from the last step in the file, not at its leaf"
-meant = "each_ended_run_is_reported_once_in_order_read_up_to_its_own_leaf"
+name = "pi turn state: an omission written after an end changes that end"
+meant = "an_omission_written_after_an_end_changes_nothing_of_that_end"
 runs = ["pts-reader"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/pi/record.rs"
-find = "            } => self.marks.get(leaf),\n"
-replace = "            } => None.filter(|_: &&Mark| !leaf.is_empty()),\n"
+find = "        leave_out(&mut record.items, &omitted);\n"
+replace = "        leave_out(&mut record.items, &self.omitted);\n"
+
+[[plant]]
+name = "pi turn state: an end whose file is not there yet is taken"
+meant = "an_end_or_a_rest_whose_leaf_the_file_lacks_waits_and_is_not_taken"
+runs = ["pts-reader"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/record.rs"
+find = "        (Some(_), None) => false,\n"
+replace = "        (Some(_), None) => true,\n"
+
+[[plant]]
+name = "pi turn state: a refusal inside a run that is on is published"
+meant = "a_task_pi_recovered_by_its_own_retry_keeps_it_and_returns_only_the_retrys_words"
+runs = ["pts-window"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/record.rs"
+find = "        if !matches!(turn, Turn::AtWork | Turn::Busy | Turn::Rested) {\n"
+replace = "        if !matches!(turn, Turn::Busy | Turn::Rested) {\n"
 
 [[plant]]
 name = "pi turn state: any context_edit is read as a cancelled retry"
@@ -142,8 +218,8 @@ runs = ["pts-reader"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/pi/record.rs"
-find = "        if let Some(step) = self.step.as_mut().filter(|step| &*step.id == target) {\n"
-replace = "        if let Some(step) = self.step.as_mut().filter(|_| !target.is_empty()) {\n"
+find = "                    if let Some(step) = step.as_mut().filter(|step| step.id == *target) {\n"
+replace = "                    if let Some(step) = step.as_mut().filter(|_| !target.is_empty()) {\n"
 
 [[plant]]
 name = "pi turn state: a call of an aborted or error step opens"
@@ -165,7 +241,15 @@ file = "crates/cf-harness/src/pi/record.rs"
 find = "                Some(Some(at)) => Some(at),\n"
 replace = "                Some(Some(_)) => Some(stat(file).map_err(|error| format!(\"{}: {error}\", file.display()))?.mtime_ms as i64),\n"
 
-# --- the stop ---
+[[plant]]
+name = "pi turn state: the words of a step Pi omitted reach the result"
+meant = "a_task_pi_recovered_by_its_own_retry_keeps_it_and_returns_only_the_retrys_words"
+runs = ["pts-window"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/record.rs"
+find = "            item.commentary = true;\n            item.synthetic = true;\n"
+replace = "            item.synthetic = true;\n"
 
 [[plant]]
 name = "pi turn state: the stop presses a key or is paid at busy"
@@ -188,11 +272,31 @@ find = "        self.lines.busy || self.lines.settles_at.is_some()\n"
 replace = "        self.lines.busy\n"
 
 [[plant]]
-name = "pi turn state: the words of a step Pi omitted reach the result"
-meant = "a_task_pi_recovered_by_its_own_retry_returns_only_the_retrys_words"
+name = "pi turn state: a rest whose result is still to come takes the keys"
+meant = "a_rest_whose_leaf_the_file_lacks_takes_no_key_and_is_paid"
 runs = ["pts-window"]
 
 [[plant.edit]]
+file = "crates/cf-harness/src/pi/adapter.rs"
+find = "        observed.over = Over::Held;\n"
+replace = "        observed.over = Over::No;\n"
+
+[[plant]]
+name = "pi turn state: an ended run beside a run at work gives no result"
+meant = "an_ended_run_beside_a_run_at_work_gives_its_result"
+runs = ["pts-window"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = "        let past = observed.ended();\n"
+replace = "        let past = observed.ended().filter(|_| false);\n"
+
+[[plant]]
+name = "pi turn state: the file overrules a working word"
+meant = "every_recorded_moment_reads_with_the_word_as_pi_said_and_without_it_by_the_clock"
+runs = ["pts-reader"]
+
+[[plant.edit]]
 file = "crates/cf-harness/src/pi/record.rs"
-find = "            item.commentary = true;\n            item.synthetic = true;\n"
-replace = "            item.synthetic = true;\n"
+find = "        State::Working if word.begun > word.ended => Turn::AtWork,\n"
+replace = "        State::Working if word.begun > word.ended && session.is_none() => Turn::AtWork,\n"

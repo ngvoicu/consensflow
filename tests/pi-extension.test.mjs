@@ -91,6 +91,10 @@ async function setup(
     // until the test says the compaction has begun (`started()`).
     compactionStartsLater = false,
     inHandMs,
+    // The extension's clock, where a test moves it itself (`{ t }`, milliseconds).
+    clock,
+    // Whether the timer's first pass follows `session_start` (a test of the start alone says no).
+    firstPass = true,
   } = {},
 ) {
   const root = await mkdtemp(join(tmpdir(), 'consensflow-pi-extension-'))
@@ -115,6 +119,7 @@ async function setup(
     ...(compaction !== undefined ? { compaction } : {}),
     ...(compactionLimitMs !== undefined ? { compactionLimitMs } : {}),
     ...(inHandMs !== undefined ? { inHandMs } : {}),
+    ...(clock !== undefined ? { now: () => clock.t } : {}),
   })
   let currentIdle = idle
   // Pi's own compaction state, as Pi 1.4.0 and 1.5.0 keep it: `isIdle()` is false from the
@@ -205,6 +210,8 @@ async function setup(
   if (record !== null)
     await writeFile(join(inbox, `${record.file ?? record.id}.json`), `${JSON.stringify(payload)}\n`)
   await pi.handlers.get('session_start')({}, ctx)
+  // The timer's first pass: `session_start` itself sends nothing.
+  if (firstPass) await extension.pass(true)
   return {
     ack,
     quarantine,
@@ -500,7 +507,9 @@ describe('consensflow Pi extension', () => {
     ['a Pi not idle', { idle: false }, 'busy'],
   ]) {
     it(`says ${state} at the session's start for ${name}`, async () => {
-      const s = await setup(null, options)
+      // The start alone: no pass of the timer after it and no inbox event, so the word is
+      // session_start's own.
+      const s = await setup(null, { ...options, firstPass: false, watchInbox: () => ({ close() {} }) })
       try {
         const word = await waitFor(join(s.settled, 'launch-pi-test.state.json'))
         assert.deepEqual(
@@ -583,20 +592,59 @@ describe('consensflow Pi extension', () => {
     }
   })
 
-  it('keeps the last eight ends, and its counts through a new session, whose ends are its own', async () => {
+  // Pi is not idle from a run's start to its settle, as a real Pi says (`isIdle()`).
+  const run = async (s, event = { aborted: false }) => {
+    s.setIdle(false)
+    await s.pi.handlers.get('agent_start')({}, s.ctx)
+    s.setIdle(true)
+    await s.pi.handlers.get('agent_settled')(event, s.ctx)
+  }
+
+  it('keeps the last eight ends, and the counts and ends through an instance Pi starts again in the session', async () => {
     const s = await setup(null)
     try {
-      for (let run = 1; run <= 10; run += 1) {
-        await s.pi.handlers.get('agent_start')({}, s.ctx)
-        await s.pi.handlers.get('agent_settled')({ aborted: false }, s.ctx)
-      }
+      for (let n = 1; n <= 10; n += 1) await run(s)
       const word = wordOf(s)
       assert.equal(word.ended, 10)
       assert.deepEqual(word.ends.map((end) => end.n), [3, 4, 5, 6, 7, 8, 9, 10])
-      await s.pi.handlers.get('session_shutdown')({ reason: 'resume' })
-      assert.equal(await exists(join(s.settled, 'launch-pi-test.state.json')), false, 'taken back at shutdown')
-      await s.pi.handlers.get('session_start')({ reason: 'resume' }, s.ctx)
-      assert.deepEqual([wordOf(s).ended, wordOf(s).begun, wordOf(s).ends], [10, 10, []])
+      // Pi's `/reload`: this instance shuts down, and another starts on the same session and launch.
+      await s.pi.handlers.get('session_shutdown')({ reason: 'reload' })
+      assert.equal(await exists(join(s.settled, 'launch-pi-test.state.json')), true, 'the word stays at shutdown')
+      const again = fakePi()
+      createDeliveryExtension(again, { settled: s.settled, launchId: 'launch-pi-test', pollMs: 60_000 })
+      await again.handlers.get('session_start')({ reason: 'reload' }, s.ctx)
+      assert.deepEqual([wordOf(s).ended, wordOf(s).begun, wordOf(s).ends.map((end) => end.n)], [10, 10, [3, 4, 5, 6, 7, 8, 9, 10]])
+      // A new session: the counts go on, its ends are its own.
+      await again.handlers.get('session_shutdown')({ reason: 'new' })
+      s.ctx.sessionManager.getSessionId = () => 'another-session'
+      const third = fakePi()
+      createDeliveryExtension(third, { settled: s.settled, launchId: 'launch-pi-test', pollMs: 60_000 })
+      await third.handlers.get('session_start')({ reason: 'new' }, s.ctx)
+      assert.deepEqual([wordOf(s).ended, wordOf(s).sessionId, wordOf(s).ends], [10, 'another-session', []])
+      await third.handlers.get('session_shutdown')({ reason: 'quit' })
+    } finally {
+      await s.close()
+    }
+  })
+
+  it('sends nothing from session_start: a message waiting then goes at the timer pass after it', async () => {
+    const s = await setup(null, { pollMs: 60_000 })
+    try {
+      await s.pi.handlers.get('session_shutdown')({ reason: 'reload' })
+      const file = join(s.inbox, `${envelopeRecord.id}.json`)
+      await writeFile(file, `${JSON.stringify({ ...envelopeRecord, expiresAt: Date.now() + 30_000 })}\n`)
+      const again = fakePi()
+      const second = createDeliveryExtension(again, {
+        inbox: s.inbox, ack: s.ack, settled: s.settled, launchId: 'launch-pi-test', pollMs: 60_000,
+        watchInbox: () => ({ close() {} }),
+      })
+      await again.handlers.get('session_start')({}, s.ctx)
+      assert.equal(wordOf(s).state, 'rest', 'the word, at once')
+      assert.deepEqual(again.sent, [])
+      assert.equal(existsSync(file), true, 'still waiting when session_start returns')
+      await second.pass(true)
+      assert.deepEqual(again.sent, [envelope])
+      await again.handlers.get('session_shutdown')({})
     } finally {
       await s.close()
     }
@@ -658,39 +706,55 @@ describe('consensflow Pi extension', () => {
     }
   })
 
-  it('ends a run Pi dropped at the first idle poll on a Pi that marks its runs from their start', async () => {
+  it('ends a run Pi dropped at the first timer pass that finds Pi idle, never at an inbox pass', async () => {
     const s = await setup(null, { idle: false })
     try {
       await s.pi.handlers.get('before_agent_start')({}, s.ctx)
       s.setIdle(true)
-      await s.extension.pass()
+      for (let n = 0; n < 5; n += 1) await s.extension.pass()
+      assert.deepEqual([wordOf(s).state, wordOf(s).ended], ['working', 0], 'inbox events end no run')
+      await s.extension.pass(true)
       assert.deepEqual([wordOf(s).ended, wordOf(s).ends.at(-1).aborted], [1, null])
-      await s.extension.pass()
+      await s.extension.pass(true)
       assert.equal(wordOf(s).state, 'rest')
     } finally {
       await s.close()
     }
   })
 
-  it('ends a run Pi dropped only at the third idle poll on a Pi that marks it at its first request', async () => {
+  it('on a Pi that marks a run at its first request, ends a dropped run at three timer passes and three seconds, once', async () => {
     // Pi before 1.2.0: idle at this extension's `before_agent_start`.
-    const s = await setup(null)
+    const clock = { t: 1_000_000 }
+    const s = await setup(null, { clock })
     try {
       await s.pi.handlers.get('before_agent_start')({}, s.ctx)
-      await s.extension.pass()
-      await s.extension.pass()
-      assert.deepEqual([wordOf(s).state, wordOf(s).ended], ['working', 0], 'two idle polls are its start')
-      await s.extension.pass()
+      for (let n = 0; n < 3; n += 1) {
+        clock.t += 700
+        await s.extension.pass(true)
+      }
+      assert.deepEqual([wordOf(s).state, wordOf(s).ended], ['working', 0], 'three passes in 2.1 s are no three seconds')
+      clock.t += 1_000
+      await s.extension.pass(true)
       assert.equal(wordOf(s).ended, 1)
-      // A poll that finds Pi at work in between counts from nought again.
-      await s.pi.handlers.get('agent_start')({}, s.ctx)
-      await s.extension.pass()
-      await s.extension.pass()
+      // Its late hook takes the same run up again, and its settle ends nothing more.
       s.setIdle(false)
-      await s.extension.pass()
+      await s.pi.handlers.get('agent_start')({}, s.ctx)
+      assert.deepEqual([wordOf(s).state, wordOf(s).begun], ['working', 1])
       s.setIdle(true)
-      await s.extension.pass()
-      await s.extension.pass()
+      await s.pi.handlers.get('agent_settled')({ aborted: false }, s.ctx)
+      assert.equal(wordOf(s).ended, 1, 'one end for the run')
+      await s.extension.pass(true)
+      assert.equal(wordOf(s).state, 'rest')
+      // A pass that finds Pi at work in between counts from nought again.
+      await s.pi.handlers.get('before_agent_start')({}, s.ctx)
+      clock.t += 5_000
+      await s.extension.pass(true)
+      await s.extension.pass(true)
+      s.setIdle(false)
+      await s.extension.pass(true)
+      s.setIdle(true)
+      await s.extension.pass(true)
+      await s.extension.pass(true)
       assert.equal(wordOf(s).ended, 1)
     } finally {
       await s.close()

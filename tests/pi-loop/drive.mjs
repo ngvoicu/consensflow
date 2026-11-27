@@ -83,12 +83,12 @@ const LAUNCH = 'launch-loop'
  */
 // Each case runs in two forms: plain, and with a person's extension's own entries.
 let form = 'plain'
-async function open(base, { person = {}, ours = {}, retry = true, tokensPerSecond, resume } = {}) {
+async function open(base, { person = {}, ours = {}, retry = true, tokensPerSecond, resume, manager, start } = {}) {
   const name = `${base}-${form}`
   const extras = form === 'extras'
   const dir = join(outRoot, name)
   const sessions = join(dir, 'sessions')
-  const settled = join(dir, 'settled')
+  const settled = ours.settled ?? join(dir, 'settled')
   const inbox = join(dir, 'inbox')
   const ack = join(dir, 'ack')
   for (const folder of [dir, sessions, inbox, ack]) mkdirSync(folder, { recursive: true })
@@ -138,7 +138,8 @@ async function open(base, { person = {}, ours = {}, retry = true, tokensPerSecon
     model: faux.getModel(),
     settingsManager,
     resourceLoader: loader,
-    sessionManager: resume ? pc.SessionManager.open(resume, sessions) : pc.SessionManager.create(dir, sessions),
+    ...(start ? { sessionStartEvent: start } : {}),
+    sessionManager: manager ?? (resume ? pc.SessionManager.open(resume, sessions) : pc.SessionManager.create(dir, sessions)),
   })
   // The TUI's mode, with a screen that draws nothing: ConsensFlow's consumer sends only there.
   const ui = new Proxy({}, { get: (_target, key) => (key === 'then' ? undefined : () => undefined) })
@@ -434,7 +435,8 @@ const CASES = {
   },
 
   /** (i): on a Pi that marks a run only at its first request, a slow `before_agent_start` of a
-   * person's extension reads `working` for three polls; on 1.2.0 and later, as long as it takes. */
+   * person's extension reads `working` for three timer passes and 3 s; on 1.2.0 and later, as
+   * long as it takes. */
   async slow_start() {
     const at = await open('slow-start', {
       person: { before_agent_start: async () => (await wait(2 * POLL_MS + POLL_MS / 2), undefined) },
@@ -451,10 +453,10 @@ const CASES = {
     slower.faux.setResponses([ai.fauxAssistantMessage('Done.')])
     await slower.session.prompt('Run the long script')
     await settles(slower)
-    // Before 1.2.0 the third idle poll ends the run as dropped, and its first request begins it
-    // again: two ends, the first with no flag. The stated limit (§6).
-    assert.equal(slower.word().ended, marksEarly ? 1 : 2, `${VERSION}: ${JSON.stringify(slower.word().ends)}`)
-    if (!marksEarly) assert.equal(slower.word().ends[0].aborted, null)
+    // A hold under 3 s is no dropped run on any Pi (R4): one end, Pi's own (its flag from
+    // 1.1.0). A hold past it: `start_held_past_the_allowance`, `board_start_held`.
+    assert.equal(slower.word().ended, 1, `${VERSION}: ${JSON.stringify(slower.word().ends)}`)
+    if (VERSION !== '0.87.0') assert.equal(slower.word().ends[0].aborted, false)
     await at.close()
     await slower.close()
   },
@@ -638,6 +640,171 @@ const CASES = {
       again.moment(`resumed-${kind}`, { at: 'rest' })
       await again.close()
     }
+  },
+
+
+  /** R3: Pi's own `/reload`, a new session and a switch back, each a new instance of the extension
+   * in the same launch: the counts go on from the launch's, never back down. */
+  async reload() {
+    const at = await open('reload')
+    await settles(at)
+    at.faux.setResponses([ai.fauxAssistantMessage('First run'), ai.fauxAssistantMessage('Second run')])
+    await at.session.prompt('First')
+    await settles(at)
+    const before = at.word()
+    await at.session.reload()
+    await at.until(() => at.word() !== null)
+    const after = at.word()
+    notes.push(`reload (${form}): events ${JSON.stringify(at.loop.seen.map((s) => s.event).slice(-4))}, ended ${before.ended} → ${after.ended}`)
+    assert.equal(after.launchId, before.launchId)
+    assert.equal(after.sessionId, before.sessionId)
+    assert.ok(after.ended >= before.ended, `the count went down across /reload: ${before.ended} → ${after.ended}`)
+    assert.deepEqual(after.ends.map((e) => e.n), before.ends.map((e) => e.n), 'the unread ends of the same session stay')
+    at.faux.setResponses([ai.fauxAssistantMessage('Second run')])
+    await at.session.prompt('Second')
+    await settles(at)
+    assert.equal(at.word().ended, before.ended + 1)
+    await at.close()
+  },
+
+  async switch_session() {
+    const first = await open('switch')
+    await settles(first)
+    first.faux.setResponses([ai.fauxAssistantMessage('first answer')])
+    await first.session.prompt('first run')
+    await settles(first)
+    const original = first.word()
+    const services = { cwd: first.session.sessionManager.getCwd(), agentDir: join(outRoot, `runtime-agent-${form}`) }
+    let serial = 0
+    let active
+    const runtime = new pc.AgentSessionRuntime(first.session, services, async (options) => {
+      active = await open(`switch-replacement-${++serial}`, {
+        manager: options.sessionManager,
+        start: options.sessionStartEvent,
+        ours: { settled: dirname(first.loop.wordFile) },
+      })
+      return { session: active.session, services }
+    })
+    const previous = first.file()
+    await runtime.newSession()
+    await first.until(() => first.word()?.sessionId !== original.sessionId)
+    const fresh = first.word()
+    await runtime.switchSession(previous)
+    await first.until(() => first.word()?.sessionId === original.sessionId)
+    const back = first.word()
+    notes.push(`switch (${form}): ended ${original.ended} → new session ${fresh.ended} → back ${back.ended}`)
+    assert.ok(fresh.ended >= original.ended && back.ended >= original.ended, `counts went down: ${original.ended}, ${fresh.ended}, ${back.ended}`)
+    assert.deepEqual(fresh.ends, [], 'a new session has no ends of its own')
+    await active?.close()
+    await first.close()
+  },
+
+  /** R4: inbox events while a person's `before_agent_start` holds the start of a run: never a
+   * dropped run on any Pi; and a board message is not sent ahead of the person's prompt. */
+  async watcher_events() {
+    const release = gate()
+    let entered = false
+    const at = await open('watcher-events', {
+      ours: { pollMs: 1000 },
+      person: { before_agent_start: async () => { if (!entered) { entered = true; await release.shut } } },
+    })
+    await settles(at)
+    at.faux.setResponses([ai.fauxAssistantMessage('Answer one'), ai.fauxAssistantMessage('Answer two')])
+    const pending = at.session.prompt('human request')
+    await at.until(() => entered)
+    for (let i = 0; i < 6; i += 1) {
+      writeFileSync(join(at.inbox, 'pending.tmp'), String(i))
+      await wait(30)
+    }
+    const id = envelope(at, at.session.sessionManager.getSessionId(), 'board request')
+    await wait(900)
+    assert.equal(at.word().state, 'working', `a run held in its start for under a second: ${JSON.stringify(at.word())}`)
+    assert.equal(at.word().ended, 0)
+    assert.equal(acked(at, id), null, 'no board message goes in while the run is held')
+    release.open()
+    await pending
+    await settles(at)
+    const users = at.rows().filter((r) => r.message?.role === 'user').map((r) => JSON.stringify(r.message.content))
+    assert.ok(users[0].includes('human request'), `the person's prompt first: ${users}`)
+    await at.close()
+  },
+
+  /** R4's limit: on a Pi that marks a run only at its first request, a person's start handler
+   * held past three seconds and three passes of the timer reads as a dropped run (nothing else
+   * tells the two apart there); what then happens. On 1.2.0 and later the run stays on. */
+  async start_held_past_the_allowance() {
+    const release = gate()
+    let entered = false
+    const at = await open('start-held', {
+      ours: { pollMs: 200 },
+      person: { before_agent_start: async () => { if (!entered) { entered = true; await release.shut } } },
+    })
+    await settles(at)
+    at.faux.setResponses([ai.fauxAssistantMessage('Answer one'), ai.fauxAssistantMessage('Answer two')])
+    const pending = at.session.prompt('human request')
+    await at.until(() => entered)
+    const id = envelope(at, at.session.sessionManager.getSessionId(), 'board request')
+    await wait(3_600)
+    const during = { state: at.word().state, ended: at.word().ended, ack: acked(at, id)?.admitted ?? null }
+    release.open()
+    await pending
+    await settles(at)
+    const users = at.rows().filter((r) => r.message?.role === 'user').map((r) => JSON.stringify(r.message.content))
+    notes.push(`start held 3.6 s (${form}): during ${JSON.stringify(during)}; user messages in order ${users.join(' | ')}`)
+    if (marksEarly) assert.deepEqual([during.state, during.ended], ['working', 0])
+    // Before 1.2.0 (the stated limit): the held run is taken as dropped (end 1), the board's
+    // message is sent and answered (end 2), and the person's run, let go, is a run of its own
+    // (end 3): a person sees the board's answer before the answer to what they typed.
+    else notes.push(`older Pi, start held 3.6 s (${form}): ends ${JSON.stringify(at.word().ends.map((e) => [e.n, e.aborted]))}`)
+    await at.close()
+  },
+
+  /** R4's limit with a board message: a person's `before_agent_start` holds the board's own run
+   * 3.6 s. Notes where the run's one end is, against the board's user message and its answer. */
+  async board_start_held() {
+    const release = gate()
+    let held = false
+    const at = await open('board-start-held', {
+      ours: { pollMs: 200 },
+      person: { before_agent_start: async () => { held = true; await release.shut } },
+    })
+    await settles(at)
+    at.faux.setResponses([ai.fauxAssistantMessage('Board answer')])
+    const id = envelope(at, at.session.sessionManager.getSessionId(), 'board request')
+    await at.until(() => held)
+    await wait(3_600)
+    const during = { state: at.word().state, ended: at.word().ended, ack: acked(at, id)?.admitted ?? null }
+    release.open()
+    await at.until(() => at.rows().some((r) => r.message?.role === 'assistant'))
+    await settles(at)
+    const rows = at.rows()
+    const user = rows.find((r) => r.message?.role === 'user')?.id
+    const answer = rows.find((r) => r.message?.role === 'assistant')?.id
+    const word = at.word()
+    notes.push(`board start held 3.6 s (${form}): during ${JSON.stringify(during)}; ends ${JSON.stringify(word.ends)}; user ${user}, answer ${answer}; word ${word.state} at ${word.leaf}`)
+    at.moment('answered', { at: 'rest', ended: 'stop', words: 'Board answer' })
+    await at.close()
+  },
+
+  /** R2 / finding 7: a person's `/tree` navigation back to an earlier answer, labelled: the word's
+   * leaf is on that branch; recorded for the reader, which reads the end along it. */
+  async tree_navigation() {
+    const b = await open('tree', { retry: false })
+    await settles(b)
+    b.faux.setResponses([
+      ai.fauxAssistantMessage('First answer'),
+      ai.fauxAssistantMessage('Partial answer', { stopReason: 'error', errorMessage: 'Final provider error' }),
+    ])
+    await b.session.prompt('First prompt')
+    await settles(b)
+    const good = b.rows().find((r) => r.message?.role === 'assistant').id
+    await b.session.prompt('Second prompt')
+    await settles(b)
+    await b.session.navigateTree(good, { label: 'Kept answer' })
+    await b.until(() => b.word()?.leaf === b.session.sessionManager.getLeafId())
+    await wait(4 * POLL_MS)
+    b.moment('navigated', { at: 'rest', ended: 'stop', words: 'First answer' })
+    await b.close()
   },
 
   /** D5: a new session that was never written: `rest`, a leaf named, no file. A message goes in. */

@@ -402,15 +402,34 @@ impl Window for PiWindow {
     }
 }
 
-/// The look a Pi record says of its window: a record that is neither at rest nor at work (Pi's
-/// extension says `busy`, or a turn the file ended waits out its quiet with no word) is the look
-/// that is neither ([`Over::Pending`]): no key, no note, no stop paid, no result, no delivery.
+/// The look a Pi record says of its window, now: a record that is neither at rest nor at work (Pi's
+/// extension says `busy`, or a run's end is being written, or with no word a turn the file ended
+/// waits out its quiet) is the look that is neither ([`Over::Pending`]): no key, no note, no stop
+/// paid, no result, no delivery. A record at rest by Pi's word whose result is still to come
+/// (`rested`) is over ([`Over::Held`]): the stop is paid with no key and words may go in. A run
+/// that ended and was not reported rides beside it ([`Observed::ended`]).
 pub fn look_of(reading: Arc<Reading>) -> Observed {
     let mut observed = record_state(Arc::clone(&reading));
-    if matches!(&*reading, Reading::Known(record) if record.neither()) {
+    let Reading::Known(record) = &*reading else {
+        return observed;
+    };
+    if record.lines.rested {
+        // At rest by Pi's word, with what the result is read from still to come: the stop is
+        // paid, words may go in, no result is taken from it.
+        observed.settled = false;
+        observed.takes_words = true;
+        observed.over = Over::Held;
+    } else if record.neither() {
         observed.settled = false;
         observed.takes_words = false;
         observed.over = Over::Pending;
+    }
+    // A refusal that ended a run reaches the dispatcher with that run's end, whatever the window
+    // does now.
+    if observed.quota.is_none() {
+        if let Some(Reading::Known(ended)) = record.lines.ended.as_deref() {
+            observed.quota.clone_from(&ended.quota);
+        }
     }
     observed
 }

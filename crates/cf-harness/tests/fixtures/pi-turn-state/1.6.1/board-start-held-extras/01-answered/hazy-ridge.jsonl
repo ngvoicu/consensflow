@@ -1,0 +1,9 @@
+{"type":"session","version":3,"id":"01a21d7d-146f-7551-929d-8261fd0731a8","timestamp":"2026-11-27T14:51:06.223Z","cwd":"<run>/board-start-held-extras"}
+{"type":"model_change","id":"d97e1cfd","parentId":null,"timestamp":"2026-11-27T14:51:06.228Z","provider":"stand-in","modelId":"stand-in-model"}
+{"type":"thinking_level_change","id":"c43f8af4","parentId":"d97e1cfd","timestamp":"2026-11-27T14:51:06.228Z","thinkingLevel":"off"}
+{"type":"custom","customType":"keeper","data":{"count":1},"id":"cf8a4510","parentId":"c43f8af4","timestamp":"2026-11-27T14:51:09.836Z"}
+{"type":"message","id":"e4d97bdc","parentId":"cf8a4510","timestamp":"2026-11-27T14:51:09.836Z","message":{"role":"system","content":"","sections":{},"timestamp":1795791069835,"toolsAdded":[{"name":"read"},{"name":"bash"},{"name":"edit"},{"name":"write"}]}}
+{"type":"message","id":"e05bed7a","parentId":"e4d97bdc","timestamp":"2026-11-27T14:51:09.836Z","message":{"role":"user","content":[{"type":"text","text":"board request"}],"timestamp":1795791069835}}
+{"type":"message","id":"31d75399","parentId":"e05bed7a","timestamp":"2026-11-27T14:51:09.836Z","message":{"role":"assistant","content":[{"type":"text","text":"Board answer"}],"api":"faux:1795791066222:c55svbtanss","provider":"stand-in","model":"stand-in-model","usage":{"input":0,"output":3,"cacheRead":0,"cacheWrite":1441,"totalTokens":1444,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}},"stopReason":"stop","timestamp":1795791066229,"thinkingLevel":"off"}}
+{"type":"custom","customType":"keeper","data":{"count":2},"id":"ff714d43","parentId":"31d75399","timestamp":"2026-11-27T14:51:09.837Z"}
+{"type":"custom_message","customType":"keeper","content":"Kept the cache warm.","display":true,"id":"78f23373","parentId":"ff714d43","timestamp":"2026-11-27T14:51:09.837Z"}

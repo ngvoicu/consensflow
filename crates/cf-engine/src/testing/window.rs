@@ -561,6 +561,7 @@ fn looked(agent: &FakeAgent, session: &str) -> Observed {
                 lost: agent.lost.clone(),
                 places,
                 said_at_work: agent.said_at_work,
+                ended: agent.ended.clone(),
                 ..Lines::default()
             }),
             beside: Vec::new(),
@@ -597,7 +598,7 @@ fn looked(agent: &FakeAgent, session: &str) -> Observed {
         // As Claude's adapter says it (`claude::adapter`): the Mac's window whose turn an
         // interrupt ended while background work keeps its status busy takes words once the
         // interrupt's end has stood, though it is not settled.
-        takes_words: agent.settled
+        takes_words: agent.takes_words.unwrap_or(agent.settled)
             || (cfg!(target_os = "macos")
                 && agent.busy_when_interrupted
                 && !agent.interrupted_in_generation

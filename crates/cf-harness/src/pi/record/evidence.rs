@@ -101,7 +101,8 @@ pub(crate) struct Word {
     pub(crate) state: State,
     /// The session's leaf when it was written.
     pub(crate) leaf: Option<String>,
-    /// How many runs of the launch ended.
+    /// How many runs of the launch began, and how many ended.
+    pub(crate) begun: u64,
     pub(crate) ended: u64,
     /// The last ended runs, oldest first.
     pub(crate) ends: Vec<End>,
@@ -150,10 +151,12 @@ pub(crate) fn word(session: &str, env: &Env, options: &Options) -> Result<Option
                 .collect()
         })
         .unwrap_or_default();
+    let begun = word.get("begun").and_then(Value::as_u64).unwrap_or(ended);
     Ok(Some(Word {
         launch: launch.id,
         state,
         leaf: leaf(word.get("leaf")),
+        begun,
         ended,
         ends,
     }))
