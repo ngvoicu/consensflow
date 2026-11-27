@@ -3,11 +3,10 @@ import { HARNESS_NAMES } from './board.js'
 import { harnessOf, modelOf } from './model-option.js'
 import { isImageAgentRole, roleIds, roleLabel, tierColumns, tiersOf } from './roles.js'
 import { holdersOf, slotName, together } from './slots.js'
-import { STAND_IN } from './suggested-staff-data.js'
 
 /**
  * The suggested staff (T-2404): one staff ConsensFlow ships and is built with, offered in New
- * project and in Project settings alike, above the slots. Its shape is `suggested-staff-data.js`'s.
+ * project and in Project settings alike, above the slots. Its data is the release's `suggested-staff.json`, which the daemon checks and sends.
  *
  * It is offered only where it can work here: a member of it is offered where its harness is
  * installed and lists its model, at its effort, in the read the dialog made as it opened (never
@@ -20,16 +19,16 @@ import { STAND_IN } from './suggested-staff-data.js'
  * gives one, rather than made twice. What it fills is an ordinary member afterwards.
  */
 
-/** The suggestion as the daemon sent it last; the page's stand-in until it sends one. */
-let suggestion = STAND_IN
+/** The suggestion as the daemon sent it last; none until it sends one. */
+let suggestion = null
 
 /**
  * Keeps the suggestion a `harnesses.missing` answer sends (`suggestedStaff`): null where there is
- * none to offer. An answer that says nothing of it keeps the last.
+ * none to offer. An answer that says nothing of it, or one that is not a list of members, offers
+ * nothing: the page holds no staff of its own.
  */
 export function readSuggestion(value) {
-  if (value === undefined) return
-  suggestion = value !== null && Array.isArray(value.members) ? value : null
+  suggestion = Array.isArray(value?.members) ? value : null
 }
 
 /**

@@ -4,7 +4,6 @@ import { join } from 'node:path'
 import { chromium, expect, test } from '@playwright/test'
 
 import { tempEnv } from '../../tests/helpers.mjs'
-import { STAND_IN } from '../ui/core/suggested-staff-data.js'
 import { agentsServer } from './agents-server.mjs'
 import { refusedByPolicy, serveUi } from './serve-ui.mjs'
 
@@ -24702,23 +24701,36 @@ test('T-2404 nothing is offered where no harness lists its models, where it woul
   await expect(fresh.locator('.suggest')).toBeHidden()
 })
 
-test('T-2404 a daemon that says nothing of a suggested staff leaves the page its own stand-in, offered as any', async ({
+test('T-2405 an entry the page cannot seat is left out and written nowhere: an unknown role, harness or tier, and a model no list names', async ({
   page,
 }) => {
-  const data = model()
-  const listedOf = (kind) =>
-    STAND_IN.members
-      .filter((member) => member.harness === kind && !member.designer)
-      .map((member) => ({ id: member.model, efforts: SUGGEST_EFFORTS }))
-  data.models.claude.listing = listed(listedOf('claude-code'))
-  data.models.codex.listing = listed(listedOf('codex'))
-  data.suggestedStaffUnsaid = true
+  const data = suggesting(model(), {
+    about: 'A staff with entries that cannot be seated.',
+    members: [
+      { harness: 'claude-code', model: 'claude-opus-5-5', effort: 'medium', tier: 'critical', roles: ['janitor'] },
+      { harness: 'emacs', model: 'claude-opus-5-5', effort: 'medium', tier: 'critical', roles: ['worker'] },
+      { harness: 'claude-code', model: 'claude-opus-5-5', effort: 'medium', tier: 'huge', roles: ['worker'] },
+      { harness: 'claude-code', model: 'claude-unlisted-9', effort: 'medium', tier: 'complex', roles: ['worker'] },
+      { harness: 'claude-code', model: 'claude-opus-5-5', effort: 'medium', tier: 'standard', roles: ['worker'] },
+    ],
+  })
   data.lastStaff = []
   const fresh = await newProjectOn(page, data)
   const panel = suggestion(fresh)
-  await expect(panel.locator('.suggest-about')).toHaveText(STAND_IN.about)
-  const slots = STAND_IN.members.reduce((sum, member) => sum + member.roles.length, 0)
-  await expect(
-    panel.getByRole('button', { name: `Fill ${slots} empty slots with the suggested staff` }),
-  ).toBeEnabled()
+  await expect(panel.locator('.suggest-fills')).toHaveText(
+    'It fills 1 empty slot with members on Claude Code.',
+  )
+  await panel.getByRole('button', { name: 'Fill 1 empty slot with the suggested staff' }).click()
+  expect(await holdersShown(fresh)).toEqual([['worker:standard', '1']])
+})
+
+test('T-2405 a daemon that says nothing of a suggested staff offers nothing: the page holds no staff of its own', async ({
+  page,
+}) => {
+  const data = suggesting()
+  data.suggestedStaffUnsaid = true
+  data.lastStaff = []
+  const fresh = await newProjectOn(page, data)
+  await expect(fresh.locator('table.slots')).toBeVisible()
+  await expect(suggestion(fresh)).toBeHidden()
 })

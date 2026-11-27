@@ -18,12 +18,17 @@ use super::Page;
 /// `harnesses.missing`: the harnesses not installed here, which the pickers leave out; and
 /// the staff's roles in their order, which the pickers offer and the board names
 /// (`cf_ledger::roles`): the page reads both as it starts and whenever a picker opens, and
-/// holds no list of roles of its own.
+/// holds no list of roles of its own; and the suggested staff the release ships
+/// (`suggested_staff`), or `null` where it cannot be offered.
 pub(super) async fn missing(page: &Page) -> Result<Fields, Said> {
     let missing = missing_harnesses(&page.env);
     let mut fields = Fields::new();
     fields.insert("missing".to_owned(), serde_json::to_value(&missing)?);
     fields.insert("roles".to_owned(), cf_ledger::roles::page_view());
+    fields.insert(
+        "suggestedStaff".to_owned(),
+        super::suggested_staff::shipped(),
+    );
     Ok(fields)
 }
 
