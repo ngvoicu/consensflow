@@ -523,29 +523,6 @@ file = "crates/cf-e2e/src/live/members/descent.rs"
 find = '''        Ok(Some(started)) if started == process.identity.started => {}'''
 replace = '''        Ok(Some(_)) => {}'''
 
-# Round 5 (Astra, P1): Windows' process table is read as JSON, where a command line of
-# many lines is one string; read as lines, an argument made up a process of the window.
-
-[[plant]]
-name = "devin resume: Windows' process table is read as lines"
-meant = "windows_process_table_is_read_as_json_and_a_command_line_of_many_lines_is_one_process"
-runs = ["e2e-lib-descent"]
-
-[[plant.edit]]
-file = "crates/cf-e2e/src/live/members/descent.rs"
-find = '''}} }} | ConvertTo-Json -Compress"'''
-replace = '''}} }} | ForEach-Object {{ \"$($_.pid) $($_.ppid) $($_.command)\" }}"'''
-
-[[plant]]
-name = "devin resume: a command line of many lines is read to its first"
-meant = "windows_process_table_is_read_as_json_and_a_command_line_of_many_lines_is_one_process"
-runs = ["e2e-lib-descent"]
-
-[[plant.edit]]
-file = "crates/cf-e2e/src/live/members/descent.rs"
-find = '''                command: entry["command"].as_str().unwrap_or_default().to_owned(),'''
-replace = '''                command: entry["command"].as_str().unwrap_or_default().lines().next().unwrap_or_default().to_owned(),'''
-
 # Round 5 (Astra 5): the relay waits on the helper only until its deadline.
 
 [[plant]]
@@ -744,7 +721,7 @@ runs = ["e2e-lib-descent"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/members/descent.rs"
-find = '''            Ok(Some(opened)) if opened.created.abs_diff(process.identity.started) < TABLE_GRAIN => {'''
+find = '''            Ok(Some(opened)) if opened.created == process.identity.started => {'''
 replace = '''            Ok(Some(opened)) => {'''
 
 # Round 7 (Astra and Sol on round 6): the guard refuses the machine's own end and a `kill`

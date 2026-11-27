@@ -303,8 +303,8 @@ runs = ["rig-lib-left"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/rig/left.rs"
-find = '''    command(pid).is_some_and(|command| !names(&command, program))'''
-replace = '''    command(pid).is_some_and(|_| false)'''
+find = '''    command.is_some_and(|command| !command.is_empty() && !names(command, program))'''
+replace = '''    command.is_some_and(|_| false)'''
 
 [[plant]]
 name = "load flakes: a command line names its program only by the exact file name, its .exe and case too"
