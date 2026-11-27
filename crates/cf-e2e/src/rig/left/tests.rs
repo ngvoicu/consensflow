@@ -217,3 +217,12 @@ fn a_processes_start_is_read_at_once_and_is_the_same_each_time() {
     let took = at.elapsed();
     assert!(took < Duration::from_millis(50), "20 reads took {took:?}");
 }
+
+#[test]
+fn a_command_that_was_not_read_or_is_empty_is_no_other_program_and_one_that_names_another_is() {
+    // A process the machine would not open says an empty command: it is unread, never another's.
+    assert!(!another_than(None, "cf"));
+    assert!(!another_than(Some(""), "cf"));
+    assert!(!another_than(Some(r"C:\bin\cf.exe --serve"), "cf"));
+    assert!(another_than(Some(r"C:\Windows\System32\sort.exe"), "cf"));
+}

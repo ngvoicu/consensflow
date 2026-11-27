@@ -83,7 +83,7 @@ pub enum Link {
 
 /// A process of the machine as a check reads it: which it is, the number of the process
 /// that started it, and its command line, and, where the system says it, the path of the
-/// image it runs (Windows' table does, and `ps` does not).
+/// image it runs (read on Windows' handle of the process, and `ps` does not say it).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Running {
     pub identity: Identity,
@@ -622,11 +622,6 @@ pub(crate) fn refined_by_bsd(
         .collect()
 }
 
-/// How far, in 100 ns, the table's creation time of a process may be from its handle's:
-/// the table says it to the microsecond.
-#[cfg(any(windows, test))]
-const TABLE_GRAIN: u64 = 10;
-
 /// What a process's own handle says: when it was created, to the 100 ns, and the number of the
 /// process that created it where the system says it.
 #[cfg(any(windows, test))]
@@ -639,7 +634,7 @@ pub(crate) struct Opened {
 /// The processes Windows' table listed (`listed`), each with its creation time and its creator
 /// as its own handle says them (`read`), to the 100 ns. One the handle says has exited, or that
 /// no process has the number of, is not listed; nor one whose handle says another creation time
-/// than the table, give or take its grain ([`TABLE_GRAIN`]): its number is another's now. One
+/// than the table, to the 100 ns (the table and the handle say the one creation time of the kernel): its number is another's now. One
 /// that cannot be opened (the system's own, another user's) keeps what the table said and proves
 /// nothing ([`Link::Unread`]): no check can end it. The handles are read from one set held open
 /// together by the caller, so that no number in the reading was another process's meanwhile
@@ -653,7 +648,7 @@ pub(crate) fn refined_by_handle(
     listed
         .into_iter()
         .filter_map(|mut process| match read(process.identity.pid) {
-            Ok(Some(opened)) if opened.created.abs_diff(process.identity.started) < TABLE_GRAIN => {
+            Ok(Some(opened)) if opened.created == process.identity.started => {
                 process.identity.started = opened.created;
                 // The table and the handle name one creator, or neither is believed.
                 process.link = match opened.creator {
@@ -734,7 +729,7 @@ fn image_folder(exe: &str) -> Option<String> {
 /// 100 ns, after the reading, and the parent began no later than the program: a held handle's
 /// number is no other process's, so the number Git Bash names is that process. Where either end is
 /// not held or a time differs, the program stays out of the window's tree and is named
-/// ([`unproved_under`]). The folder is the image's, which Windows' table gives plain, and not the
+/// ([`unproved_under`]). The folder is the image's, which the process's handle gives plain, and not the
 /// command line's spelling of it (`Git\bin\..\usr\bin` and `Git\usr\bin` are one folder); a
 /// process whose image the table could not say is left as it was.
 pub fn with_cygwin_parents(
@@ -869,6 +864,26 @@ mod entry {
     pub const CREATED: usize = 32;
     pub const PID: usize = 80;
     pub const CREATOR: usize = 88;
+}
+
+/// Where the text of a `UNICODE_STRING` the kernel answered a command-line query with lies, in
+/// the buffer the kit gave it (`base`, `size` bytes: its address and room): the offset of its first
+/// byte and its length in 16-bit units. None where the length is odd, where the text begins before
+/// the end of the `UNICODE_STRING` itself (`header`) or off a 2-byte boundary, or where it ends past
+/// the buffer: an answer that points outside what was given is no command line (it is read as
+/// none, never as memory).
+#[cfg(any(windows, test))]
+fn text_in_buffer(
+    base: usize,
+    size: usize,
+    header: usize,
+    length: usize,
+    text: usize,
+) -> Option<(usize, usize)> {
+    let offset = text.checked_sub(base)?;
+    let end = offset.checked_add(length)?;
+    (length.is_multiple_of(2) && offset >= header && offset.is_multiple_of(2) && end <= size)
+        .then_some((offset, length / 2))
 }
 
 /// The processes of what `NtQuerySystemInformation(SystemProcessInformation)` wrote into `buffer`:

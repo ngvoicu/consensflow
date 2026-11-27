@@ -523,8 +523,8 @@ fn a_mac_row_whose_start_the_system_says_is_another_second_than_ps_said_is_anoth
 
 #[test]
 fn windows_lists_a_process_with_its_handles_creation_time_and_not_one_whose_number_changed_hands() {
-    // The table says when each began to the microsecond; its handle, to the 100 ns. 11's
-    // handle says another time than the table (its number is another process's), 12 has
+    // The table and the handle say when each began to the 100 ns, the one time. 10's handle says
+    // another time by one unit and 11's by much (their numbers are other processes'), 12 has
     // exited, 13 is no process now, and 14 cannot be opened (the system's own): it keeps
     // what the table said.
     let listed = vec![
@@ -533,10 +533,12 @@ fn windows_lists_a_process_with_its_handles_creation_time_and_not_one_whose_numb
         running(12, 133_000_000_000_000_120, 10, "ping.exe"),
         running(13, 133_000_000_000_000_120, 10, "cmd.exe"),
         running(14, 5, 0, "System"),
+        running(15, 133_000_000_000_000_120, 1, "same.exe"),
     ];
     let opened = |created, creator| Ok(Some(Opened { created, creator }));
     let refined = refined_by_handle(listed, |pid| match pid {
-        10 => opened(133_000_000_000_000_127, Some(1)),
+        10 => opened(133_000_000_000_000_121, Some(1)),
+        15 => opened(133_000_000_000_000_120, Some(1)),
         11 => opened(133_000_000_000_500_120, Some(10)),
         12 | 13 => Ok(None),
         _ => Err(std::io::Error::other("access denied")),
@@ -544,11 +546,11 @@ fn windows_lists_a_process_with_its_handles_creation_time_and_not_one_whose_numb
     assert_eq!(
         refined,
         [
-            created(running(10, 133_000_000_000_000_127, 1, "devin.exe")),
             Running {
                 link: Link::Unread,
                 ..running(14, 5, 0, "System")
             },
+            created(running(15, 133_000_000_000_000_120, 1, "same.exe")),
         ]
     );
     // A handle that names another creator than the table does is believed by neither.
@@ -940,7 +942,7 @@ const WINDOWS_AWARE: &[(&str, &str)] = &[
     ("tests/live_approval/minute.rs", "not a Windows case: an advisor's window on a Mac"),
     ("tests/live_asks.rs", "Claude Code's commands run in Git Bash on Windows"),
     ("tests/live_devin_wire.rs", "`sleep 30` is PowerShell's Start-Sleep and Git Bash's own (not run in cmd.exe; Devin's shell on Windows is PowerShell)"),
-    ("tests/live_finish/leaving.rs", "`ps` on the Unix side, PowerShell's table on Windows"),
+    ("tests/live_finish/leaving.rs", "`ps` on the Unix side, Windows' own table on Windows"),
     ("tests/live_finish/leaving/tests.rs", "tests of the Unix side"),
     ("tests/live_finish/stand_in.rs", "a test of the Unix side: another run's orphan, started with /bin/sh"),
     ("tests/live_folder_trust.rs", "a server of a .mcp.json the dialog asks of, never started"),
@@ -1063,4 +1065,25 @@ fn no_live_check_starts_a_unix_only_program_or_gives_a_harness_one_unless_it_is_
     ] {
         assert!(unix_only_use(fine).is_none(), "{fine}");
     }
+}
+
+#[test]
+fn the_text_of_a_command_line_the_kernel_places_outside_its_buffer_is_no_command_line() {
+    // A buffer of 64 bytes at address 1000, whose own string header is 16 bytes: the text may lie
+    // from 1016 to 1064, in whole units, from an even address.
+    let at = |length, text| text_in_buffer(1000, 64, 16, length, text);
+    assert_eq!(at(8, 1016), Some((16, 4)));
+    assert_eq!(at(48, 1016), Some((16, 24)));
+    assert_eq!(at(0, 1016), Some((16, 0)));
+    // Past the end, by a unit or by the whole address space; before the buffer; inside the header.
+    assert_eq!(at(50, 1016), None);
+    assert_eq!(at(8, 1062), None);
+    assert_eq!(at(usize::MAX - 2, 1016), None);
+    assert_eq!(at(8, usize::MAX), None);
+    assert_eq!(at(8, 999), None);
+    assert_eq!(at(8, 1000), None);
+    assert_eq!(at(8, 1008), None);
+    // An odd length is no whole units, and an odd address is off the boundary of one.
+    assert_eq!(at(7, 1016), None);
+    assert_eq!(at(8, 1017), None);
 }

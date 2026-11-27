@@ -321,7 +321,8 @@ mod win {
     };
 
     use super::super::{
-        refined_by_handle, table_of_system, with_cygwin_parents, Identity, Opened, Running,
+        refined_by_handle, table_of_system, text_in_buffer, with_cygwin_parents, Identity, Opened,
+        Running,
     };
     use crate::process::Run;
     use crate::{Error, Result};
@@ -367,6 +368,9 @@ mod win {
         drop(held);
         Ok(rows)
     }
+
+    // The table's offsets are of a 64-bit Windows: a build for another is refused here.
+    const _: () = assert!(std::mem::size_of::<usize>() == 8);
 
     /// The class `SystemProcessInformation` of `NtQuerySystemInformation`.
     const SYSTEM_PROCESS_INFORMATION: i32 = 5;
@@ -598,14 +602,26 @@ mod win {
             }
             let text = buffer.as_ptr().cast::<UNICODE_STRING>();
             #[allow(unsafe_code)]
-            // SAFETY: on success the buffer holds a UNICODE_STRING whose text follows it in the
-            // same buffer: `Length` bytes of UTF-16 at `Buffer`.
+            // SAFETY: on success the buffer holds a UNICODE_STRING at its start (it is at least
+            // that big, checked above), read by value.
+            let (length, chars) = unsafe { ((*text).Length as usize, (*text).Buffer) };
+            // The text is the kernel's to place, in the buffer given: where it says it lies outside
+            // that, or is not whole units, it is no command line.
+            let (offset, units) = text_in_buffer(
+                buffer.as_ptr() as usize,
+                buffer.len() * 8,
+                std::mem::size_of::<UNICODE_STRING>(),
+                length,
+                chars as usize,
+            )?;
+            #[allow(unsafe_code)]
+            // SAFETY: `text_in_buffer` put `units` 16-bit units at `offset` inside the buffer, on a
+            // 2-byte boundary, and the buffer is alive and not written meanwhile.
             let units = unsafe {
-                let (bytes, chars) = ((*text).Length as usize, (*text).Buffer);
-                if chars.is_null() {
-                    return None;
-                }
-                std::slice::from_raw_parts(chars, bytes / std::mem::size_of::<u16>())
+                std::slice::from_raw_parts(
+                    buffer.as_ptr().cast::<u8>().add(offset).cast::<u16>(),
+                    units,
+                )
             };
             Some(String::from_utf16_lossy(units))
         }
