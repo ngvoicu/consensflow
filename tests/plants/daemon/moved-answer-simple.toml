@@ -516,6 +516,13 @@ file = "crates/cf-ledger/src/messages.rs"
 find = "    if why == \"was finished\" {\n        store.db.execute("
 replace = "    if false && why == \"was finished\" {\n        store.db.execute("
 
+# Finish closes the questions the task's result leaves open before this runs (T-2287): both are
+# taken out for a question to be left open.
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = "            close_by_the_result(store, &task, &open)?;"
+replace = "            if false {\n                close_by_the_result(store, &task, &open)?;\n            }"
+
 [[plant]]
 name = "round3 legacy: cancellation changes an old delivered question"
 meant = "t1827_legacy_questions_keep_main_cancel_and_accept_behavior"

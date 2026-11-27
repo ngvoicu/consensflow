@@ -82,11 +82,13 @@ fn every_window_is_given_what_the_app_took_of_a_terminals_environment_before_its
     let env = Env::from_vars([
         (
             TERMINAL_ENV,
-            r#"["LANG","PNPM_HOME","EMPTY_BY_THE_RC","CONSENSFLOW_URL","Path","NOT_THERE"]"#,
+            r#"["LANG","PNPM_HOME","EMPTY_BY_THE_RC","CONSENSFLOW_URL","CONSENSFLOW_HOME","Path","NOT_THERE"]"#,
         ),
         ("LANG", "en_GB.UTF-8"),
         ("PNPM_HOME", "/home/me/Library/pnpm"),
         ("CONSENSFLOW_URL", "http://elsewhere"),
+        // One of ConsensFlow's that is no window's: the app's own, never given to a window.
+        ("CONSENSFLOW_HOME", "/elsewhere/consensflow"),
         ("Path", "/rc/bin"),
         ("PATH", "/usr/bin"),
         ("NOT_NAMED", "kept out"),
