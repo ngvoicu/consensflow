@@ -10,6 +10,7 @@ mod last_call;
 mod looks;
 mod recordings;
 mod steps;
+mod turn_state;
 
 use std::fs::{self, File};
 use std::path::PathBuf;
@@ -23,7 +24,9 @@ use crate::shared::record::cache::PiSettlement;
 
 const SESSION: &str = "hazy-ridge";
 
-/// When the first session file was written, in milliseconds.
+/// When the first session file was written, in milliseconds: the time the records below say
+/// they were written (2026-09-21T14:13:20Z), so a look `after` milliseconds after a write reads
+/// them that old.
 const WRITTEN: i64 = 1_790_000_000_000;
 
 /// A session file in a Pi home of its own, and the reader of its session.
@@ -108,6 +111,25 @@ impl Stage {
     fn at(&mut self, after: i64) -> Record {
         known(&self.look(after, &Options::default()))
     }
+
+    /// A look told nothing at the clock's `now_ms`.
+    fn at_time(&mut self, now_ms: i64) -> Record {
+        known(&self.reader.look(&Options::default(), now_ms))
+    }
+}
+
+/// The time of the newest entry of a session's text, in milliseconds: what a look with no word
+/// of the extension's counts the quiet from.
+fn newest(text: &str) -> i64 {
+    text.lines()
+        .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+        .filter_map(|row| {
+            row.get("timestamp")
+                .and_then(Value::as_str)
+                .and_then(cf_base::time::parse)
+        })
+        .max()
+        .unwrap()
 }
 
 /// The record a reading holds, or a failure of the test.
@@ -127,12 +149,12 @@ fn reason(reading: &Reading) -> &str {
 }
 
 fn header() -> Value {
-    json!({ "type": "session", "version": 3, "id": SESSION, "timestamp": "2026-08-24T18:00:00.703Z" })
+    json!({ "type": "session", "version": 3, "id": SESSION, "timestamp": "2026-09-21T14:13:19.703Z" })
 }
 
 /// A `message` record holding `fields`, as Pi writes one.
 fn message(id: &str, fields: Value) -> Value {
-    json!({ "type": "message", "id": id, "timestamp": "2026-08-24T18:00:01.000Z", "message": fields })
+    json!({ "type": "message", "id": id, "timestamp": "2026-09-21T14:13:20.000Z", "message": fields })
 }
 
 fn user(id: &str, text: &str) -> Value {

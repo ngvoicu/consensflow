@@ -211,6 +211,17 @@ pub struct Lines {
     /// notifications, its reader): a turn is to begin for each while its program runs,
     /// and none began where it no longer does (T-814).
     pub held_by_notices: bool,
+    /// The harness says the window is not free though no turn runs (Pi's word `busy`: it
+    /// compacts, sums up a branch, or holds a prompt someone submitted): neither at rest nor at
+    /// work ([`Record::neither`]).
+    pub busy: bool,
+    /// A turn the record ended reads at rest at this time (milliseconds since the epoch) if
+    /// nothing is written before it, and until then neither at rest nor at work: Pi's record
+    /// read by its quiet alone, with no word of its extension's.
+    pub settles_at: Option<i64>,
+    /// The turn reads at work by the harness's own word (Pi's extension says a run is on), not
+    /// by what its record shows.
+    pub said_at_work: bool,
 }
 
 /// A monitor a turn armed that its harness has said no end of: its task's id, what its
@@ -361,6 +372,14 @@ impl Record {
             lines: Box::default(),
             beside: Vec::new(),
         }
+    }
+
+    /// Whether the record says its window is neither at rest nor at work: its harness says it is
+    /// busy with no turn ([`Lines::busy`]), or a turn it ended waits out its quiet
+    /// ([`Lines::settles_at`]). No key is pressed into it, no stop is paid, nothing is taken as a
+    /// result and nothing is sent until it says one or the other.
+    pub fn neither(&self) -> bool {
+        self.lines.busy || self.lines.settles_at.is_some()
     }
 }
 

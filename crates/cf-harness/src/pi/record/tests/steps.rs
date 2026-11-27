@@ -11,9 +11,9 @@ fn length_stop(content: &str) -> Stage {
     let mut stage = Stage::new();
     stage.write_text(&format!(
         concat!(
-            "{{\"type\":\"session\",\"version\":3,\"id\":\"hazy-ridge\",\"timestamp\":\"2026-08-24T18:00:00.703Z\"}}\n",
-            "{{\"type\":\"message\",\"id\":\"u1\",\"parentId\":null,\"timestamp\":\"2026-08-24T18:00:01.000Z\",\"message\":{{\"role\":\"user\",\"content\":[{{\"type\":\"text\",\"text\":\"Inspect the parser\"}}]}}}}\n",
-            "{{\"type\":\"message\",\"id\":\"a1\",\"parentId\":\"u1\",\"timestamp\":\"2026-08-24T18:00:02.000Z\",\"message\":{{",
+            "{{\"type\":\"session\",\"version\":3,\"id\":\"hazy-ridge\",\"timestamp\":\"2026-09-21T14:13:19.703Z\"}}\n",
+            "{{\"type\":\"message\",\"id\":\"u1\",\"parentId\":null,\"timestamp\":\"2026-09-21T14:13:20.000Z\",\"message\":{{\"role\":\"user\",\"content\":[{{\"type\":\"text\",\"text\":\"Inspect the parser\"}}]}}}}\n",
+            "{{\"type\":\"message\",\"id\":\"a1\",\"parentId\":\"u1\",\"timestamp\":\"2026-09-21T14:13:21.000Z\",\"message\":{{",
             "\"role\":\"assistant\",\"content\":{content},\"api\":\"made-api\",\"provider\":\"made-provider\",\"model\":\"made-model\",",
             "\"usage\":{{\"input\":1,\"output\":2,\"cacheRead\":0,\"cacheWrite\":0,\"reasoning\":2,\"totalTokens\":3,\"cost\":{{\"input\":0,\"output\":0,\"cacheRead\":0,\"cacheWrite\":0,\"total\":0,\"totalFromProvider\":0}}}},",
             "\"stopReason\":\"length\",\"timestamp\":1790000002000,\"responseId\":\"made-response\",\"rawStopReason\":\"length\",\"durationMs\":1000,\"thinkingLevel\":\"high\"}}}}\n"
@@ -29,7 +29,8 @@ fn assert_length_failure(mut stage: Stage) {
         before_end.in_flight && !before_end.failed,
         "Pi may still continue"
     );
-    let record = stage.at(120_000);
+    // The cut step is a second after the file's first write: 120 s after it.
+    let record = stage.at(121_000);
     assert!(!record.in_flight, "the cut turn must be over: {record:?}");
     assert_eq!(record.settlement, Settlement::Settled);
     assert!(record.failed);
@@ -142,8 +143,12 @@ fn a_later_message_clears_the_cut_failure_and_pending_is_not_an_end() {
     let record = stage.at(120_000);
     assert!(record.failed && record.failure_kind.is_none());
     assert_eq!(record.failure.as_deref(), Some("provider error"));
+    // A step whose end Pi does not name asks for nothing more: with no word of the
+    // extension's, the run is over once the quiet has passed, with no answer.
     let mut pending = Stage::with(&[header(), user("u1", "go"), assistant("a1", "pending", "")]);
-    assert!(pending.at(120_000).in_flight);
+    assert!(pending.at(119_000).in_flight);
+    let over = pending.at(120_000);
+    assert!(!over.in_flight && !over.failed && over.aborted, "{over:?}");
 }
 
 #[test]
@@ -158,11 +163,12 @@ fn a_record_that_is_null_fails_the_look_and_a_file_of_no_record_is_an_empty_sess
         reason(&stage.look(0, &Options::default())),
         "unreadable: empty pi session hazy-ridge"
     );
-    // A session of its header alone is a record, and says nothing of a turn.
+    // A session of its header alone is a record, and holds no entry a request can follow:
+    // nothing is at work.
     stage.write(&[header()]);
     let record = stage.at(0);
-    assert!(record.items.is_empty() && !record.in_flight);
-    assert_eq!(record.settlement, Settlement::Unknown);
+    assert!(record.items.is_empty() && !record.in_flight && !record.aborted);
+    assert_eq!(record.settlement, Settlement::Settled);
 }
 
 /// An assistant's step that said `text` and called the tool `call`.
@@ -216,7 +222,7 @@ fn the_steps_of_a_turn_that_stopped_for_a_tool_are_never_complete_and_the_step_t
 }
 
 #[test]
-fn a_step_that_names_no_end_keeps_the_turn_open_without_failing_it() {
+fn a_call_unanswered_keeps_the_turn_open_and_a_step_that_names_no_end_waits_out_the_quiet() {
     let mut stage = Stage::with(&[
         header(),
         user("u1", "go"),
@@ -227,7 +233,8 @@ fn a_step_that_names_no_end_keeps_the_turn_open_without_failing_it() {
     let record = stage.at(1_000_000);
     assert!(!record.failed && record.in_flight);
     assert_eq!(record.settlement, Settlement::InFlight);
-    // A step with no stop reason is no end either.
+    // A step with no stop reason asks for nothing: with no word, it is over by the quiet, with
+    // no answer, and the failure before it is not the run's.
     stage.write(&[
         header(),
         user("u1", "go"),
@@ -235,7 +242,10 @@ fn a_step_that_names_no_end_keeps_the_turn_open_without_failing_it() {
         message("a2", json!({ "role": "assistant", "content": [] })),
     ]);
     let record = stage.at(1_000_000);
-    assert!(!record.failed && record.in_flight);
+    assert!(
+        !record.failed && !record.in_flight && record.aborted,
+        "{record:?}"
+    );
     // A user message clears the failure.
     stage.write(&[
         header(),
@@ -423,7 +433,7 @@ fn an_item_is_at_the_time_of_its_record_else_of_its_message_else_at_its_place() 
         record.as_object_mut().unwrap().remove("timestamp");
         record
     };
-    assert_eq!(at_of(user("u1", "go")), json!("2026-08-24T18:00:01.000Z"));
+    assert_eq!(at_of(user("u1", "go")), json!("2026-09-21T14:13:20.000Z"));
     // `??` passes over null as well as nothing.
     let mut nulled = user("u1", "go");
     nulled["timestamp"] = json!(null);
@@ -774,17 +784,19 @@ fn a_retry_on_another_branch_than_the_one_pi_is_on_takes_no_refusal_out_of_view(
     };
     let label = |parent: &str| {
         json!({ "type": "label", "id": "l1", "parentId": parent, "targetId": parent,
-            "label": "prior result", "timestamp": "2026-08-24T18:00:03.000Z" })
+            "label": "prior result", "timestamp": "2026-09-21T14:13:22.000Z" })
     };
     let summary = json!({ "type": "branch_summary", "id": "s1", "parentId": "a1", "fromId": "a1",
-        "summary": "older branch", "timestamp": "2026-08-24T18:00:03.000Z" });
+        "summary": "older branch", "timestamp": "2026-09-21T14:13:22.000Z" });
     let state = |rows: Vec<Value>| {
         let mut stage = Stage::with(&rows);
         let record = stage.at(0);
         (
             record.quota.is_some(),
             record.failed,
-            stage.at(120_000).failed,
+            // 120 s after the branch summary (an entry a request can follow, two seconds after
+            // the first write), with no word of the extension's.
+            stage.at(122_000).failed,
         )
     };
     // The leaf is the retry's label: the retry is on the path, and the refusal is out of view.

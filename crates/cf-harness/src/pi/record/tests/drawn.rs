@@ -33,7 +33,7 @@ fn answered(failed: bool, fields: Value) -> Value {
     if let (Value::Object(said), Value::Object(fields)) = (&mut said, fields) {
         said.extend(fields);
     }
-    written(message("r1", said), "2026-08-24T18:00:03.500Z")
+    written(message("r1", said), "2026-09-21T14:13:22.500Z")
 }
 
 fn timeline(record: &Record) -> Vec<(String, Kind, bool)> {
@@ -141,7 +141,7 @@ fn a_compaction_stands_beside_the_items_with_its_tokens_and_summary() {
         user("u1", "go"),
         assistant("a1", "stop", "done"),
         json!({ "type": "compaction", "id": "c1", "parentId": "a1",
-            "timestamp": "2026-08-24T18:00:05.000Z", "summary": "The human asked; it is done.",
+            "timestamp": "2026-09-21T14:13:24.000Z", "summary": "The human asked; it is done.",
             "firstKeptEntryId": "a1", "tokensBefore": 14_321 }),
     ];
     let record = Stage::with(&records).at(0);

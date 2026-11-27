@@ -1,32 +1,39 @@
-//! Pi's record of a session: its JSONL session file, and what ConsensFlow's
-//! extension writes beside it (the `evidence` module).
+//! Pi's record of a session: its JSONL session file, and the word ConsensFlow's extension
+//! writes beside it (the `evidence` module): the brain's `architecture/pi-turn-state.md`.
 //!
-//! Pi writes no session file until an assistant message is complete, so a
-//! first request that hangs leaves nothing to read: the extension's working
-//! marker, when it is there, says that turn is in flight, not unknown.
+//! **Whether a turn runs is Pi's own word.** The extension follows Pi's run state and writes
+//! it as one word (`working`, `busy`, `rest`) with a count of the runs that ended and the last
+//! of them: each its leaf and Pi's own flag of an abort. Where that word is there the session
+//! file never decides whether a turn runs: `working` is at work; `busy` is neither at rest nor
+//! at work (a compaction, a prompt in hand: nothing is interrupted, taken as a result or sent);
+//! `rest` is at rest once the file as read holds the leaf it names (a session with no file yet is
+//! at rest with nothing to read). A run that ended is never missed: each look reports the oldest
+//! end it has not reported, read up to that run's own leaf, whatever the word says now, one look
+//! for each, in order.
 //!
-//! The session's last assistant step decides the turn. It is settled when
-//! that step stopped, was aborted (an Escape: a pause, a tell, the human) or
-//! failed (a provider's error, an output-limit cut, or a deferred response), no tool call is open, and either the
-//! extension's evidence names it, or the file has been quiet for 120 seconds
-//! (`QUIET_MS`): Pi's agent retry is capped at 60 seconds
-//! (`retry.maxAgentDelayMs`, since Pi 0.86.0 and still in 1.3.0, the newest
-//! seen), so two of them without an append say no retry is coming. A failed
-//! step is a turn that ended like the others: Pi writes a new step for each
-//! retry, so a failure with nothing after it for that long is the last, and
-//! a window whose evidence is gone (a conversation followed with `/resume`, a
-//! launch folder swept, an extension that could not write) must not read at
-//! work for good (T-781).
+//! **The file gives the words, and how a run ended:** the last assistant step at or before the
+//! run's leaf since the last user message. `stop` is its answer; `length` and `deferred` failed
+//! with their cause; `aborted` was interrupted; `error` was interrupted where Pi's flag says it
+//! aborted, or where Pi's own omission names that very step (a `context_edit` of it with no
+//! replacement, and no step after it: a retry cancelled in its backoff), and failed otherwise; a
+//! `toolUse` step, a tool's result or no step ended with no answer, interrupted. A call in a step
+//! that ended `aborted` or `error` never ran: never open, never named. A step Pi omitted is left
+//! out of the answer's words. An entry that asks the model nothing changes nothing.
 //!
-//! Pi's reader is no `TranscriptReader`: its answer also rests on the
-//! evidence and on the file's quiet, which change while the transcript does
-//! not, so every look works its answer out anew, and returns a new reading. A
-//! refusal's quota stays the same object until the transcript changes it.
+//! **Without the word** (the extension did not load, a window an older ConsensFlow opened, the
+//! moment before its first word) the file decides by time alone. A run is open while the last
+//! message is the user's or a tool's result, or a call is not answered; else the window is at
+//! rest [`QUIET_MS`] after the last entry a request can follow, by that entry's own time, and
+//! until then neither at rest nor at work (`settles_at`): a stop presses no key for it.
 //!
-//! Kept from Node on purpose: the look's options are `piSettlement` alone
-//! (Node also read the alias `options.pi`, which no caller passes). The
-//! session's records key its set of open tool calls as they keyed Node's (see
-//! `Key`).
+//! Pi's reader is no `TranscriptReader`: its answer also rests on the word and on the clock,
+//! which change while the transcript does not, so every look works its answer out anew, and
+//! returns a new reading. A refusal's quota stays the same object until the transcript
+//! changes it.
+//!
+//! Kept from Node on purpose: the look's options are `piSettlement` alone (Node also read the
+//! alias `options.pi`, which no caller passes). The session's records key its set of open tool
+//! calls as they keyed Node's (see `Key`).
 
 pub(crate) mod evidence;
 
@@ -40,6 +47,7 @@ use cf_base::js;
 use jiff::tz::TimeZone;
 use serde_json::Value;
 
+use self::evidence::{State, Word};
 use super::paths::transcript;
 use crate::shared::quota::{
     account_refusal, busy_quota, busy_refusal, exhausted_quota, refused_for_quota,
@@ -55,9 +63,9 @@ use crate::shared::record::reading::{
     native_id, null_record, Item, Reading, Record, Role, Settlement,
 };
 
-/// How long a session file must be quiet, in milliseconds, for a turn that
-/// ended to be settled with no evidence of the extension's.
-const QUIET_MS: f64 = 120_000.0;
+/// How long after the last entry a request can follow, in milliseconds, a window with no word
+/// of the extension's is at rest.
+const QUIET_MS: i64 = 120_000;
 
 /// The reader of the session `session`, in the Pi folders `env` names. A
 /// reset a refusal names at a time of day, and in no zone, is read in
@@ -74,15 +82,20 @@ pub fn reader(session: &str, env: &Env, local: &TimeZone) -> Box<dyn Look + Send
             Box::new(move || transcript(&locating, &searched)),
             Box::new(move |_: &Path| Session::new(Arc::clone(&reading), local.clone())),
         ),
+        taken: None,
     })
 }
 
-/// A session's reader: its transcript followed, and the environment that says
-/// where the extension's evidence is.
+/// A session's reader: its transcript followed, the environment that says where the
+/// extension's word is, and the ends of runs it has reported.
 struct Reader {
     session: Arc<str>,
     env: Env,
     transcript: Followed<Session>,
+    /// The launch whose word the reader read, and how many of its runs' ends it has reported. A
+    /// reader made new (the daemon restarted, a reader forgotten unread) starts from the word's
+    /// count.
+    taken: Option<(String, u64)>,
 }
 
 impl Look for Reader {
@@ -94,39 +107,140 @@ impl Look for Reader {
     }
 }
 
+/// What a look says of the turn.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Turn {
+    /// At work: by the extension's word (`said`), or by a file that is behind the word.
+    AtWork { said: bool },
+    /// The word says `busy`: neither at rest nor at work.
+    Busy,
+    /// A run ended, read up to the leaf `upto` (the file's end where none), with Pi's flag.
+    Ended {
+        upto: Option<Arc<str>>,
+        flag: Option<bool>,
+    },
+    /// No word: the file leaves a run open.
+    Open,
+    /// No word: the file ended a run, and is at rest at `settles_at` if nothing moves the clock.
+    Quiet { settles_at: i64 },
+}
+
 impl Reader {
     /// What the session says now, or why it cannot be read.
     fn read(&mut self, options: &Options, now_ms: i64) -> Result<Reading, String> {
-        match self.transcript.read(now_ms).map_err(|stop| stop.reason())? {
-            Some(read) => {
-                let mut reading = read.state.result(&self.env, options, now_ms, &read.file)?;
-                if let Reading::Known(record) = &mut reading {
+        let word = evidence::word(&self.session, &self.env, options)?;
+        let read = self.transcript.read(now_ms).map_err(|stop| stop.reason())?;
+        let Some(word) = word else {
+            return match read {
+                Some(read) => {
+                    let mut record = read.state.unworded(now_ms, &read.file)?;
                     record.lines.lost = read.lost;
+                    Ok(Reading::Known(record))
                 }
-                Ok(reading)
-            }
-            None => {
-                if !evidence::working(&self.session, &self.env, options)? {
-                    return Ok(Reading::missing(&format!("pi session {}", self.session)));
+                None => Ok(Reading::missing(&format!("pi session {}", self.session))),
+            };
+        };
+        let turn = turn(
+            &mut self.taken,
+            &word,
+            read.as_ref().map(|read| &*read.state),
+        );
+        Ok(Reading::Known(match read {
+            Some(read) => {
+                if read.state.records == 0 {
+                    return Err(format!("empty pi session {}", self.session));
                 }
-                let mut working = Record::new();
-                working.in_flight = true;
-                working.settlement = Settlement::InFlight;
-                Ok(Reading::Known(working))
+                let mut record = read.state.reading(&turn);
+                record.lines.lost = read.lost;
+                record
             }
+            // Pi writes a session's file at its first conversation: nothing to read yet.
+            None => Session::nothing(&turn),
+        }))
+    }
+}
+
+/// The turn the word says, the file `session` as read (none where there is no file yet): the
+/// oldest end not yet reported (`taken` counts those reported) first, one a look.
+fn turn(taken_so_far: &mut Option<(String, u64)>, word: &Word, session: Option<&Session>) -> Turn {
+    let holds = |leaf: Option<&String>| match (leaf, session) {
+        (Some(leaf), Some(session)) => session.marks.contains_key(leaf.as_str()),
+        _ => true,
+    };
+    let taken = match &*taken_so_far {
+        Some((launch, taken)) if *launch == word.launch => (*taken).min(word.ended),
+        _ => word.ended,
+    };
+    if word.ended > taken {
+        // The oldest end kept that is not reported; more than the word keeps between two
+        // looks are merged into the oldest kept.
+        if let Some(end) = word.ends.iter().find(|end| end.n > taken) {
+            if !holds(end.leaf.as_ref()) {
+                *taken_so_far = Some((word.launch.clone(), taken));
+                return Turn::AtWork { said: false };
+            }
+            *taken_so_far = Some((word.launch.clone(), end.n));
+            return Turn::Ended {
+                upto: end.leaf.as_deref().map(Arc::from),
+                flag: end.aborted,
+            };
         }
     }
+    *taken_so_far = Some((word.launch.clone(), word.ended));
+    match word.state {
+        State::Working => Turn::AtWork { said: true },
+        State::Busy => Turn::Busy,
+        State::Rest if !holds(word.leaf.as_ref()) => Turn::AtWork { said: false },
+        State::Rest => Turn::Ended {
+            upto: word.leaf.as_deref().map(Arc::from),
+            flag: word
+                .ends
+                .last()
+                .filter(|end| end.n == word.ended)
+                .and_then(|end| end.aborted),
+        },
+    }
+}
+
+/// The last assistant step since the last user message, and what it says of the run's end.
+#[derive(Clone)]
+struct Step {
+    id: Arc<str>,
+    /// Its `stopReason`.
+    stop: Option<Arc<str>>,
+    /// Why it failed, where Pi said (`errorMessage`).
+    failure: Option<String>,
+    /// ConsensFlow's plain description of a stop that returned no whole reply.
+    failure_kind: Option<&'static str>,
+    quota: Option<Arc<Quota>>,
+    /// Pi's own omission names it (a `context_edit` of it with no replacement).
+    omitted: bool,
+}
+
+/// The last message of the conversation's own, which says, without the word, whether Pi has a
+/// request to make.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Tail {
+    Nothing,
+    User,
+    Assistant,
+    ToolResult,
 }
 
 /// What a user message took out of view: the refused turn's, as it stood before it.
 #[derive(Clone)]
 struct Taken {
-    quota: Option<Arc<Quota>>,
-    failed: bool,
-    failure: Option<String>,
-    failure_kind: Option<&'static str>,
-    terminal: Option<Arc<str>>,
-    turn_open: bool,
+    step: Option<Step>,
+    tail: Tail,
+}
+
+/// The session as it stood at one entry: what a look up to that leaf reads.
+#[derive(Clone)]
+struct Mark {
+    items: usize,
+    beside: usize,
+    step: Option<Step>,
+    last_call: Option<Arc<LastCall>>,
 }
 
 /// What a session said so far.
@@ -142,19 +256,14 @@ struct Session {
     reading: usize,
     /// The tool calls made and not yet answered in the turn.
     open_tools: HashSet<Key>,
-    turn_open: bool,
-    /// The last assistant step ended in an abort.
-    aborted: bool,
-    /// The last assistant step, if it ended: it stopped, was aborted or failed.
-    terminal: Option<Arc<str>>,
-    failed: bool,
-    /// Why the latest turn failed, where Pi said (`errorMessage`).
-    failure: Option<String>,
-    /// ConsensFlow's plain description of a stop that returned no whole reply.
-    failure_kind: Option<&'static str>,
+    /// The last assistant step since the last user message.
+    step: Option<Step>,
+    tail: Tail,
+    /// When the last entry a request can follow was written: none where there is none yet, an
+    /// unknown time where that entry says none (the file's time stands for it).
+    clock: Option<Option<i64>>,
     /// The last tool call the session shows, as a line (`calls::describe`).
     last_call: Option<Arc<LastCall>>,
-    quota: Option<Arc<Quota>>,
     /// Every entry's id and its parent's (`parentId`, null for the first), for the path from
     /// the last entry back: the branch Pi is on.
     parents: HashMap<Arc<str>, Option<Arc<str>>>,
@@ -165,6 +274,8 @@ struct Session {
     /// What the latest user message took out of view, with its id: given back where that
     /// message is not on the path to the leaf (the retry belongs to another branch).
     taken: Option<(Arc<str>, Taken)>,
+    /// The session at each entry, by its id.
+    marks: HashMap<Arc<str>, Mark>,
     records: usize,
     keys: Keys,
     /// The items only the history shows (a step's thinking, a compaction), each with the
@@ -184,18 +295,15 @@ impl Session {
             places: Vec::new(),
             reading: 0,
             open_tools: HashSet::new(),
-            turn_open: false,
-            aborted: false,
-            terminal: None,
-            failed: false,
-            failure: None,
-            failure_kind: None,
+            step: None,
+            tail: Tail::Nothing,
+            clock: None,
             last_call: None,
-            quota: None,
             parents: HashMap::new(),
             leaf: None,
             linear: false,
             taken: None,
+            marks: HashMap::new(),
             records: 0,
             keys: Keys::default(),
             beside: Vec::new(),
@@ -213,12 +321,8 @@ impl Session {
         }
         let mut back = self.clone();
         back.taken = None;
-        back.quota.clone_from(&taken.quota);
-        back.failed = taken.failed;
-        back.failure.clone_from(&taken.failure);
-        back.failure_kind = taken.failure_kind;
-        back.terminal.clone_from(&taken.terminal);
-        back.turn_open = taken.turn_open;
+        back.step.clone_from(&taken.step);
+        back.tail = taken.tail;
         Some(back)
     }
 
@@ -314,18 +418,12 @@ impl Session {
                 self.taken = Some((
                     Arc::clone(&id),
                     Taken {
-                        quota: self.quota.take(),
-                        failed: self.failed,
-                        failure: self.failure.take(),
-                        failure_kind: self.failure_kind.take(),
-                        terminal: self.terminal.clone(),
-                        turn_open: self.turn_open,
+                        step: self.step.take(),
+                        tail: self.tail,
                     },
                 ));
-                self.failed = false;
                 self.push(id, Role::User, text, true, at);
-                self.turn_open = true;
-                self.terminal = None;
+                self.tail = Tail::User;
             }
             Some("toolResult") => {
                 let call = self.keys.of(field("toolCallId"));
@@ -337,6 +435,7 @@ impl Session {
                 if let Some(result) = self.items.last_mut() {
                     result.detail = Some(Arc::new(detail));
                 }
+                self.tail = Tail::ToolResult;
             }
             Some("assistant") => self.assistant(id, &field, at)?,
             _ => {}
@@ -344,8 +443,9 @@ impl Session {
         Ok(())
     }
 
-    /// An assistant's step, with the fields of its message: its tool calls
-    /// open, and how it ended says what the turn is.
+    /// An assistant's step, with the fields of its message: its tool calls open, unless it
+    /// ended `aborted` or `error` (Pi's loop returns there without running them), and how it
+    /// ended.
     fn assistant<'a>(
         &mut self,
         id: Arc<str>,
@@ -353,17 +453,25 @@ impl Session {
         at: Value,
     ) -> Result<(), Stop> {
         let made = millis(&at);
+        let stop = field("stopReason").and_then(Value::as_str);
+        let abandoned = matches!(stop, Some("aborted" | "error"));
         if let Some(Value::Array(blocks)) = field("content") {
             for (place, block) in blocks.iter().enumerate() {
                 match block.get("type").and_then(Value::as_str) {
                     Some("toolCall") => {
+                        let call = self.keys.of(block.get("id"));
+                        if call.truthy() {
+                            self.calls.insert(call.clone(), (called(block), made));
+                        }
+                        // A call of a step that ended in an abort or an error never ran.
+                        if abandoned {
+                            continue;
+                        }
                         let name = block.get("name").and_then(Value::as_str);
                         if let Some(line) = describe(name, block.get("arguments")) {
                             self.last_call = Some(line);
                         }
-                        let call = self.keys.of(block.get("id"));
                         if call.truthy() {
-                            self.calls.insert(call.clone(), (called(block), made));
                             self.open_tools.insert(call);
                         }
                     }
@@ -389,7 +497,6 @@ impl Session {
                 }
             }
         }
-        let stop = field("stopReason").and_then(Value::as_str);
         self.push(
             Arc::clone(&id),
             Role::Assistant,
@@ -400,30 +507,23 @@ impl Session {
         // A run that failed or was aborted before the model's first token: the step
         // is Pi's own (`handleRunFailure`, Pi 1.4.0), or a provider's abort of a reply
         // that had not begun, and no turn got through.
-        if matches!(stop, Some("aborted" | "error")) && !the_model_wrote(field("content")) {
+        if abandoned && !the_model_wrote(field("content")) {
             if let Some(step) = self.items.last_mut() {
                 step.synthetic = true;
             }
         }
-        self.quota = None;
         self.taken = None;
-        self.turn_open = true;
-        let cut_tool_calls = stop == Some("length")
-            && matches!(field("content"), Some(Value::Array(blocks))
-                if blocks.iter().any(|block| block.get("type").and_then(Value::as_str) == Some("toolCall")));
-        self.aborted = false;
+        self.tail = Tail::Assistant;
+        let mut step = Step {
+            id,
+            stop: stop.map(Arc::from),
+            failure: None,
+            failure_kind: None,
+            quota: None,
+            omitted: false,
+        };
         match stop {
-            // An abort is a turn over, not a failed one.
-            Some("stop" | "aborted") => {
-                self.aborted = stop == Some("aborted");
-                self.failed = false;
-                self.failure = None;
-                self.failure_kind = None;
-                self.terminal = Some(id);
-            }
             Some("error") => {
-                self.failed = true;
-                self.failure_kind = None;
                 // `String(message.errorMessage ?? 'provider error')`.
                 let failure = match field("errorMessage") {
                     None | Some(Value::Null) => "provider error".to_owned(),
@@ -432,7 +532,7 @@ impl Session {
                         .into_owned(),
                 };
                 let said = !matches!(field("errorMessage"), None | Some(Value::Null));
-                self.failure = said.then(|| failure.clone());
+                step.failure = said.then(|| failure.clone());
                 // An account refused for its billing or its login has no reset to wait for
                 // (MUS-23); a limit that resets is the quota.
                 let refusal = account_refusal(&failure, None);
@@ -451,35 +551,38 @@ impl Session {
                         None => busy_quota(at_ms, &failure),
                     }
                     .map_err(Stop::Failed)?;
-                    self.quota = Some(Arc::new(quota));
+                    step.quota = Some(Arc::new(quota));
                 }
-                self.terminal = Some(id);
             }
-            // Pi 1.5.0 rejects each cut tool call and continues the agent loop;
-            // that message is not the end of the agent's work.
-            Some("length") if cut_tool_calls => {
-                self.failed = false;
-                self.failure = None;
-                self.failure_kind = None;
-                self.terminal = None;
-            }
-            Some(reason @ ("length" | "deferred")) => {
-                self.failed = true;
-                self.failure = None;
-                self.failure_kind = Some(match reason {
-                    "length" => "the member's reply was cut at the model's output limit; nothing was taken as its result",
-                    _ => "the provider deferred the member's reply; no result was returned",
-                });
-                self.terminal = Some(id);
-            }
-            Some("toolUse") if self.failure_kind.is_some() => {
-                self.failed = false;
-                self.failure_kind = None;
-                self.terminal = None;
-            }
-            _ => self.terminal = None,
+            Some("length") => step.failure_kind = Some("the member's reply was cut at the model's output limit; nothing was taken as its result"),
+            Some("deferred") => step.failure_kind = Some("the provider deferred the member's reply; no result was returned"),
+            _ => {}
         }
+        self.step = Some(step);
         Ok(())
+    }
+
+    /// A `context_edit`: Pi's own omission of a step from the model's context (no replacement)
+    /// leaves that step out of the answer's words, and names it as the one a cancelled retry
+    /// was about to try again. Any other edit says nothing of a run.
+    fn context_edit(&mut self, record: &Value) {
+        if !matches!(record.get("replacement"), None | Some(Value::Null)) {
+            return;
+        }
+        let Some(target) = record.get("targetId").and_then(Value::as_str) else {
+            return;
+        };
+        if let Some(item) = self
+            .items
+            .iter_mut()
+            .rev()
+            .find(|item| &*item.id == target && item.role == Role::Assistant)
+        {
+            item.synthetic = true;
+        }
+        if let Some(step) = self.step.as_mut().filter(|step| &*step.id == target) {
+            step.omitted = true;
+        }
     }
 
     /// What the history draws of a tool's result: the call's name and header, how it
@@ -515,62 +618,121 @@ impl Session {
         detail
     }
 
-    /// The answer, with the extension's evidence and the session file's quiet
-    /// as they are now. Fails for a session of no records, for evidence that
-    /// cannot be read, and for a file that cannot be looked at.
-    fn result(
-        &self,
-        env: &Env,
-        options: &Options,
-        now_ms: i64,
-        file: &Path,
-    ) -> Result<Reading, String> {
+    /// The reading of the turn `turn`, read up to the leaf it names (the file's end where none, or
+    /// where the file has no such entry).
+    fn reading(&self, turn: &Turn) -> Record {
+        let upto = match turn {
+            Turn::Ended {
+                upto: Some(leaf), ..
+            } => self.marks.get(leaf),
+            _ => None,
+        };
+        let (items, beside, step, last_call) = match upto {
+            Some(mark) => (mark.items, mark.beside, mark.step.as_ref(), &mark.last_call),
+            None => (
+                self.items.len(),
+                self.beside.len(),
+                self.step.as_ref(),
+                &self.last_call,
+            ),
+        };
+        let mut record = Record::new();
+        record.items = self.items[..items].to_vec();
+        record.lines.places = Some(self.places[..items].to_vec());
+        record.beside = self.beside[..beside].to_vec();
+        record.last_call.clone_from(last_call);
+        record.quota = step.and_then(|step| step.quota.clone());
+        of_turn(&mut record, turn, step);
+        record
+    }
+
+    /// The reading of a session with no file yet.
+    fn nothing(turn: &Turn) -> Record {
+        let mut record = Record::new();
+        of_turn(&mut record, turn, None);
+        record.aborted = false;
+        record
+    }
+
+    /// The reading with no word of the extension's, at `now_ms`: the file decides by time
+    /// alone (`file`'s own time stands for an entry that says none).
+    fn unworded(&self, now_ms: i64, file: &Path) -> Result<Record, String> {
         if self.records == 0 {
             return Err(format!("empty pi session {}", self.session));
         }
         if let Some(given_back) = self.given_back() {
-            return given_back.result(env, options, now_ms, file);
+            return given_back.unworded(now_ms, file);
         }
-        let frontier = evidence::frontier(&self.session, env, options)?;
-        let has_native_boundary = self
-            .terminal
-            .as_deref()
-            .is_some_and(|terminal| frontier.as_deref() == Some(terminal));
-        let written = stat(file)
-            .map_err(|error| format!("{}: {error}", file.display()))?
-            .mtime_ms;
-        // A clock reading is within the 53 bits of a double for millions of years.
-        #[allow(clippy::cast_precision_loss)]
-        let quiet = now_ms as f64 - written >= QUIET_MS;
-        let open = !self.open_tools.is_empty();
-        let can_settle = self.terminal.is_some() && quiet && !open;
-        let native_settled = has_native_boundary && !open;
-        let in_flight = open
-            || match self.terminal {
-                Some(_) => !(quiet || native_settled),
-                None => self.turn_open,
-            };
-        let mut record = Record::new();
-        record.items = self.items.clone();
-        record.lines.places = Some(self.places.clone());
-        record.beside = self.beside.clone();
-        record.in_flight = in_flight;
-        // Pi may retry a provider error or continue a cut/deferred message itself.
-        // Fail only when its settlement evidence or the quiet spell says it ended.
-        record.failed = self.failed && (native_settled || can_settle);
-        record.failure = self.failure.clone().filter(|said| !said.trim().is_empty());
-        record.failure_kind = self.failure_kind.map(str::to_owned);
-        record.aborted = self.aborted;
-        record.last_call.clone_from(&self.last_call);
-        record.quota = self.quota.clone();
-        record.settlement = if native_settled || can_settle {
-            Settlement::Settled
-        } else if in_flight {
-            Settlement::InFlight
-        } else {
-            Settlement::Unknown
+        let open =
+            !self.open_tools.is_empty() || matches!(self.tail, Tail::User | Tail::ToolResult);
+        let ended = Turn::Ended {
+            upto: None,
+            flag: None,
         };
-        Ok(Reading::Known(record))
+        let turn = if open {
+            Turn::Open
+        } else {
+            let since = match self.clock {
+                None => None,
+                Some(Some(at)) => Some(at),
+                // A clock reading is within the 53 bits of a double for millions of years.
+                #[allow(clippy::cast_possible_truncation)]
+                Some(None) => Some(
+                    stat(file)
+                        .map_err(|error| format!("{}: {error}", file.display()))?
+                        .mtime_ms as i64,
+                ),
+            };
+            match since {
+                Some(since) if now_ms < since + QUIET_MS => Turn::Quiet {
+                    settles_at: since + QUIET_MS,
+                },
+                _ => ended,
+            }
+        };
+        Ok(self.reading(&turn))
+    }
+}
+
+/// The record's word of the turn, and how the run ended where it ended (`step`: the last
+/// assistant step at or before the run's leaf, since the last user message).
+fn of_turn(record: &mut Record, turn: &Turn, step: Option<&Step>) {
+    match turn {
+        Turn::AtWork { said } => {
+            record.in_flight = true;
+            record.settlement = Settlement::InFlight;
+            record.lines.said_at_work = *said;
+        }
+        Turn::Busy => {
+            record.settlement = Settlement::Unknown;
+            record.lines.busy = true;
+        }
+        Turn::Open => {
+            record.in_flight = true;
+            record.settlement = Settlement::InFlight;
+        }
+        Turn::Quiet { settles_at } => {
+            record.in_flight = true;
+            record.settlement = Settlement::InFlight;
+            record.lines.settles_at = Some(*settles_at);
+        }
+        Turn::Ended { flag, .. } => {
+            record.settlement = Settlement::Settled;
+            match step.map(|step| (step, step.stop.as_deref())) {
+                Some((_, Some("stop"))) => {}
+                Some((step, Some("length" | "deferred"))) => {
+                    record.failed = true;
+                    record.failure_kind = step.failure_kind.map(str::to_owned);
+                }
+                Some((step, Some("error"))) if *flag != Some(true) && !step.omitted => {
+                    record.failed = true;
+                    record.failure = step.failure.clone().filter(|said| !said.trim().is_empty());
+                }
+                // An abort, a cancelled retry, a step that called a tool, a tool's result
+                // or no step: the run ended with no answer, interrupted.
+                _ => record.aborted = !record.items.is_empty(),
+            }
+        }
     }
 }
 
@@ -582,38 +744,66 @@ impl Parser for Session {
             return Err(Stop::Failed(null_record(index)));
         }
         let seq = Value::from(index);
-        if let Some(entry) = record
+        let mut entry = None;
+        if let Some(id) = record
             .get("id")
             .and_then(Value::as_str)
             .filter(|_| record.get("type").and_then(Value::as_str) != Some("session"))
         {
-            let entry: Arc<str> = Arc::from(entry);
+            let id: Arc<str> = Arc::from(id);
             match record.get("parentId") {
                 None => self.linear = true,
                 Some(parent) => {
                     let parent = parent.as_str().map(Arc::from);
-                    self.parents.insert(Arc::clone(&entry), parent);
+                    self.parents.insert(Arc::clone(&id), parent);
                 }
             }
-            self.leaf = Some(entry);
+            self.leaf = Some(Arc::clone(&id));
+            entry = Some(id);
         }
         // `record.message ?? {}`: none and null hold no field.
         let message = record.get("message").filter(|message| !message.is_null());
-        let at = [
+        // The entry's own time, for the quiet without the word: its own `timestamp` first.
+        let own = [
             record.get("timestamp"),
             message.and_then(|message| message.get("timestamp")),
         ]
         .into_iter()
         .flatten()
-        .find(|at| !at.is_null())
-        .unwrap_or(&seq)
-        .clone();
-        match record.get("type").and_then(Value::as_str) {
-            Some("custom_message") => self.custom(&record, at, &seq),
-            Some("message") => self.message(&record, message, at, &seq),
-            Some("compaction") => self.compaction(&record, at, &seq),
-            _ => Ok(()),
+        .find(|at| !at.is_null());
+        let at = own.unwrap_or(&seq).clone();
+        let asks = match record.get("type").and_then(Value::as_str) {
+            Some("message") => matches!(
+                message
+                    .and_then(|message| message.get("role"))
+                    .and_then(Value::as_str),
+                Some("user" | "assistant" | "toolResult" | "system" | "bashExecution")
+            ),
+            Some("custom_message" | "compaction" | "branch_summary" | "context_edit") => true,
+            _ => false,
+        };
+        if asks {
+            self.clock = Some(own.and_then(millis));
         }
+        match record.get("type").and_then(Value::as_str) {
+            Some("custom_message") => self.custom(&record, at, &seq)?,
+            Some("message") => self.message(&record, message, at, &seq)?,
+            Some("compaction") => self.compaction(&record, at, &seq)?,
+            Some("context_edit") => self.context_edit(&record),
+            _ => {}
+        }
+        if let Some(entry) = entry {
+            self.marks.insert(
+                entry,
+                Mark {
+                    items: self.items.len(),
+                    beside: self.beside.len(),
+                    step: self.step.clone(),
+                    last_call: self.last_call.clone(),
+                },
+            );
+        }
+        Ok(())
     }
 }
 

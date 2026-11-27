@@ -1,0 +1,3 @@
+{"type":"session","version":3,"id":"hazy-ridge","timestamp":"2026-11-26T10:00:00.000Z"}
+{"type":"message","id":"u1","parentId":null,"timestamp":"2026-11-26T10:00:01.000Z","message":{"role":"user","content":[{"type":"text","text":"Run the long script"}],"timestamp":1795000001000}}
+{"type":"message","id":"a1","parentId":"u1","timestamp":"2026-11-26T10:00:05.000Z","message":{"role":"assistant","content":[{"type":"text","text":"I will start by reading the"}],"api":"made-api","provider":"made-provider","model":"made-model","usage":{"input":120,"output":18892,"cacheRead":0,"cacheWrite":0,"totalTokens":19012},"stopReason":"aborted","timestamp":1795000000000,"errorMessage":"Request was aborted"}}

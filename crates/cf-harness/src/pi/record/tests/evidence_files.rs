@@ -1,11 +1,10 @@
-//! The files the extension writes beside a session: when they settle a turn
-//! or say one is in flight, which launch they are read for, and what keeps
-//! a file from being read at all.
+//! The word the extension writes beside a session (`<launch>.state.json`): which launch and
+//! session it is read for, what is no word, and what keeps it from being read at all.
 
 use super::*;
 
-/// The folder of the extension's evidence in a stage's home.
-fn folder(stage: &Stage) -> PathBuf {
+/// The folder of the extension's word in a stage's home.
+pub(super) fn folder(stage: &Stage) -> PathBuf {
     stage.home.path().join("settled")
 }
 
@@ -21,7 +20,7 @@ fn options_of(directory: &Path, launch: &str) -> Options {
 }
 
 /// Options naming the stage's folder and the launch `launch`.
-fn options(stage: &Stage, launch: &str) -> Options {
+pub(super) fn options(stage: &Stage, launch: &str) -> Options {
     options_of(&folder(stage), launch)
 }
 
@@ -33,13 +32,38 @@ fn put_in(directory: &Path, name: &str, contents: impl AsRef<[u8]>) {
 }
 
 /// The file `name` of the stage's folder, holding `contents`.
-fn put(stage: &Stage, name: &str, contents: impl AsRef<[u8]>) {
+pub(super) fn put(stage: &Stage, name: &str, contents: impl AsRef<[u8]>) {
     put_in(&folder(stage), name, contents);
 }
 
-/// What the extension writes when Pi settles on the leaf entry `frontier`.
-fn settled(launch: &str, session: &str, frontier: &Value) -> String {
-    json!({ "launchId": launch, "sessionId": session, "frontier": { "id": frontier } }).to_string()
+/// The word the extension writes: `state` at the leaf `leaf`, with `ends` ended runs, each
+/// `(n, leaf, aborted)`, the last of them the count of runs ended.
+pub(super) fn word(
+    launch: &str,
+    session: &str,
+    state: &str,
+    leaf: &Value,
+    ends: &[(u64, Value, Value)],
+) -> String {
+    let ended = ends.last().map_or(0, |(n, _, _)| *n);
+    json!({
+        "launchId": launch, "sessionId": session, "state": state, "leaf": leaf,
+        "begun": ended, "ended": ended,
+        "ends": ends.iter().map(|(n, leaf, aborted)| json!({ "n": n, "leaf": leaf, "aborted": aborted })).collect::<Vec<_>>(),
+        "n": 1, "at": 1
+    })
+    .to_string()
+}
+
+/// The word that Pi rests at `leaf` after one run ended there, Pi's flag false.
+pub(super) fn rest(launch: &str, leaf: &str) -> String {
+    word(
+        launch,
+        SESSION,
+        "rest",
+        &json!(leaf),
+        &[(1, json!(leaf), json!(false))],
+    )
 }
 
 /// A session whose last step stopped, as `a1`.
@@ -53,88 +77,42 @@ fn is_settled(stage: &mut Stage, after: i64, options: &Options) -> bool {
 }
 
 #[test]
-fn evidence_that_names_the_last_step_of_this_launch_and_session_settles_at_once() {
+fn a_word_of_this_launch_and_session_decides_and_any_other_is_no_word() {
     let mut stage = Stage::with(&stopped());
     let named = options(&stage, "launch-1");
-    assert!(!is_settled(&mut stage, 1_000, &named), "no evidence yet");
-    put(
-        &stage,
-        "launch-1.json",
-        settled("launch-1", SESSION, &json!("a1")),
-    );
+    assert!(!is_settled(&mut stage, 1_000, &named), "no word: the quiet");
+    put(&stage, "launch-1.state.json", rest("launch-1", "a1"));
     assert!(is_settled(&mut stage, 1_000, &named));
-    assert!(!known(&stage.look(1_000, &named)).in_flight);
-    // Evidence of another leaf, session or launch, or that is not of a leaf, waits for the quiet.
-    let frontier = json!("a1");
-    for evidence in [
-        settled("launch-1", SESSION, &json!("a0")),
-        settled("launch-1", SESSION, &json!("")),
-        settled("launch-1", SESSION, &json!(5)),
-        settled("launch-1", SESSION, &json!(null)),
-        settled("launch-1", "another-session", &frontier),
-        settled("launch-2", SESSION, &frontier),
-        json!({ "launchId": "launch-1", "sessionId": SESSION }).to_string(),
-        json!({ "launchId": "launch-1", "sessionId": SESSION, "frontier": "a1" }).to_string(),
-        json!({ "launchId": 1, "sessionId": SESSION, "frontier": { "id": "a1" } }).to_string(),
-        json!(["a1"]).to_string(),
-        json!("a1").to_string(),
+    // A word of another session or launch, or one that says no state the extension writes or
+    // no count of its runs, is no word: the file's quiet decides.
+    for word in [
+        word("launch-1", "another-session", "rest", &json!("a1"), &[]),
+        word("launch-2", SESSION, "rest", &json!("a1"), &[]),
+        json!({ "launchId": "launch-1", "sessionId": SESSION, "state": "idle", "ended": 0 })
+            .to_string(),
+        json!({ "launchId": "launch-1", "sessionId": SESSION, "state": "rest" }).to_string(),
+        json!({ "launchId": "launch-1", "sessionId": SESSION, "state": "rest", "ended": -1 })
+            .to_string(),
+        json!({ "launchId": 1, "sessionId": SESSION, "state": "rest", "ended": 0 }).to_string(),
+        json!(["rest"]).to_string(),
         json!(null).to_string(),
     ] {
-        put(&stage, "launch-1.json", &evidence);
-        assert!(!is_settled(&mut stage, 1_000, &named), "{evidence}");
+        put(&stage, "launch-1.state.json", &word);
+        let record = known(&stage.look(1_000, &named));
+        assert!(
+            record.settlement != Settlement::Settled,
+            "{word}: {record:?}"
+        );
+        assert_eq!(
+            record.lines.settles_at,
+            Some(stage.written + 120_000),
+            "{word}"
+        );
+        assert!(
+            stage.at(121_000).settlement == Settlement::Settled,
+            "{word}"
+        );
     }
-}
-
-#[test]
-fn evidence_settles_what_an_error_ended_and_never_what_a_call_holds_open() {
-    // The turn ended in a failure the extension saw Pi settle on.
-    let mut stage = Stage::with(&[header(), user("u1", "go"), assistant("a1", "error", "down")]);
-    let named = options(&stage, "launch-1");
-    put(
-        &stage,
-        "launch-1.json",
-        settled("launch-1", SESSION, &json!("a1")),
-    );
-    let record = known(&stage.look(0, &named));
-    assert!(record.failed && !record.in_flight);
-    assert_eq!(record.settlement, Settlement::Settled);
-    // The step stopped, and a call of the turn is still open.
-    let mut stage = Stage::with(&[
-        header(),
-        user("u1", "go"),
-        calling("a0", &json!("c1")),
-        assistant("a1", "stop", "done"),
-    ]);
-    let named = options(&stage, "launch-1");
-    put(
-        &stage,
-        "launch-1.json",
-        settled("launch-1", SESSION, &json!("a1")),
-    );
-    let record = known(&stage.look(0, &named));
-    assert!(record.in_flight);
-    assert_eq!(record.settlement, Settlement::InFlight);
-}
-
-#[test]
-fn evidence_of_a_cut_reply_ends_the_failed_turn_without_waiting_for_quiet() {
-    let mut stage = Stage::with(&[
-        header(),
-        user("u1", "go"),
-        assistant("a1", "length", "partial"),
-    ]);
-    let named = options(&stage, "launch-1");
-    let before = known(&stage.look(0, &named));
-    assert!(before.in_flight && !before.failed);
-    put(
-        &stage,
-        "launch-1.json",
-        settled("launch-1", SESSION, &json!("a1")),
-    );
-    let ended = known(&stage.look(0, &named));
-    assert!(!ended.in_flight && ended.failed);
-    assert_eq!(ended.settlement, Settlement::Settled);
-    assert_eq!(ended.failure_kind.as_deref(), Some("the member's reply was cut at the model's output limit; nothing was taken as its result"));
 }
 
 #[test]
@@ -149,8 +127,8 @@ fn the_launch_is_what_the_options_say_and_the_environment_says_what_they_leave_n
     for launch in ["launch-env", "launch-opt"] {
         put_in(
             evidence.path(),
-            &format!("{launch}.json"),
-            settled(launch, SESSION, &json!("a1")),
+            &format!("{launch}.state.json"),
+            rest(launch, "a1"),
         );
     }
     let mut settles = |directory: Option<&str>, launch: Option<&str>| {
@@ -179,18 +157,16 @@ fn the_launch_is_what_the_options_say_and_the_environment_says_what_they_leave_n
 #[test]
 fn a_launch_that_is_no_one_path_segment_reads_no_file() {
     let mut stage = Stage::with(&stopped());
-    let evidence = |launch: &str| settled(launch, SESSION, &json!("a1"));
-    // Each name, and where it would lead if it were read: a file that
-    // settles the turn waits there.
+    // Each name, and where it would lead if it were read: a word at rest waits there.
     for (launch, file) in [
-        ("../x", "../x.json"),
-        ("./x", "x.json"),
-        ("a b", "a b.json"),
-        ("a/b", "a/b.json"),
-        ("", ".json"),
-        ("\u{E9}", "\u{E9}.json"),
+        ("../x", "../x.state.json"),
+        ("./x", "x.state.json"),
+        ("a b", "a b.state.json"),
+        ("a/b", "a/b.state.json"),
+        ("", ".state.json"),
+        ("\u{E9}", "\u{E9}.state.json"),
     ] {
-        put(&stage, file, evidence(launch));
+        put(&stage, file, rest(launch, "a1"));
         let named = options(&stage, launch);
         assert!(!is_settled(&mut stage, 1_000, &named), "{launch:?}");
     }
@@ -201,40 +177,42 @@ fn a_launch_that_is_no_one_path_segment_reads_no_file() {
     }
     // A name of letters, digits, dots, underscores and hyphens is read.
     for launch in ["x", "A.b_c-d", "..", "0"] {
-        put(&stage, &format!("{launch}.json"), evidence(launch));
+        put(&stage, &format!("{launch}.state.json"), rest(launch, "a1"));
         let named = options(&stage, launch);
         assert!(is_settled(&mut stage, 1_000, &named), "{launch:?}");
     }
 }
 
 #[test]
-fn evidence_that_is_no_json_is_none_and_evidence_that_cannot_be_read_fails_the_look() {
+fn a_word_that_is_no_json_is_none_and_one_that_cannot_be_read_fails_the_look() {
     let mut stage = Stage::with(&stopped());
     let named = options(&stage, "launch-1");
     for contents in ["", "not json", "{\"launchId\":", "[1,"] {
-        put(&stage, "launch-1.json", contents);
+        put(&stage, "launch-1.state.json", contents);
         assert!(!is_settled(&mut stage, 1_000, &named), "{contents:?}");
     }
     // Bytes that are no UTF-8 read as U+FFFD, as Node decoded the file.
-    let mut bytes =
-        br#"{"launchId":"launch-1","sessionId":"hazy-ridge","frontier":{"id":"a1"},"note":"#
-            .to_vec();
+    let mut bytes = br#"{"launchId":"launch-1","sessionId":"hazy-ridge","state":"rest","leaf":"a1","ended":0,"note":"#
+        .to_vec();
     bytes.extend_from_slice(b"\"\xFF\"}");
-    put(&stage, "launch-1.json", bytes);
+    put(&stage, "launch-1.state.json", bytes);
     assert!(is_settled(&mut stage, 1_000, &named));
     // A folder where the file should be is no file: neither missing nor JSON.
-    fs::remove_file(folder(&stage).join("launch-1.json")).unwrap();
-    fs::create_dir(folder(&stage).join("launch-1.json")).unwrap();
+    fs::remove_file(folder(&stage).join("launch-1.state.json")).unwrap();
+    fs::create_dir(folder(&stage).join("launch-1.state.json")).unwrap();
     let failed = stage.look(1_000, &named);
     assert!(reason(&failed).starts_with("unreadable: "), "{failed:?}");
-    assert!(reason(&failed).contains("launch-1.json"), "{failed:?}");
+    assert!(
+        reason(&failed).contains("launch-1.state.json"),
+        "{failed:?}"
+    );
 }
 
 #[test]
 #[cfg(unix)]
-fn a_folder_of_evidence_that_is_a_file_fails_the_look() {
-    // Node: ENOTDIR, which is not the ENOENT that is no evidence. Windows says
-    // the path is not found, as libuv's ENOENT.
+fn a_folder_of_the_word_that_is_a_file_fails_the_look() {
+    // Node: ENOTDIR, which is not the ENOENT that is no word. Windows says the path is not
+    // found, as libuv's ENOENT.
     let mut stage = Stage::with(&stopped());
     fs::write(folder(&stage), "").unwrap();
     let named = options(&stage, "launch-1");
@@ -242,64 +220,79 @@ fn a_folder_of_evidence_that_is_a_file_fails_the_look() {
 }
 
 #[test]
-fn a_working_marker_says_a_turn_whose_file_is_not_there_yet_is_in_flight() {
+fn with_no_file_yet_the_word_says_the_turn_and_no_word_says_no_session() {
     let mut stage = Stage::new();
     let named = options(&stage, "launch-1");
-    // No marker: no session, as ever.
     assert_eq!(
         reason(&stage.look(0, &named)),
         "unreadable: no pi session hazy-ridge"
     );
-    let marker = |launch: &str, session: &str| {
-        json!({ "launchId": launch, "sessionId": session, "startedAt": 1 }).to_string()
-    };
-    put(&stage, "launch-1.working.json", marker("launch-1", SESSION));
+    // A first request that hangs: Pi has written no file, the word says a run is on.
+    put(
+        &stage,
+        "launch-1.state.json",
+        word("launch-1", SESSION, "working", &json!("m1"), &[]),
+    );
     let record = known(&stage.look(0, &named));
     assert!(record.items.is_empty() && record.in_flight && !record.failed && !record.asking);
-    assert!(record.quota.is_none());
     assert_eq!(record.settlement, Settlement::InFlight);
-    // A marker of another session or launch, that holds no text for either, or that is no JSON.
-    for contents in [
-        marker("launch-1", "another-session"),
-        marker("launch-2", SESSION),
-        json!({ "launchId": 1, "sessionId": SESSION }).to_string(),
-        json!({ "sessionId": SESSION }).to_string(),
-        json!(null).to_string(),
-        "not json".to_owned(),
-        String::new(),
-    ] {
-        put(&stage, "launch-1.working.json", &contents);
-        assert_eq!(
-            reason(&stage.look(0, &named)),
-            "unreadable: no pi session hazy-ridge",
-            "{contents}"
-        );
-    }
-    // A marker that cannot be read fails the look: it is not the sentence of no session.
-    fs::remove_file(folder(&stage).join("launch-1.working.json")).unwrap();
-    fs::create_dir(folder(&stage).join("launch-1.working.json")).unwrap();
+    // A new session at its empty prompt: Pi keeps its first leaf in memory and writes no file
+    // until a conversation (D5). At rest, with nothing to read.
+    put(
+        &stage,
+        "launch-1.state.json",
+        word("launch-1", SESSION, "rest", &json!("m1"), &[]),
+    );
+    let record = known(&stage.look(0, &named));
+    assert!(record.items.is_empty() && !record.in_flight && !record.aborted && !record.neither());
+    assert_eq!(record.settlement, Settlement::Settled);
+    // Busy: neither.
+    put(
+        &stage,
+        "launch-1.state.json",
+        word("launch-1", SESSION, "busy", &json!("m1"), &[]),
+    );
+    assert!(known(&stage.look(0, &named)).neither());
+    // A word that cannot be read fails the look: it is not the sentence of no session.
+    fs::remove_file(folder(&stage).join("launch-1.state.json")).unwrap();
+    fs::create_dir(folder(&stage).join("launch-1.state.json")).unwrap();
     let failed = stage.look(0, &named);
     assert!(reason(&failed).starts_with("unreadable: "));
     assert!(!reason(&failed).contains("no pi session"), "{failed:?}");
 }
 
 #[test]
-fn a_working_marker_is_read_only_while_there_is_no_session_file() {
+fn the_files_an_older_extension_wrote_say_nothing() {
+    // `<launch>.json` (its settlement) and `<launch>.working.json` (its working marker): a window
+    // an older ConsensFlow opened is read by the file's quiet alone.
     let mut stage = Stage::with(&stopped());
     let named = options(&stage, "launch-1");
-    // Even a marker that cannot be read: it is never looked at.
-    fs::create_dir_all(folder(&stage).join("launch-1.working.json")).unwrap();
-    assert_eq!(known(&stage.look(0, &named)).items.len(), 2);
-    // An unsafe launch id reads no marker either.
-    let mut stage = Stage::new();
-    let unsafe_launch = options(&stage, "../x");
     put(
         &stage,
-        "../x.working.json",
-        json!({ "launchId": "../x", "sessionId": SESSION }).to_string(),
+        "launch-1.json",
+        json!({ "launchId": "launch-1", "sessionId": SESSION, "frontier": { "id": "a1" } })
+            .to_string(),
+    );
+    put(
+        &stage,
+        "launch-1.working.json",
+        json!({ "launchId": "launch-1", "sessionId": SESSION, "startedAt": 1 }).to_string(),
+    );
+    let record = known(&stage.look(1_000, &named));
+    assert!(
+        record.in_flight && record.lines.settles_at.is_some(),
+        "{record:?}"
+    );
+    assert!(is_settled(&mut stage, 121_000, &named));
+    let mut fresh = Stage::new();
+    let named = options(&fresh, "launch-1");
+    put(
+        &fresh,
+        "launch-1.working.json",
+        json!({ "launchId": "launch-1", "sessionId": SESSION, "startedAt": 1 }).to_string(),
     );
     assert_eq!(
-        reason(&stage.look(0, &unsafe_launch)),
+        reason(&fresh.look(0, &named)),
         "unreadable: no pi session hazy-ridge"
     );
 }

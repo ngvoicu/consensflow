@@ -69,37 +69,52 @@ function frontierOf(ctx) {
   return typeof value === 'string' && value.length > 0 ? { id: value } : null
 }
 
+/** How many ended runs the word keeps for a reader that has not taken them yet. */
+const ENDS_KEPT = 8
+/**
+ * How long a prompt submitted with no run begun is held in hand: Pi tells no extension that
+ * another extension's `input` handler handled it, or that it was refused for its model or login.
+ */
+const IN_HAND_MS = 30_000
+/** On a Pi that marks a run only at its first request, how many idle polls in a row end one. */
+const LATE_IDLE_POLLS = 3
+
 /**
  * Install the delivery extension against Pi's ExtensionAPI.
  *
- * The fake in tests follows Pi 0.85.1's installed types: `ExtensionAPI.on`
- * exposes `agent_start`, `agent_settled`, `turn_start`, and `message_start`
- * (dist/core/extensions/types.d.ts:924-931). `AgentSettledEvent` is the
- * post-retry/compaction/continuation boundary (line 561); `TurnStartEvent`
- * fires for each turn (line 580); and `MessageStartEvent` carries the message
- * entering the run (lines 593-595). The context's read-only session manager
- * exposes `getSessionId()` and `getLeafId()` (dist/core/session-manager.d.ts:
- * 140, 240-241), so the evidence is tied to Pi's native session frontier.
+ * **The word** (`settled/<launchId>.state.json`, written under another name and moved into place):
+ * `{launchId, sessionId, state, leaf, begun, ended, ends, n, at}`, Pi's own run state as this
+ * extension follows it (the brain's `architecture/pi-turn-state.md`). `state` is `working` (a run
+ * is on), `busy` (no run, and Pi is not free: it compacts, sums up a branch, or holds a prompt
+ * someone submitted) or `rest`. `leaf` is `getLeafId()` at the write. `begun` and `ended` count
+ * this launch's runs; `ends` keeps the last {@link ENDS_KEPT} ended runs, each `{n, leaf,
+ * aborted}`: its count, its leaf and Pi's flag at its `agent_settled` (null where Pi gave none,
+ * or the run was dropped). `n` counts the writes, `at` is the time of this one.
  *
- * `settled/<launchId>.json` is app-owned evidence with `{launchId, sessionId,
- * frontier: {id}, settledAt}`. It is written at `agent_settled` or when an idle
- * TUI restores a completed assistant leaf, and removed at new work.
- * `settled/<launchId>.compacting.json` is the extension's word that it asked Pi to compact the
- * conversation at a rest for the project's size: `{launchId, sessionId, startedAt}`. It is written
- * before the ask (and before the settlement evidence the engine takes the result by) and taken back
- * when that compaction ends, completed, failed or aborted, and at shutdown: only for the compaction
- * this extension asked for, never for Pi's own or another extension's. The engine keeps the close of
- * a done task's window open while it stands, up to its own bound from `startedAt` (T-1475: the
- * close, ten seconds after the result, aborted the summary, which takes 39 to 80 seconds).
- * `settled/<launchId>.shown.json` says `{launchId, sessionId}`: the
- * conversation the window shows, written whenever this extension starts on
- * one (Pi starts it anew at every /new, /resume or /fork), so ConsensFlow
- * follows the window there.
- * A delivery record carries its own absolute `expiresAt`;
- * this extension never derives a second timeout from launch configuration.
- * Before a send, false means zero-byte refusal. After a send, absent
- * `message_start` means null/unknown, never false. Invalid ids are quarantined;
- * expired records are acknowledged false and moved to `expired/`.
+ * Three notes, changed only by hooks: a run is on while `begun > ended`; `begun` goes up at the
+ * first of `before_agent_start`, `agent_start` or `turn_start` since the last end, and `ended`
+ * at `agent_settled`, the handler writing the end at once. A prompt is in hand from the `input`
+ * hook, or from this extension's own send, while no run is on, until the next begin (or
+ * {@link IN_HAND_MS}). A run Pi dropped (begun, and Pi idle with no settle) is ended by an
+ * idle poll: on a Pi that marks a run only at its first request (before 1.2.0, told by finding
+ * Pi idle at this extension's `before_agent_start`), by the third in a row.
+ *
+ * The state is `working` while a run is on; else `busy` while a prompt is in hand or Pi is not
+ * idle; else `rest`. It is written when it changes, at every hook and every pass of the poll;
+ * **`rest` is written only by a pass of the poll** (and at `session_start`), never inside a
+ * handler, which keeps the state it had. The inbox consumer sends only in a pass whose state is
+ * `rest`. This extension's own compaction for the project's size is asked by the pass that writes
+ * `rest` after a run's end: its word (`<launchId>.compacting.json`, `{launchId, sessionId,
+ * startedAt}`) is written before `rest` and the ask made after it, so the engine never finds the
+ * window free before the word that holds a done task's close (T-1475).
+ *
+ * `settled/<launchId>.shown.json` says `{launchId, sessionId}`: the conversation the window shows,
+ * written whenever this extension starts on one (Pi starts it anew at every /new, /resume or
+ * /fork), so ConsensFlow follows the window there. A delivery record carries its own absolute
+ * `expiresAt`; this extension never derives a second timeout from launch configuration. Before a
+ * send, false means zero-byte refusal. After a send, absent `message_start` means null/unknown,
+ * never false. Invalid ids are quarantined; expired records are acknowledged false and moved to
+ * `expired/`.
  */
 export function createDeliveryExtension(
   pi,
@@ -124,16 +139,14 @@ export function createDeliveryExtension(
     // holds a done task's window by the word for the same length (`COMPACTION_HOLD_MS`), so
     // nothing, a reopen's words included, waits past it (T-1475).
     compactionLimitMs = 300_000,
+    // How long a prompt submitted with no run begun is held in hand (tests shorten it).
+    inHandMs = IN_HAND_MS,
+    now = () => Date.now(),
   } = {},
 ) {
   let context
-  // Whether a compaction this extension asked for is at work: a delivery waits for it.
+  // Whether a compaction this extension asked for is at work.
   let compacting = false
-  // Whether Pi compacts, whoever began it (this extension, or Pi itself at its own point or
-  // to recover an overflow): Pi tells its extensions `session_before_compact`, then
-  // `session_compact` or `session_compact_failed`, and its `isIdle()` is false all along
-  // (`!this._isAgentRunActive && !this.isCompacting`, Pi 1.4.0 and 1.5.0).
-  let piCompacting = false
   let watcher
   let poller
   let running = false
@@ -145,16 +158,26 @@ export function createDeliveryExtension(
   // inbox refuses the old launch's records anyway.
   const settledIds = new Set()
 
+  // The notes, and what was last written of them.
+  let begun = 0
+  let ended = 0
+  let ends = []
+  let inHand = null
+  let idlePolls = 0
+  // This Pi marks a run only at its first request (Pi before 1.2.0).
+  let late = false
+  let state = null
+  let writes = 0
+  let lastWord = null
+  // The count of ended runs the last rest looked at for a compaction.
+  let restAfter = 0
+
   const logError = (...args) => logger?.error?.(...args)
-  const evidenceFile =
+  const named =
     typeof settled === 'string' && typeof launchId === 'string' && SAFE_PATH_SEGMENT.test(launchId)
-      ? join(settled, `${launchId}.json`)
-      : null
-  // A turn on: Pi saves nothing until an answer is complete, so a first
-  // request that hangs would leave ConsensFlow nothing to read but this.
-  const workingFile = evidenceFile === null ? null : join(settled, `${launchId}.working.json`)
-  const shownFile = evidenceFile === null ? null : join(settled, `${launchId}.shown.json`)
-  const compactingFile = evidenceFile === null ? null : join(settled, `${launchId}.compacting.json`)
+  const stateFile = named ? join(settled, `${launchId}.state.json`) : null
+  const shownFile = named ? join(settled, `${launchId}.shown.json`) : null
+  const compactingFile = named ? join(settled, `${launchId}.compacting.json`) : null
 
   const uniquePath = async (directory, file) => {
     await mkdir(directory, { recursive: true })
@@ -170,32 +193,82 @@ export function createDeliveryExtension(
     }
   }
 
-  const invalidateSettlement = async () => {
-    if (evidenceFile === null) return
-    try {
-      await unlink(evidenceFile)
-    } catch (cause) {
-      if (cause?.code !== 'ENOENT') {
-        logError(`could not invalidate settlement evidence: ${cause?.message ?? String(cause)}`)
+  // A file written under another name and moved into place: a reader never finds half of it,
+  // and a rename replaces a file a reader has open (Rust opens a file sharing delete) on
+  // Windows too, with a few tries where it is refused for a moment.
+  const put = async (file, text) => {
+    await mkdir(settled, { recursive: true })
+    await writeFile(`${file}.tmp`, text, 'utf8')
+    for (let attempt = 1; ; attempt += 1) {
+      try {
+        await rename(`${file}.tmp`, file)
+        return
+      } catch (cause) {
+        if (attempt >= 4 || !['EPERM', 'EBUSY', 'EACCES'].includes(cause?.code)) throw cause
+        await new Promise((resolve) => setTimeout(resolve, 25 * attempt))
       }
     }
   }
 
-  const writeWorking = async () => {
-    if (workingFile === null) return
-    const sessionId = sessionIdOf(context)
-    if (sessionId === null) return
+  const runOn = () => begun > ended
+  const idle = () => {
     try {
-      await mkdir(settled, { recursive: true })
-      await writeFile(
-        `${workingFile}.tmp`,
-        `${JSON.stringify({ launchId, sessionId, startedAt: Date.now() })}\n`,
-        'utf8',
-      )
-      await rename(`${workingFile}.tmp`, workingFile)
-    } catch (cause) {
-      logError(`could not record a working turn: ${cause?.message ?? String(cause)}`)
+      return context?.isIdle?.() === true
+    } catch {
+      return false
     }
+  }
+  const sampled = () => {
+    if (runOn()) return 'working'
+    if (inHand !== null || !idle()) return 'busy'
+    return 'rest'
+  }
+  const end = (aborted) => {
+    ended += 1
+    ends.push({ n: ended, leaf: frontierOf(context)?.id ?? null, aborted })
+    if (ends.length > ENDS_KEPT) ends = ends.slice(-ENDS_KEPT)
+    idlePolls = 0
+  }
+
+  // The word's writes, one after another, in the order they were asked.
+  let writing = Promise.resolve()
+  const say = (inPoll) => {
+    let next = sampled()
+    if (next === 'rest' && !inPoll) next = state ?? 'busy'
+    state = next
+    const sessionId = sessionIdOf(context)
+    if (stateFile === null || sessionId === null) return writing
+    const word = {
+      launchId,
+      sessionId,
+      state: next,
+      leaf: frontierOf(context)?.id ?? null,
+      begun,
+      ended,
+      ends,
+    }
+    const key = JSON.stringify(word)
+    if (key === lastWord) return writing
+    lastWord = key
+    writes += 1
+    const text = `${JSON.stringify({ ...word, n: writes, at: now() })}\n`
+    writing = writing
+      .then(() => put(stateFile, text))
+      .catch((cause) => {
+        lastWord = null
+        logError(`could not record Pi's run state: ${cause?.message ?? String(cause)}`)
+      })
+    return writing
+  }
+
+  const takeWordBack = async () => {
+    lastWord = null
+    await writing
+    if (stateFile === null) return
+    await unlink(stateFile).catch((cause) => {
+      if (cause?.code !== 'ENOENT')
+        logError(`could not take back Pi's run state: ${cause?.message ?? String(cause)}`)
+    })
   }
 
   const writeShown = async () => {
@@ -203,9 +276,7 @@ export function createDeliveryExtension(
     const sessionId = sessionIdOf(context)
     if (sessionId === null) return
     try {
-      await mkdir(settled, { recursive: true })
-      await writeFile(`${shownFile}.tmp`, `${JSON.stringify({ launchId, sessionId })}\n`, 'utf8')
-      await rename(`${shownFile}.tmp`, shownFile)
+      await put(shownFile, `${JSON.stringify({ launchId, sessionId })}\n`)
     } catch (cause) {
       logError(`could not record the conversation shown: ${cause?.message ?? String(cause)}`)
     }
@@ -215,31 +286,14 @@ export function createDeliveryExtension(
   // the ask is made only once it is in place. Says whether it is: where no folder is told (no
   // engine to read it) there is nothing to write and the ask goes; a word that cannot be written
   // asks for no compaction at this rest (the engine would find the window free with nothing
-  // to hold it by, and its close would cut the summary), said once in the log. It is written
-  // under another name and moved into place, as the settlement evidence is: a reader never
-  // finds half of it, and a rename replaces a file a reader has open (Rust opens a file
-  // sharing delete) on Windows too, with a few tries where it is refused for a moment.
+  // to hold it by, and its close would cut the summary), said once in the log.
   let wordFailure
   const writeCompactionWord = async () => {
     if (compactingFile === null) return true
     const sessionId = sessionIdOf(context)
     try {
       if (sessionId === null) throw new Error('Pi has no conversation to name')
-      await mkdir(settled, { recursive: true })
-      await writeFile(
-        `${compactingFile}.tmp`,
-        `${JSON.stringify({ launchId, sessionId, startedAt: Date.now() })}\n`,
-        'utf8',
-      )
-      for (let attempt = 1; ; attempt += 1) {
-        try {
-          await rename(`${compactingFile}.tmp`, compactingFile)
-          break
-        } catch (cause) {
-          if (attempt >= 4 || !['EPERM', 'EBUSY', 'EACCES'].includes(cause?.code)) throw cause
-          await new Promise((resolve) => setTimeout(resolve, 25 * attempt))
-        }
-      }
+      await put(compactingFile, `${JSON.stringify({ launchId, sessionId, startedAt: now() })}\n`)
       wordFailure = undefined
       return true
     } catch (cause) {
@@ -258,32 +312,6 @@ export function createDeliveryExtension(
       if (cause?.code !== 'ENOENT') {
         logError(`could not take back the word of a compaction: ${cause?.message ?? String(cause)}`)
       }
-    }
-  }
-
-  const writeSettlement = async () => {
-    if (evidenceFile === null) return
-    await unlink(workingFile).catch((cause) => {
-      if (cause?.code !== 'ENOENT')
-        logError(`could not clear a working turn: ${cause?.message ?? String(cause)}`)
-    })
-    const sessionId = sessionIdOf(context)
-    const frontier = frontierOf(context)
-    if (sessionId === null || frontier === null) {
-      logError('could not record settlement evidence: Pi session frontier is unavailable')
-      return
-    }
-    try {
-      await mkdir(settled, { recursive: true })
-      const temporary = `${evidenceFile}.tmp`
-      await writeFile(
-        temporary,
-        `${JSON.stringify({ launchId, sessionId, frontier, settledAt: Date.now() })}\n`,
-        'utf8',
-      )
-      await rename(temporary, evidenceFile)
-    } catch (cause) {
-      logError(`could not record settlement evidence: ${cause?.message ?? String(cause)}`)
     }
   }
 
@@ -320,7 +348,6 @@ export function createDeliveryExtension(
 
   const observeMessage = async (event, ctx) => {
     context = ctx ?? context
-    await invalidateSettlement()
     if (event?.message?.role !== 'user') return
     const text = messageText(event.message)
     if (text === null) return
@@ -329,119 +356,165 @@ export function createDeliveryExtension(
     }
   }
 
-  const newWork = async (_event, ctx) => {
+  // A run begins: the first of its beginning hooks since the last end. Written first thing,
+  // and awaited, so the word says `working` before any later extension's handler runs.
+  const begin = (_event, ctx) => {
     context = ctx ?? context
-    await invalidateSettlement()
-    await writeWorking()
+    if (!runOn()) {
+      begun += 1
+      inHand = null
+      idlePolls = 0
+    }
+    return say(false)
   }
 
+  // The inbox, read in a pass whose state is `rest`: one message at most is sent.
   const consume = async () => {
+    if (typeof inbox !== 'string' || typeof ack !== 'string') return
+    // A watcher event or queued rerun can outlive the inbox; nothing to read.
+    const names = await readdir(inbox).catch((cause) => {
+      if (cause?.code === 'ENOENT') return []
+      throw cause
+    })
+    const files = names.filter((name) => name.endsWith('.json')).sort()
+    for (const file of files) {
+      const path = join(inbox, file)
+      let record
+      try {
+        record = JSON.parse(await readFile(path, 'utf8'))
+      } catch (cause) {
+        logError(`could not read delivery ${file}: ${cause?.message ?? String(cause)}`)
+        continue
+      }
+      const id = record?.id
+      if (record?.type === 'message') {
+        if (!validMessageId(id)) {
+          if (typeof quarantine === 'string') {
+            try {
+              await rename(path, await uniquePath(quarantine, file))
+              logError(`invalid message id quarantined from ${file}`)
+            } catch (cause) {
+              logError(
+                `could not quarantine invalid message ${file}: ${cause?.message ?? String(cause)}`,
+              )
+            }
+          } else {
+            logError(`invalid message id in ${file}: quarantine is not configured`)
+          }
+          continue
+        }
+        if (pending.has(id)) continue
+        if (settledIds.has(id)) {
+          await unlink(path).catch(() => {})
+          continue
+        }
+        const shapeError = invalidMessageShape(record)
+        if (shapeError !== null) {
+          logError(`message ${id} is ${shapeError}`)
+          await refuseBeforeSend(path, file, id, shapeError)
+          continue
+        }
+        if (record.launchId !== launchId) {
+          await refuseBeforeSend(path, file, id, 'wrong-launch')
+          continue
+        }
+        if (!validExpiry(record.expiresAt)) {
+          await refuseBeforeSend(path, file, id, 'missing-expiry')
+          continue
+        }
+        if (record.expiresAt <= now()) {
+          if (typeof expired === 'string') {
+            await refuseBeforeSend(path, file, id, 'expired-before-send', expired)
+          } else {
+            logError(`expired message ${id}: expired directory is not configured`)
+          }
+          continue
+        }
+        // The one gate: a message goes in only where the state this pass would write is `rest`.
+        // A window that is busy (it compacts, or holds a prompt someone submitted) refuses it
+        // before it is sent, in Pi's own word for a window at work, which spends no attempt of it
+        // (T-1272); one at work leaves it waiting.
+        const now_ = sampled()
+        if (now_ === 'busy') {
+          const reason =
+            sessionIdOf(context) === record.session ? 'chief busy' : 'native session changed'
+          await refuseBeforeSend(path, file, id, reason)
+          continue
+        }
+        if (now_ !== 'rest' || state !== 'rest') break
+        const tui = nativeTuiState(context, record.session)
+        if (tui.ready !== true) {
+          await refuseBeforeSend(path, file, id, tui.reason)
+          continue
+        }
+        const message = record.text
+        const messageEntry = { path, file, text: message, timer: null, done: false }
+        pending.set(id, messageEntry)
+        messageEntry.timer = setTimeout(
+          () => void acknowledge(id, null, 'admission-unknown'),
+          Math.max(0, record.expiresAt - now()),
+        )
+        // The prompt is in hand from the moment it is sent, until its run begins.
+        inHand = now()
+        try {
+          // The raw text goes verbatim. Only message_start proves entry;
+          // the editor is never touched.
+          pi.sendUserMessage(message)
+        } catch (cause) {
+          void acknowledge(id, null, 'send-user-message-threw')
+          logError(`could not submit message ${id}: ${cause?.message ?? String(cause)}`)
+        }
+        await say(false)
+        break
+      }
+      // ConsensFlow writes messages alone: a record of any other type is set aside.
+      if (typeof quarantine === 'string') await rename(path, await uniquePath(quarantine, file))
+    }
+  }
+
+  // One pass of the poll (also on an inbox event): the notes a poll may change, the word, the
+  // compaction a rest asks for, and the inbox.
+  const pass = async () => {
     if (running) {
       queued = true
       return
     }
-    if (typeof inbox !== 'string' || typeof ack !== 'string') return
+    if (context === undefined) return
     running = true
     try {
-      // A watcher event or queued rerun can outlive the inbox; nothing to read.
-      const names = await readdir(inbox).catch((cause) => {
-        if (cause?.code === 'ENOENT') return []
-        throw cause
-      })
-      const files = names.filter((name) => name.endsWith('.json')).sort()
-      for (const file of files) {
-        const path = join(inbox, file)
-        let record
-        try {
-          record = JSON.parse(await readFile(path, 'utf8'))
-        } catch (cause) {
-          logError(`could not read delivery ${file}: ${cause?.message ?? String(cause)}`)
-          continue
-        }
-        const id = record?.id
-        if (record?.type === 'message') {
-          if (!validMessageId(id)) {
-            if (typeof quarantine === 'string') {
-              try {
-                await rename(path, await uniquePath(quarantine, file))
-                logError(`invalid message id quarantined from ${file}`)
-              } catch (cause) {
-                logError(
-                  `could not quarantine invalid message ${file}: ${cause?.message ?? String(cause)}`,
-                )
-              }
-            } else {
-              logError(`invalid message id in ${file}: quarantine is not configured`)
-            }
-            continue
-          }
-          if (pending.has(id)) continue
-          if (settledIds.has(id)) {
-            await unlink(path).catch(() => {})
-            continue
-          }
-          const shapeError = invalidMessageShape(record)
-          if (shapeError !== null) {
-            logError(`message ${id} is ${shapeError}`)
-            await refuseBeforeSend(path, file, id, shapeError)
-            continue
-          }
-          if (record.launchId !== launchId) {
-            await refuseBeforeSend(path, file, id, 'wrong-launch')
-            continue
-          }
-          if (!validExpiry(record.expiresAt)) {
-            await refuseBeforeSend(path, file, id, 'missing-expiry')
-            continue
-          }
-          if (record.expiresAt <= Date.now()) {
-            if (typeof expired === 'string') {
-              await refuseBeforeSend(path, file, id, 'expired-before-send', expired)
-            } else {
-              logError(`expired message ${id}: expired directory is not configured`)
-            }
-            continue
-          }
-          // A window that compacts is at work, though no turn runs: the message is refused
-          // before it is sent, in Pi's own word for a window at work, which spends no attempt
-          // of it (T-1272: left for later, each expired, and three spent the delivery).
-          if (compactingNow()) {
-            const reason =
-              sessionIdOf(context) === record.session ? 'chief busy' : 'native session changed'
-            await refuseBeforeSend(path, file, id, reason)
-            continue
-          }
-          if (context?.isIdle?.() !== true) break
-          const tui = nativeTuiState(context, record.session)
-          if (tui.ready !== true) {
-            await refuseBeforeSend(path, file, id, tui.reason)
-            continue
-          }
-          const message = record.text
-          const messageEntry = { path, file, text: message, timer: null, done: false }
-          pending.set(id, messageEntry)
-          messageEntry.timer = setTimeout(
-            () => void acknowledge(id, null, 'admission-unknown'),
-            Math.max(0, record.expiresAt - Date.now()),
-          )
-          try {
-            // The raw text goes verbatim. Only message_start proves entry;
-            // the editor is never touched.
-            pi.sendUserMessage(message)
-          } catch (cause) {
-            void acknowledge(id, null, 'send-user-message-threw')
-            logError(`could not submit message ${id}: ${cause?.message ?? String(cause)}`)
-          }
-          break
-        }
-        // ConsensFlow writes messages alone: a record of any other type is set aside.
-        if (typeof quarantine === 'string') await rename(path, await uniquePath(quarantine, file))
+      if (inHand !== null && now() - inHand >= inHandMs) inHand = null
+      if (runOn() && idle()) {
+        idlePolls += 1
+        if (idlePolls >= (late ? LATE_IDLE_POLLS : 1)) end(null)
+      } else {
+        idlePolls = 0
       }
+      let asking = false
+      if (sampled() === 'rest' && ended > restAfter) {
+        restAfter = ended
+        asking = wantsCompaction(ends.at(-1)?.aborted === true, context)
+        if (asking && !(await writeCompactionWord())) {
+          compacting = false
+          asking = false
+        }
+      }
+      await say(true)
+      if (asking) {
+        if (state === 'rest') askCompaction(context)
+        else {
+          compacting = false
+          await takeCompactionWordBack()
+        }
+      } else {
+        await consume()
+      }
+    } catch (cause) {
+      logError(`could not read the inbox: ${cause?.message ?? String(cause)}`)
     } finally {
       running = false
       if (queued) {
         queued = false
-        void consume()
+        void pass()
       }
     }
   }
@@ -451,57 +524,59 @@ export function createDeliveryExtension(
     watcher?.close()
     clearInterval(poller)
     await writeShown()
-    await invalidateSettlement()
-    const leaf = ctx.sessionManager?.getLeafEntry?.()
-    if (
-      ctx.mode === 'tui' &&
-      ctx.hasUI === true &&
-      ctx.isIdle?.() === true &&
-      ctx.hasPendingMessages?.() === false &&
-      leaf?.type === 'message' &&
-      leaf.id === frontierOf(ctx)?.id &&
-      leaf.message?.role === 'assistant' &&
-      leaf.message.stopReason === 'stop'
-    )
-      await writeSettlement()
-    if (typeof inbox !== 'string' || typeof ack !== 'string') return
-    await mkdir(inbox, { recursive: true })
-    watcher = watchInbox(inbox, () => void consume())
-    poller = setInterval(() => void consume(), pollMs)
+    // The notes cleared: no run of this conversation is on, no prompt in hand, no end to take.
+    // The counts go on: they are the launch's.
+    begun = ended
+    ends = []
+    inHand = null
+    idlePolls = 0
+    restAfter = ended
+    await say(true)
+    if (typeof inbox === 'string' && typeof ack === 'string') {
+      await mkdir(inbox, { recursive: true })
+      watcher = watchInbox(inbox, () => void pass())
+    }
+    poller = setInterval(() => void pass(), pollMs)
     poller.unref?.()
-    await consume()
+    await pass()
   })
-  pi.on('agent_start', newWork)
-  pi.on('turn_start', newWork)
+  pi.on('input', (_event, ctx) => {
+    context = ctx ?? context
+    if (runOn()) return undefined
+    inHand = now()
+    return say(false).then(() => undefined)
+  })
+  pi.on('before_agent_start', (event, ctx) => {
+    context = ctx ?? context
+    // Idle here: this Pi marks a run only at its first request (before 1.2.0).
+    if (!runOn() && idle()) late = true
+    return begin(event, ctx).then(() => undefined)
+  })
+  pi.on('agent_start', begin)
+  pi.on('turn_start', begin)
   pi.on('message_start', observeMessage)
-  /**
-   * Whether the window compacts now: a compaction this extension asked for and whose callback
-   * has not come, or one Pi said it began and has not said it ended. Pi tells no extension of
-   * an end where it finds no entry it saved, so an idle Pi is taken for one that compacts
-   * nothing.
-   */
-  const compactingNow = () => {
-    if (compacting) return true
-    if (piCompacting && context?.isIdle?.() === true) piCompacting = false
-    return piCompacting
-  }
+  pi.on('agent_settled', async (event, ctx) => {
+    context = ctx ?? context
+    // A run whose beginning this extension did not see is still a run that ended.
+    if (!runOn()) begun += 1
+    end(typeof event?.aborted === 'boolean' ? event.aborted : null)
+    await say(false)
+  })
 
   /**
    * Asks Pi to compact the window's conversation at this rest, once its context is past
    * the size the project chose (smaller-contexts, SCX-28 to SCX-30): Pi has no flag or
    * variable for it, and its settings are the owner's. `ctx.compact()` aborts a turn at
-   * work, so it is asked only at a rest (idle, nothing pending, the turn not aborted by the
+   * work, so it is asked only at a rest (idle, nothing pending, the run not aborted by the
    * human), and Pi's own compaction does the rest; a long turn grows meanwhile, to Pi's own
    * point at most. A size at or above the model's window, or a context Pi cannot say yet,
-   * asks for none. A compaction that fails is said, and the next rest asks again. The word
-   * (`compacting/<launch>.json`) is written before the ask and taken back as it ends, for the
-   * engine to keep the window open meanwhile (T-1475).
+   * asks for none. A compaction that fails is said, and the next rest asks again.
    */
   // Whether this rest asks for a compaction, and if so the compaction is marked as ours
   // (`compacting`) at once, so no second ask comes before the first has begun.
-  const wantsCompaction = (event, ctx) => {
+  const wantsCompaction = (aborted, ctx) => {
     if (!Number.isInteger(compaction) || compaction <= 0 || compacting) return false
-    if (event?.aborted === true) return false
+    if (aborted) return false
     if (ctx?.isIdle?.() !== true || ctx.hasPendingMessages?.() !== false) return false
     let usage
     try {
@@ -526,8 +601,8 @@ export function createDeliveryExtension(
       if (mine !== asks) return
       clearTimeout(limit)
       compacting = false
-      void takeCompactionWordBack()
-      void consume()
+      // A compaction that failed is asked for again at the next rest after a run.
+      void takeCompactionWordBack().then(() => pass())
     }
     try {
       ctx.compact({
@@ -559,34 +634,14 @@ export function createDeliveryExtension(
     limit.unref?.()
   }
 
-  pi.on('session_before_compact', (_event, ctx) => {
-    context = ctx ?? context
-    piCompacting = true
-  })
-  // Ended: a turn the compaction came in the middle of goes on as any turn does.
+  // The word is taken back as the compaction this extension asked for ends, completed,
+  // failed or aborted; one Pi began itself, or another extension did, never had one.
   const compactionEnded = async (_event, ctx) => {
     context = ctx ?? context
-    // The word is taken back as the compaction this extension asked for ends, completed,
-    // failed or aborted; one Pi began itself, or another extension did, never had one.
     if (compacting) await takeCompactionWordBack()
-    piCompacting = false
-    await consume()
   }
   pi.on('session_compact', compactionEnded)
   pi.on('session_compact_failed', compactionEnded)
-  pi.on('agent_settled', async (event, ctx) => {
-    context = ctx ?? context
-    // The word comes before the settlement evidence the engine takes the result by: a window
-    // found free is never found free before the word that holds its close.
-    let asking = wantsCompaction(event, context)
-    if (asking && !(await writeCompactionWord())) {
-      compacting = false
-      asking = false
-    }
-    await writeSettlement()
-    if (asking) askCompaction(context)
-    await consume()
-  })
   pi.on('session_shutdown', async () => {
     clearTimeout(limit)
     await takeCompactionWordBack()
@@ -598,10 +653,11 @@ export function createDeliveryExtension(
       if (entry.timer !== null) clearTimeout(entry.timer)
     }
     pending.clear()
+    await takeWordBack()
     context = undefined
   })
 
-  return { consume }
+  return { pass }
 }
 
 // This is the only environment-reading entry point. The launch producer

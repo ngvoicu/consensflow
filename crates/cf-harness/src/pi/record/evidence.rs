@@ -1,7 +1,5 @@
 //! What ConsensFlow's Pi extension writes beside a session, in the folder of
-//! one launch: the `<launchId>.json` it writes when Pi settles, and the
-//! `<launchId>.working.json` it writes when a turn starts and removes when Pi
-//! settles.
+//! one launch: its word of Pi's run state, `<launchId>.state.json`.
 //!
 //! A file that is not there, or is no JSON, is no evidence. A file that
 //! cannot be read for any other reason fails the look, as it threw in Node.
@@ -74,37 +72,89 @@ impl Launch {
     }
 }
 
-/// The leaf entry the extension saw Pi settle at: the id its file for this
-/// launch and session names, if it names one.
-pub(super) fn frontier(
-    session: &str,
-    env: &Env,
-    options: &Options,
-) -> Result<Option<String>, String> {
-    let Some(launch) = launch(env, options) else {
-        return Ok(None);
-    };
-    let Some(evidence) = launch.read(".json")? else {
-        return Ok(None);
-    };
-    if !launch.is_of(&evidence, session) {
-        return Ok(None);
-    }
-    Ok(evidence
-        .get("frontier")
-        .and_then(|frontier| frontier.get("id"))
-        .and_then(Value::as_str)
-        .filter(|id| !id.is_empty())
-        .map(str::to_owned))
+/// Pi's run state, as ConsensFlow's extension follows it and writes it in one word
+/// (`<launchId>.state.json`, the brain's `architecture/pi-turn-state.md`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum State {
+    /// A run is on.
+    Working,
+    /// No run, and Pi is not free: it compacts, sums up a branch, or holds a prompt.
+    Busy,
+    /// Pi is idle, with nothing in hand.
+    Rest,
 }
 
-/// Whether the extension saw a turn of this session start, and has not seen
-/// Pi settle.
-pub(crate) fn working(session: &str, env: &Env, options: &Options) -> Result<bool, String> {
+/// A run that ended: its count in the launch, the session's leaf at its end, and Pi's own flag
+/// of an abort (none where Pi gave none, or the run was dropped).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct End {
+    pub(crate) n: u64,
+    pub(crate) leaf: Option<String>,
+    pub(crate) aborted: Option<bool>,
+}
+
+/// The extension's word for this launch and session.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Word {
+    /// The launch it is of: a reader's count of the ends it took is the launch's.
+    pub(crate) launch: String,
+    pub(crate) state: State,
+    /// The session's leaf when it was written.
+    pub(crate) leaf: Option<String>,
+    /// How many runs of the launch ended.
+    pub(crate) ended: u64,
+    /// The last ended runs, oldest first.
+    pub(crate) ends: Vec<End>,
+}
+
+/// The extension's word for `session`, where it wrote one for this launch: none where there is
+/// none, it is another launch's or session's, or it is no word (a state it does not say, a count
+/// that is no whole number). A file that cannot be read for any other reason fails the look.
+pub(crate) fn word(session: &str, env: &Env, options: &Options) -> Result<Option<Word>, String> {
     let Some(launch) = launch(env, options) else {
-        return Ok(false);
+        return Ok(None);
     };
-    Ok(launch
-        .read(".working.json")?
-        .is_some_and(|marker| launch.is_of(&marker, session)))
+    let Some(word) = launch.read(".state.json")? else {
+        return Ok(None);
+    };
+    if !launch.is_of(&word, session) {
+        return Ok(None);
+    }
+    let state = match word.get("state").and_then(Value::as_str) {
+        Some("working") => State::Working,
+        Some("busy") => State::Busy,
+        Some("rest") => State::Rest,
+        _ => return Ok(None),
+    };
+    let leaf = |value: Option<&Value>| {
+        value
+            .and_then(Value::as_str)
+            .filter(|id| !id.is_empty())
+            .map(str::to_owned)
+    };
+    let Some(ended) = word.get("ended").and_then(Value::as_u64) else {
+        return Ok(None);
+    };
+    let ends = word
+        .get("ends")
+        .and_then(Value::as_array)
+        .map(|ends| {
+            ends.iter()
+                .filter_map(|end| {
+                    Some(End {
+                        n: end.get("n")?.as_u64()?,
+                        leaf: leaf(end.get("leaf")),
+                        aborted: end.get("aborted").and_then(Value::as_bool),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    Ok(Some(Word {
+        launch: launch.id,
+        state,
+        leaf: leaf(word.get("leaf")),
+        ended,
+        ends,
+    }))
 }

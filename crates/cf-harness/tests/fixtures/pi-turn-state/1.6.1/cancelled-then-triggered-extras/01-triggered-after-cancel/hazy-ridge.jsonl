@@ -1,0 +1,12 @@
+{"type":"session","version":3,"id":"01a21c4d-9041-7227-8bb7-1e7f9dbdf888","timestamp":"2026-11-27T09:19:34.977Z","cwd":"<run>/cancelled-then-triggered-extras"}
+{"type":"model_change","id":"221634a9","parentId":null,"timestamp":"2026-11-27T09:19:34.981Z","provider":"stand-in","modelId":"stand-in-model"}
+{"type":"thinking_level_change","id":"d000e129","parentId":"221634a9","timestamp":"2026-11-27T09:19:34.981Z","thinkingLevel":"off"}
+{"type":"custom","customType":"keeper","data":{"count":1},"id":"3365a8ab","parentId":"d000e129","timestamp":"2026-11-27T09:19:34.984Z"}
+{"type":"message","id":"13462b87","parentId":"3365a8ab","timestamp":"2026-11-27T09:19:34.984Z","message":{"role":"system","content":"","sections":{},"timestamp":1795771174983,"toolsAdded":[{"name":"read"},{"name":"bash"},{"name":"edit"},{"name":"write"}]}}
+{"type":"message","id":"4e230f85","parentId":"13462b87","timestamp":"2026-11-27T09:19:34.984Z","message":{"role":"user","content":[{"type":"text","text":"Run the long script"}],"timestamp":1795771174983}}
+{"type":"message","id":"06c9ea84","parentId":"4e230f85","timestamp":"2026-11-27T09:19:34.984Z","message":{"role":"assistant","content":[{"type":"text","text":"Partial text"}],"api":"faux:1795771174976:xbjcm3fmkfk","provider":"stand-in","model":"stand-in-model","usage":{"input":0,"output":3,"cacheRead":0,"cacheWrite":1405,"totalTokens":1408,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}},"stopReason":"error","errorMessage":"503 Service Unavailable: overloaded","timestamp":1795771174982,"thinkingLevel":"off"}}
+{"type":"context_edit","id":"07aa27b8","parentId":"06c9ea84","timestamp":"2026-11-27T09:19:34.984Z","targetId":"06c9ea84","replacement":null}
+{"type":"custom","customType":"keeper","data":{"count":2},"id":"23bafb6f","parentId":"07aa27b8","timestamp":"2026-11-27T09:19:34.988Z"}
+{"type":"custom_message","customType":"keeper","content":"Kept the cache warm.","display":true,"id":"27529471","parentId":"23bafb6f","timestamp":"2026-11-27T09:19:34.988Z"}
+{"type":"custom","customType":"keeper","data":{"count":1},"id":"19e378d0","parentId":"27529471","timestamp":"2026-11-27T09:19:34.989Z"}
+{"type":"custom_message","customType":"keeper","content":"Continue automatically","display":false,"id":"a7c8e389","parentId":"19e378d0","timestamp":"2026-11-27T09:19:34.989Z"}

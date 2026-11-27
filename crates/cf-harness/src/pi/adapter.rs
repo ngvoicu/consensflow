@@ -28,13 +28,13 @@ use cf_proto::specs::Variant;
 use super::channel::{hex, launch_configuration, send, Channel};
 use super::install::prepare_extension;
 use super::paths;
-use super::record::evidence::working;
+use super::record::evidence::word;
 use crate::contract::{
     Adapter, Admission, CompactionWord, FirstMessage, Held, Launch, LaunchId, NoDefault, Observed,
-    Pane, PaneHost, Prepared, Readiness, Records, Skill, Specs, Used, Window, Work,
+    Over, Pane, PaneHost, Prepared, Readiness, Records, Skill, Specs, Used, Window, Work,
 };
 use crate::detect::executable;
-use crate::records::{Options, PiSettlement};
+use crate::records::{Options, PiSettlement, Reading};
 use crate::seams::processes::Processes;
 use crate::seams::{Entropy, Services, Time};
 use crate::shared::admission::admission;
@@ -376,18 +376,19 @@ impl Window for PiWindow {
             // its look had read before the file came back could be older.
             let shown = self.channel.shown_session()?;
             let reading = self.records.look(Harness::Pi, &session, &options).await;
-            let mut observed = record_state(Arc::clone(&reading));
-            // A turn the quit cut is over, though no record says so: the
-            // extension, which names the conversation, has seen no turn of this
-            // window begin, and the window has begun none of its own.
+            let mut observed = look_of(Arc::clone(&reading));
+            // A turn the quit cut is over, though no record says so: with no word of the
+            // extension's (which says Pi's own run state), the extension names the conversation
+            // and the window has begun no turn of its own.
             if !observed.settled
+                && observed.over == Over::No
                 && shown.as_deref() == Some(session.as_str())
                 && self
                     .left_open
                     .borrow()
                     .as_ref()
                     .is_some_and(|open| open.still(&reading))
-                && !working(&session, &self.env, &options)?
+                && word(&session, &self.env, &options)?.is_none()
             {
                 observed.settled = true;
                 observed.takes_words = true;
@@ -399,6 +400,19 @@ impl Window for PiWindow {
             })
         })
     }
+}
+
+/// The look a Pi record says of its window: a record that is neither at rest nor at work (Pi's
+/// extension says `busy`, or a turn the file ended waits out its quiet with no word) is the look
+/// that is neither ([`Over::Pending`]): no key, no note, no stop paid, no result, no delivery.
+pub fn look_of(reading: Arc<Reading>) -> Observed {
+    let mut observed = record_state(Arc::clone(&reading));
+    if matches!(&*reading, Reading::Known(record) if record.neither()) {
+        observed.settled = false;
+        observed.takes_words = false;
+        observed.over = Over::Pending;
+    }
+    observed
 }
 
 /// The size the project chose for its members to compact at, as ConsensFlow's own extension

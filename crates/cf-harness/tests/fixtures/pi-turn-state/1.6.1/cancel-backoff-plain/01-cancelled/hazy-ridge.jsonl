@@ -1,0 +1,7 @@
+{"type":"session","version":3,"id":"01a21c4d-7fb5-7227-8bb7-1e4fabc8e4aa","timestamp":"2026-11-27T09:19:30.741Z","cwd":"<run>/cancel-backoff-plain"}
+{"type":"model_change","id":"a2415ba6","parentId":null,"timestamp":"2026-11-27T09:19:30.745Z","provider":"stand-in","modelId":"stand-in-model"}
+{"type":"thinking_level_change","id":"c03b8c1c","parentId":"a2415ba6","timestamp":"2026-11-27T09:19:30.745Z","thinkingLevel":"off"}
+{"type":"message","id":"6afccf01","parentId":"c03b8c1c","timestamp":"2026-11-27T09:19:30.746Z","message":{"role":"system","content":"","sections":{},"timestamp":1795771170746,"toolsAdded":[{"name":"read"},{"name":"bash"},{"name":"edit"},{"name":"write"}]}}
+{"type":"message","id":"b47298b0","parentId":"6afccf01","timestamp":"2026-11-27T09:19:30.746Z","message":{"role":"user","content":[{"type":"text","text":"Run the long script"}],"timestamp":1795771170746}}
+{"type":"message","id":"4febd806","parentId":"b47298b0","timestamp":"2026-11-27T09:19:30.747Z","message":{"role":"assistant","content":[{"type":"text","text":"Partial text"}],"api":"faux:1795771170740:npsbbnk1yha","provider":"stand-in","model":"stand-in-model","usage":{"input":0,"output":3,"cacheRead":0,"cacheWrite":1402,"totalTokens":1405,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}},"stopReason":"error","errorMessage":"503 Service Unavailable: overloaded","timestamp":1795771170745,"thinkingLevel":"off"}}
+{"type":"context_edit","id":"6e0f661d","parentId":"4febd806","timestamp":"2026-11-27T09:19:30.747Z","targetId":"4febd806","replacement":null}

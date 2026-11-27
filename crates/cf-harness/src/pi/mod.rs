@@ -12,7 +12,7 @@ pub(crate) mod paths;
 pub mod record;
 pub(crate) mod setup;
 
-pub use adapter::PiAdapter;
+pub use adapter::{look_of, PiAdapter};
 // What the channel's cases against the system's own clock call
 // (`tests/channels/contract.rs`), and what `pi-send` plays the Pi extension's
 // tests through (`src/bin/pi_send.rs`).

@@ -5,22 +5,29 @@
 use super::*;
 
 #[test]
-fn a_turn_that_ended_is_settled_once_the_file_has_been_quiet_a_hundred_and_twenty_seconds() {
+fn with_no_word_a_turn_that_ended_is_settled_a_hundred_and_twenty_seconds_after_its_last_entry() {
     let steps = |stop: &str| vec![header(), user("u1", "go"), assistant("a1", stop, "done")];
     // A failed step is a turn that ended as the others are (T-781): Pi writes a new
     // step for each retry, so one with nothing after it for that long is the last.
     for stop in ["stop", "aborted", "error"] {
         let mut stage = Stage::with(&steps(stop));
-        // Written exactly then: 120,000 milliseconds is enough, 119,999 is not.
-        assert_eq!(stage.at(119_999).settlement, Settlement::InFlight, "{stop}");
+        // The entries say they were written at the file's write: 120,000 milliseconds after it
+        // is enough, 119,999 is not, and the look says when it will be.
+        let early = stage.at(119_999);
+        assert_eq!(early.settlement, Settlement::InFlight, "{stop}");
+        assert_eq!(
+            early.lines.settles_at,
+            Some(stage.written + 120_000),
+            "{stop}"
+        );
         let record = stage.at(120_000);
         assert!(!record.in_flight, "{stop}");
         assert_eq!(record.settlement, Settlement::Settled, "{stop}");
-        // Written half a millisecond later: 119,999.5 is not enough, and a
-        // clock told in whole milliseconds must not round it up.
-        stage.written_at(500_000);
-        assert_eq!(stage.at(120_000).settlement, Settlement::InFlight, "{stop}");
-        assert_eq!(stage.at(120_001).settlement, Settlement::Settled, "{stop}");
+        // The file's own time is not the clock: written again a minute later with the same
+        // entries, it is as quiet as its entries say.
+        stage.written += 60_000;
+        stage.written_at(0);
+        assert_eq!(stage.at(60_000).settlement, Settlement::Settled, "{stop}");
     }
     // A step that stopped with a call open is not settled by waiting.
     let mut stage = Stage::with(&[

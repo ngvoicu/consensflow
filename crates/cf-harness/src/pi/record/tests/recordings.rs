@@ -101,9 +101,10 @@ fn t1958_each_pi_prefix_fails_only_at_settlement_and_every_whole_record_fails() 
         let lines: Vec<&str> = fixture.lines().collect();
         let mut stage = Stage::new();
         for end in 1..=lines.len() {
-            stage.write_text(&format!("{}\n", lines[..end].join("\n")));
+            let text = format!("{}\n", lines[..end].join("\n"));
+            stage.write_text(&text);
             for age in [0, 120_000] {
-                let record = stage.at(age);
+                let record = stage.at_time(newest(&text) + age);
                 assert!(
                     !record.failed
                         || (record.settlement == Settlement::Settled && !record.in_flight),
@@ -111,22 +112,25 @@ fn t1958_each_pi_prefix_fails_only_at_settlement_and_every_whole_record_fails() 
                 );
             }
         }
-        let quiet = stage.at(120_000);
+        let quiet = stage.at_time(newest(fixture) + 120_000);
         assert!(quiet.failed && !quiet.in_flight, "{name}: {quiet:?}");
         assert_eq!(quiet.settlement, Settlement::Settled, "{name}");
 
-        // The extension boundary is independent evidence; it ends the same
-        // recorded last error immediately, without the quiet fallback.
+        // The extension's word is independent evidence; Pi at rest after the run that ended at
+        // the recorded last error ends it immediately, without the quiet fallback.
         let last: Value = serde_json::from_str(lines.last().unwrap()).unwrap();
         assert_eq!(last["message"]["stopReason"], "error", "{name}");
         let directory = stage.home.path().join("settled");
         fs::create_dir_all(&directory).unwrap();
         fs::write(
-            directory.join("launch.json"),
-            json!({
-                "launchId": "launch", "sessionId": SESSION, "frontier": { "id": last["id"] }
-            })
-            .to_string(),
+            directory.join("launch.state.json"),
+            evidence_files::word(
+                "launch",
+                SESSION,
+                "rest",
+                &last["id"],
+                &[(1, last["id"].clone(), json!(false))],
+            ),
         )
         .unwrap();
         let options = Options {
@@ -158,7 +162,12 @@ fn t1958_a_recorded_cut_error_followed_by_a_constructed_success_gives_the_result
     let failed = rows.last().unwrap().clone();
     assert_eq!(failed["message"]["stopReason"], "error");
     let mut stage = Stage::with(&rows);
-    let working = stage.at(0);
+    let at = rows
+        .iter()
+        .filter_map(|row| row["timestamp"].as_str().and_then(cf_base::time::parse))
+        .max()
+        .unwrap();
+    let working = stage.at_time(at);
     assert!(working.in_flight && !working.failed);
 
     let mut success = failed.clone();
@@ -172,7 +181,7 @@ fn t1958_a_recorded_cut_error_followed_by_a_constructed_success_gives_the_result
         .remove("errorMessage");
     rows.push(success);
     stage.write(&rows);
-    let done = stage.at(120_000);
+    let done = stage.at_time(at + 120_000);
     assert_eq!(done.settlement, Settlement::Settled);
     assert!(!done.failed && !done.in_flight);
     let result = done.items.last().unwrap();
