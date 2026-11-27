@@ -740,7 +740,14 @@ fn a_command_outside_the_closed_list_stays_in_flight_for_as_long_as_it_is_looked
 /// list is the whole of the difference (a counter-case to the test above).
 #[test]
 fn the_listed_commands_in_the_same_shapes_are_at_rest_at_their_output() {
-    for name in ["clear", "compact", "effort", "model", "reload-skills"] {
+    for name in [
+        "clear",
+        "compact",
+        "effort",
+        "model",
+        "recap",
+        "reload-skills",
+    ] {
         for system in [false, true] {
             assert_eq!(
                 settlement_of(&typed_line(name, system)),
@@ -1175,4 +1182,45 @@ fn a_shell_line_is_a_turn_the_model_answers_and_ends() {
         Settlement::InFlight
     );
     assert_eq!(settlement_of(&records), Settlement::Settled);
+}
+
+/// The rows of a field record of a chief's window (Claude Code 2.1.332, T-2388;
+/// `typed-recap-after-a-compaction.jsonl`): a turn's end, a compaction at rest with its
+/// attachments, then a typed `/recap` (the caveat, the echo, the system's output). The first
+/// row of the file is the one before the turn's end (row 17, `turn_duration`).
+fn recap_record() -> Vec<Value> {
+    include_str!("../../../../tests/fixtures/claude/typed-recap-after-a-compaction.jsonl")
+        .lines()
+        .map(|line| {
+            let mut record: Value = serde_json::from_str(line).unwrap();
+            if record.get("sessionId").is_some() {
+                record["sessionId"] = json!(SESSION);
+            }
+            record
+        })
+        .collect()
+}
+
+/// The window the owner left at rest on 2026-11-27 by typing `/recap`: at rest from the turn's
+/// end through the compaction and its attachments, and at rest again at `/recap`'s output
+/// (row 58) and every row after it, at every time. `/recap` is in the closed list
+/// (`QUIET_COMMAND`); without it the echo read as a turn that never ended.
+#[test]
+fn a_recap_typed_after_a_compaction_is_at_rest_at_its_output() {
+    let records = recap_record();
+    assert_eq!(records.len(), 68);
+    assert_eq!(records[16]["subtype"], "turn_duration");
+    assert_eq!(records[57]["subtype"], "local_command");
+    for upto in (17..=55).chain(58..=68) {
+        let mut stage = Stage::new();
+        stage.write(&records[..upto]);
+        for now_ms in [0, 86_400_000] {
+            match &*stage.reader.look(&Options::default(), now_ms) {
+                Reading::Known(record) => {
+                    assert_eq!(record.settlement, Settlement::Settled, "{upto} rows")
+                }
+                other => panic!("{upto} rows: {other:?}"),
+            }
+        }
+    }
 }

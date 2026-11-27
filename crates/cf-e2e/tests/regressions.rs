@@ -103,6 +103,8 @@ mod a_ledger_of_a_harness_this_build_does_not_run;
 mod a_message_the_chief_took_was_typed_in_again_under_load;
 #[path = "regressions/a_monitor_claude_ended_by_its_shell_held_its_task.rs"]
 mod a_monitor_claude_ended_by_its_shell_held_its_task;
+#[path = "regressions/a_recap_typed_into_an_idle_chief_held_a_workers_result.rs"]
+mod a_recap_typed_into_an_idle_chief_held_a_workers_result;
 // The rig's Muse is a script that runs the machine's Muse, so Unix's.
 #[path = "regressions/a_muse_worker_whose_pane_repainted_at_rest_never_got_the_words_that_resumed_its_task.rs"]
 #[cfg(unix)]

@@ -20,6 +20,7 @@
 [run]
 compact-rest-reader = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "claude::record"]
 compact-rest-rig = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_compact_typed_into_an_idle_chief_held_a_workers_result::"]
+compact-rest-recap-rig = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_recap_typed_into_an_idle_chief_held_a_workers_result::"]
 compact-rest-stand-in = ["cargo", "test", "--offline", "-p", "cf-e2e", "--features", "test-support", "--bin", "fake-agent", "a_compaction"]
 compact-rest-live = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_commands_at_rest"]
 
@@ -61,7 +62,7 @@ runs = ["compact-rest-reader"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/claude/record/patterns.rs"
-find = '''compile(r"^<command-name>/(?:clear|compact|effort|model|reload-skills)</command-name>")'''
+find = '''compile(r"^<command-name>/(?:clear|compact|effort|model|recap|reload-skills)</command-name>")'''
 replace = '''compile(r"^<command-name>/[^<]+</command-name>")'''
 
 [[plant]]
@@ -71,7 +72,7 @@ runs = ["compact-rest-reader"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/claude/record/patterns.rs"
-find = '''compile(r"^<command-name>/(?:clear|compact|effort|model|reload-skills)</command-name>")'''
+find = '''compile(r"^<command-name>/(?:clear|compact|effort|model|recap|reload-skills)</command-name>")'''
 replace = '''compile(r"")'''
 
 [[plant]]
@@ -236,3 +237,24 @@ runs = ["compact-rest-live"]
 file = "crates/cf-e2e/tests/live_commands_at_rest.rs"
 find = "                && outcome.read\n"
 replace = ""
+
+[[plant]]
+name = "compact-rest: /recap is out of the reader's closed list, and the chief that typed it reads at work from the echo on (the field of 2026-11-27)"
+meant = "a_recap_typed_after_a_compaction_is_at_rest_at_its_output"
+runs = ["compact-rest-reader"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/patterns.rs"
+find = '''compile(r"^<command-name>/(?:clear|compact|effort|model|recap|reload-skills)</command-name>")'''
+replace = '''compile(r"^<command-name>/(?:clear|compact|effort|model|reload-skills)</command-name>")'''
+
+[[plant]]
+name = "compact-rest: a chief typed a /recap is handed no result before its output and one after (the field of 2026-11-27)"
+meant = "a_claude_chief_given_a_recap_while_idle_is_handed_its_workers_result_once_after_the_output"
+runs = ["compact-rest-recap-rig"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/patterns.rs"
+find = '''compile(r"^<command-name>/(?:clear|compact|effort|model|recap|reload-skills)</command-name>")'''
+replace = '''compile(r"^<command-name>/(?:clear|compact|effort|model|reload-skills)</command-name>")'''
