@@ -105,6 +105,7 @@ mod n35_model;
 mod named_by_model;
 mod new_roles;
 mod no_adapter;
+mod no_lead;
 mod not_ready;
 mod nothing_to_stop;
 mod open_deadline;

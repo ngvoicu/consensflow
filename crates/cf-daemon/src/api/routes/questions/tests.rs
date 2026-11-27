@@ -7,7 +7,7 @@ use serde_json::{json, Value};
 
 use crate::api::callers::caller_of;
 use crate::api::routes::tests::support::{
-    api, open_task, session_task_at_work, state_of, working_task,
+    api, human_task_working, open_task, session_task_at_work, state_of, working_task,
 };
 use crate::testing::{request, said, scene, Scene};
 
@@ -720,6 +720,17 @@ async fn a_member_s_question_is_about_the_task_it_has_in_progress_and_the_task_w
     );
     assert_eq!(state_of(&scene, number), "waiting");
     assert_eq!(scene.kicks.get(), 1);
+}
+
+#[tokio::test]
+async fn a_member_s_question_on_a_task_the_human_gave_is_the_chief_s_all_the_same() {
+    let scene = scene();
+    let number = human_task_working(&scene);
+    let (status, said) = ask(&scene, &scene.zeus, r#"{"body":"Which format?"}"#).await;
+    assert_eq!(status, 201, "{said}");
+    assert_eq!(said["message"]["recipient"], "chief");
+    assert_eq!(said["message"]["task"], number);
+    assert_eq!(state_of(&scene, number), "waiting");
 }
 
 #[tokio::test]

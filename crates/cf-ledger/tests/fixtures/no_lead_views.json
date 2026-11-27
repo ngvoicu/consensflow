@@ -1,0 +1,1727 @@
+{
+  "handles": [
+    "human",
+    "chief",
+    "zeus",
+    "diana"
+  ],
+  "project": {
+    "id": 1,
+    "directory": "/work/app",
+    "name": "app",
+    "state": "open",
+    "gate": false,
+    "createdAt": "2026-09-21T14:13:21.000Z",
+    "updatedAt": "2026-09-21T14:13:21.000Z",
+    "participants": [
+      {
+        "id": 1,
+        "projectId": 1,
+        "handle": "human",
+        "role": "human",
+        "agent": null,
+        "harness": null,
+        "designer": false,
+        "createdAt": "2026-09-21T14:13:22.000Z",
+        "leftAt": null,
+        "tier": null,
+        "roles": [],
+        "outUntil": null,
+        "outSince": null,
+        "memberId": null,
+        "member": null,
+        "session": null
+      },
+      {
+        "id": 2,
+        "projectId": 1,
+        "handle": "chief",
+        "role": "chief",
+        "agent": null,
+        "harness": "claude-code",
+        "model": "apollo",
+        "designer": false,
+        "createdAt": "2026-09-21T14:13:23.000Z",
+        "leftAt": null,
+        "tier": null,
+        "roles": [],
+        "outUntil": null,
+        "outSince": null,
+        "memberId": null,
+        "member": null,
+        "session": null
+      },
+      {
+        "id": 3,
+        "projectId": 1,
+        "handle": "zeus",
+        "role": "worker",
+        "agent": null,
+        "harness": "claude-code",
+        "modelName": "zeus",
+        "designer": false,
+        "createdAt": "2026-09-21T14:13:24.000Z",
+        "leftAt": null,
+        "tier": "standard",
+        "roles": [
+          "worker"
+        ],
+        "outUntil": null,
+        "outSince": null,
+        "memberId": null,
+        "member": null,
+        "session": null
+      },
+      {
+        "id": 4,
+        "projectId": 1,
+        "handle": "diana",
+        "role": "worker",
+        "agent": null,
+        "harness": "claude-code",
+        "modelName": "diana",
+        "designer": false,
+        "createdAt": "2026-09-21T14:13:26.000Z",
+        "leftAt": null,
+        "tier": "standard",
+        "roles": [
+          "worker"
+        ],
+        "outUntil": null,
+        "outSince": null,
+        "memberId": null,
+        "member": null,
+        "session": null
+      },
+      {
+        "id": 5,
+        "projectId": 1,
+        "handle": "zeus-session-1",
+        "role": "worker",
+        "agent": null,
+        "harness": "claude-code",
+        "modelName": "zeus",
+        "designer": false,
+        "createdAt": "2026-09-21T14:13:31.000Z",
+        "leftAt": null,
+        "tier": "standard",
+        "roles": [
+          "worker"
+        ],
+        "outUntil": null,
+        "outSince": null,
+        "memberId": 3,
+        "member": "zeus",
+        "session": "session-1"
+      },
+      {
+        "id": 6,
+        "projectId": 1,
+        "handle": "diana-session-2",
+        "role": "worker",
+        "agent": null,
+        "harness": "claude-code",
+        "modelName": "diana",
+        "designer": false,
+        "createdAt": "2026-09-21T14:13:55.000Z",
+        "leftAt": null,
+        "tier": "standard",
+        "roles": [
+          "worker"
+        ],
+        "outUntil": null,
+        "outSince": null,
+        "memberId": 4,
+        "member": "diana",
+        "session": "session-2"
+      }
+    ]
+  },
+  "projects": [
+    {
+      "id": 1,
+      "directory": "/work/app",
+      "name": "app",
+      "state": "open",
+      "gate": false,
+      "createdAt": "2026-09-21T14:13:21.000Z",
+      "updatedAt": "2026-09-21T14:13:21.000Z",
+      "participants": [
+        {
+          "id": 1,
+          "projectId": 1,
+          "handle": "human",
+          "role": "human",
+          "agent": null,
+          "harness": null,
+          "designer": false,
+          "createdAt": "2026-09-21T14:13:22.000Z",
+          "leftAt": null,
+          "tier": null,
+          "roles": [],
+          "outUntil": null,
+          "outSince": null,
+          "memberId": null,
+          "member": null,
+          "session": null
+        },
+        {
+          "id": 2,
+          "projectId": 1,
+          "handle": "chief",
+          "role": "chief",
+          "agent": null,
+          "harness": "claude-code",
+          "model": "apollo",
+          "designer": false,
+          "createdAt": "2026-09-21T14:13:23.000Z",
+          "leftAt": null,
+          "tier": null,
+          "roles": [],
+          "outUntil": null,
+          "outSince": null,
+          "memberId": null,
+          "member": null,
+          "session": null
+        },
+        {
+          "id": 3,
+          "projectId": 1,
+          "handle": "zeus",
+          "role": "worker",
+          "agent": null,
+          "harness": "claude-code",
+          "modelName": "zeus",
+          "designer": false,
+          "createdAt": "2026-09-21T14:13:24.000Z",
+          "leftAt": null,
+          "tier": "standard",
+          "roles": [
+            "worker"
+          ],
+          "outUntil": null,
+          "outSince": null,
+          "memberId": null,
+          "member": null,
+          "session": null
+        },
+        {
+          "id": 4,
+          "projectId": 1,
+          "handle": "diana",
+          "role": "worker",
+          "agent": null,
+          "harness": "claude-code",
+          "modelName": "diana",
+          "designer": false,
+          "createdAt": "2026-09-21T14:13:26.000Z",
+          "leftAt": null,
+          "tier": "standard",
+          "roles": [
+            "worker"
+          ],
+          "outUntil": null,
+          "outSince": null,
+          "memberId": null,
+          "member": null,
+          "session": null
+        },
+        {
+          "id": 5,
+          "projectId": 1,
+          "handle": "zeus-session-1",
+          "role": "worker",
+          "agent": null,
+          "harness": "claude-code",
+          "modelName": "zeus",
+          "designer": false,
+          "createdAt": "2026-09-21T14:13:31.000Z",
+          "leftAt": null,
+          "tier": "standard",
+          "roles": [
+            "worker"
+          ],
+          "outUntil": null,
+          "outSince": null,
+          "memberId": 3,
+          "member": "zeus",
+          "session": "session-1"
+        },
+        {
+          "id": 6,
+          "projectId": 1,
+          "handle": "diana-session-2",
+          "role": "worker",
+          "agent": null,
+          "harness": "claude-code",
+          "modelName": "diana",
+          "designer": false,
+          "createdAt": "2026-09-21T14:13:55.000Z",
+          "leftAt": null,
+          "tier": "standard",
+          "roles": [
+            "worker"
+          ],
+          "outUntil": null,
+          "outSince": null,
+          "memberId": 4,
+          "member": "diana",
+          "session": "session-2"
+        }
+      ]
+    }
+  ],
+  "board": {
+    "project": {
+      "id": 1,
+      "directory": "/work/app",
+      "name": "app",
+      "state": "open",
+      "gate": false,
+      "createdAt": "2026-09-21T14:13:21.000Z",
+      "updatedAt": "2026-09-21T14:13:21.000Z",
+      "participants": [
+        {
+          "id": 1,
+          "projectId": 1,
+          "handle": "human",
+          "role": "human",
+          "agent": null,
+          "harness": null,
+          "designer": false,
+          "createdAt": "2026-09-21T14:13:22.000Z",
+          "leftAt": null,
+          "tier": null,
+          "roles": [],
+          "outUntil": null,
+          "outSince": null,
+          "memberId": null,
+          "member": null,
+          "session": null
+        },
+        {
+          "id": 2,
+          "projectId": 1,
+          "handle": "chief",
+          "role": "chief",
+          "agent": null,
+          "harness": "claude-code",
+          "model": "apollo",
+          "designer": false,
+          "createdAt": "2026-09-21T14:13:23.000Z",
+          "leftAt": null,
+          "tier": null,
+          "roles": [],
+          "outUntil": null,
+          "outSince": null,
+          "memberId": null,
+          "member": null,
+          "session": null
+        },
+        {
+          "id": 3,
+          "projectId": 1,
+          "handle": "zeus",
+          "role": "worker",
+          "agent": null,
+          "harness": "claude-code",
+          "modelName": "zeus",
+          "designer": false,
+          "createdAt": "2026-09-21T14:13:24.000Z",
+          "leftAt": null,
+          "tier": "standard",
+          "roles": [
+            "worker"
+          ],
+          "outUntil": null,
+          "outSince": null,
+          "memberId": null,
+          "member": null,
+          "session": null
+        },
+        {
+          "id": 4,
+          "projectId": 1,
+          "handle": "diana",
+          "role": "worker",
+          "agent": null,
+          "harness": "claude-code",
+          "modelName": "diana",
+          "designer": false,
+          "createdAt": "2026-09-21T14:13:26.000Z",
+          "leftAt": null,
+          "tier": "standard",
+          "roles": [
+            "worker"
+          ],
+          "outUntil": null,
+          "outSince": null,
+          "memberId": null,
+          "member": null,
+          "session": null
+        },
+        {
+          "id": 5,
+          "projectId": 1,
+          "handle": "zeus-session-1",
+          "role": "worker",
+          "agent": null,
+          "harness": "claude-code",
+          "modelName": "zeus",
+          "designer": false,
+          "createdAt": "2026-09-21T14:13:31.000Z",
+          "leftAt": null,
+          "tier": "standard",
+          "roles": [
+            "worker"
+          ],
+          "outUntil": null,
+          "outSince": null,
+          "memberId": 3,
+          "member": "zeus",
+          "session": "session-1"
+        },
+        {
+          "id": 6,
+          "projectId": 1,
+          "handle": "diana-session-2",
+          "role": "worker",
+          "agent": null,
+          "harness": "claude-code",
+          "modelName": "diana",
+          "designer": false,
+          "createdAt": "2026-09-21T14:13:55.000Z",
+          "leftAt": null,
+          "tier": "standard",
+          "roles": [
+            "worker"
+          ],
+          "outUntil": null,
+          "outSince": null,
+          "memberId": 4,
+          "member": "diana",
+          "session": "session-2"
+        }
+      ]
+    },
+    "open": [
+      {
+        "id": 3,
+        "projectId": 1,
+        "number": 3,
+        "title": "Docs",
+        "state": "open",
+        "requester": "chief",
+        "assignee": null,
+        "pool": "worker",
+        "tier": "standard",
+        "purpose": null,
+        "session": null,
+        "needs": [
+          {
+            "number": 1,
+            "state": "waiting"
+          }
+        ],
+        "blockedBy": [
+          1
+        ],
+        "heldUntil": null,
+        "pausedAt": null,
+        "deletedAt": null,
+        "createdAt": "2026-09-21T14:13:51.000Z",
+        "updatedAt": "2026-09-21T14:13:51.000Z",
+        "stateSince": "2026-09-21T14:13:52.000Z",
+        "result": null
+      },
+      {
+        "id": 5,
+        "projectId": 1,
+        "number": 5,
+        "title": "Cleanup",
+        "state": "cancelled",
+        "requester": "chief",
+        "assignee": null,
+        "pool": "worker",
+        "tier": "standard",
+        "purpose": null,
+        "session": null,
+        "needs": [],
+        "blockedBy": [],
+        "heldUntil": null,
+        "pausedAt": null,
+        "deletedAt": null,
+        "createdAt": "2026-09-21T14:14:09.000Z",
+        "updatedAt": "2026-09-21T14:14:11.000Z",
+        "stateSince": "2026-09-21T14:14:12.000Z",
+        "result": null
+      },
+      {
+        "id": 6,
+        "projectId": 1,
+        "number": 6,
+        "title": "From the page",
+        "state": "open",
+        "requester": "human",
+        "assignee": null,
+        "pool": "worker",
+        "tier": "standard",
+        "purpose": null,
+        "session": null,
+        "needs": [],
+        "blockedBy": [],
+        "heldUntil": null,
+        "pausedAt": null,
+        "deletedAt": null,
+        "createdAt": "2026-09-21T14:14:13.000Z",
+        "updatedAt": "2026-09-21T14:14:13.000Z",
+        "stateSince": "2026-09-21T14:14:14.000Z",
+        "result": null
+      }
+    ],
+    "lanes": [
+      {
+        "participant": {
+          "id": 1,
+          "projectId": 1,
+          "handle": "human",
+          "role": "human",
+          "agent": null,
+          "harness": null,
+          "designer": false,
+          "createdAt": "2026-09-21T14:13:22.000Z",
+          "leftAt": null,
+          "tier": null,
+          "roles": [],
+          "outUntil": null,
+          "outSince": null,
+          "memberId": null,
+          "member": null,
+          "session": null
+        },
+        "tasks": []
+      },
+      {
+        "participant": {
+          "id": 2,
+          "projectId": 1,
+          "handle": "chief",
+          "role": "chief",
+          "agent": null,
+          "harness": "claude-code",
+          "model": "apollo",
+          "designer": false,
+          "createdAt": "2026-09-21T14:13:23.000Z",
+          "leftAt": null,
+          "tier": null,
+          "roles": [],
+          "outUntil": null,
+          "outSince": null,
+          "memberId": null,
+          "member": null,
+          "session": null
+        },
+        "tasks": [
+          {
+            "id": 2,
+            "projectId": 1,
+            "number": 2,
+            "title": "Plan the week",
+            "state": "queued",
+            "requester": "human",
+            "assignee": "chief",
+            "pool": null,
+            "tier": null,
+            "purpose": null,
+            "session": null,
+            "needs": [],
+            "blockedBy": [],
+            "heldUntil": null,
+            "pausedAt": null,
+            "deletedAt": null,
+            "createdAt": "2026-09-21T14:13:48.000Z",
+            "updatedAt": "2026-09-21T14:13:48.000Z",
+            "stateSince": "2026-09-21T14:13:50.000Z",
+            "result": null
+          }
+        ]
+      },
+      {
+        "participant": {
+          "id": 3,
+          "projectId": 1,
+          "handle": "zeus",
+          "role": "worker",
+          "agent": null,
+          "harness": "claude-code",
+          "modelName": "zeus",
+          "designer": false,
+          "createdAt": "2026-09-21T14:13:24.000Z",
+          "leftAt": null,
+          "tier": "standard",
+          "roles": [
+            "worker"
+          ],
+          "outUntil": null,
+          "outSince": null,
+          "memberId": null,
+          "member": null,
+          "session": null
+        },
+        "tasks": []
+      },
+      {
+        "participant": {
+          "id": 4,
+          "projectId": 1,
+          "handle": "diana",
+          "role": "worker",
+          "agent": null,
+          "harness": "claude-code",
+          "modelName": "diana",
+          "designer": false,
+          "createdAt": "2026-09-21T14:13:26.000Z",
+          "leftAt": null,
+          "tier": "standard",
+          "roles": [
+            "worker"
+          ],
+          "outUntil": null,
+          "outSince": null,
+          "memberId": null,
+          "member": null,
+          "session": null
+        },
+        "tasks": []
+      },
+      {
+        "participant": {
+          "id": 5,
+          "projectId": 1,
+          "handle": "zeus-session-1",
+          "role": "worker",
+          "agent": null,
+          "harness": "claude-code",
+          "modelName": "zeus",
+          "designer": false,
+          "createdAt": "2026-09-21T14:13:31.000Z",
+          "leftAt": null,
+          "tier": "standard",
+          "roles": [
+            "worker"
+          ],
+          "outUntil": null,
+          "outSince": null,
+          "memberId": 3,
+          "member": "zeus",
+          "session": "session-1"
+        },
+        "tasks": [
+          {
+            "id": 1,
+            "projectId": 1,
+            "number": 1,
+            "title": "Parser",
+            "state": "waiting",
+            "requester": "chief",
+            "assignee": "zeus-session-1",
+            "pool": "worker",
+            "tier": "standard",
+            "purpose": null,
+            "session": "zeus-session-1",
+            "needs": [],
+            "blockedBy": [],
+            "heldUntil": null,
+            "pausedAt": null,
+            "deletedAt": null,
+            "createdAt": "2026-09-21T14:13:29.000Z",
+            "updatedAt": "2026-09-21T14:13:46.000Z",
+            "stateSince": "2026-09-21T14:13:47.000Z",
+            "result": null
+          }
+        ]
+      },
+      {
+        "participant": {
+          "id": 6,
+          "projectId": 1,
+          "handle": "diana-session-2",
+          "role": "worker",
+          "agent": null,
+          "harness": "claude-code",
+          "modelName": "diana",
+          "designer": false,
+          "createdAt": "2026-09-21T14:13:55.000Z",
+          "leftAt": null,
+          "tier": "standard",
+          "roles": [
+            "worker"
+          ],
+          "outUntil": null,
+          "outSince": null,
+          "memberId": 4,
+          "member": "diana",
+          "session": "session-2"
+        },
+        "tasks": [
+          {
+            "id": 4,
+            "projectId": 1,
+            "number": 4,
+            "title": "Tests",
+            "state": "done",
+            "requester": "chief",
+            "assignee": "diana-session-2",
+            "pool": "worker",
+            "tier": "standard",
+            "purpose": null,
+            "session": "diana-session-2",
+            "needs": [],
+            "blockedBy": [],
+            "heldUntil": null,
+            "pausedAt": null,
+            "deletedAt": null,
+            "createdAt": "2026-09-21T14:13:53.000Z",
+            "updatedAt": "2026-09-21T14:14:07.000Z",
+            "stateSince": "2026-09-21T14:14:08.000Z",
+            "result": "Tests pass"
+          }
+        ]
+      }
+    ],
+    "gated": []
+  },
+  "open": [
+    {
+      "id": 3,
+      "projectId": 1,
+      "number": 3,
+      "title": "Docs",
+      "body": "Docs",
+      "state": "open",
+      "requester": "chief",
+      "assignee": null,
+      "pool": "worker",
+      "tier": "standard",
+      "purpose": null,
+      "session": null,
+      "needs": [
+        {
+          "number": 1,
+          "state": "waiting"
+        }
+      ],
+      "blockedBy": [
+        1
+      ],
+      "heldUntil": null,
+      "pausedAt": null,
+      "deletedAt": null,
+      "createdAt": "2026-09-21T14:13:51.000Z",
+      "updatedAt": "2026-09-21T14:13:51.000Z"
+    },
+    {
+      "id": 6,
+      "projectId": 1,
+      "number": 6,
+      "title": "From the page",
+      "body": "From the page",
+      "state": "open",
+      "requester": "human",
+      "assignee": null,
+      "pool": "worker",
+      "tier": "standard",
+      "purpose": null,
+      "session": null,
+      "needs": [],
+      "blockedBy": [],
+      "heldUntil": null,
+      "pausedAt": null,
+      "deletedAt": null,
+      "createdAt": "2026-09-21T14:14:13.000Z",
+      "updatedAt": "2026-09-21T14:14:13.000Z"
+    }
+  ],
+  "tasks": [
+    {
+      "id": 1,
+      "projectId": 1,
+      "number": 1,
+      "title": "Parser",
+      "body": "Parser",
+      "state": "waiting",
+      "requester": "chief",
+      "assignee": "zeus-session-1",
+      "pool": "worker",
+      "tier": "standard",
+      "purpose": null,
+      "session": "zeus-session-1",
+      "needs": [],
+      "blockedBy": [],
+      "heldUntil": null,
+      "pausedAt": null,
+      "deletedAt": null,
+      "createdAt": "2026-09-21T14:13:29.000Z",
+      "updatedAt": "2026-09-21T14:13:46.000Z",
+      "messages": [
+        {
+          "id": 1,
+          "projectId": 1,
+          "recipient": "zeus-session-1",
+          "recipientId": 5,
+          "recipientRole": "worker",
+          "sender": "chief",
+          "kind": "task",
+          "taskNumber": 1,
+          "replyTo": null,
+          "body": "Parser",
+          "state": "delivered",
+          "attempts": 1,
+          "reason": null,
+          "receipt": {
+            "item": "i-1"
+          },
+          "questions": null,
+          "choices": null,
+          "urgent": false,
+          "createdAt": "2026-09-21T14:13:34.000Z",
+          "deliveredAt": "2026-09-21T14:13:38.000Z"
+        },
+        {
+          "id": 2,
+          "projectId": 1,
+          "recipient": "chief",
+          "recipientId": 2,
+          "recipientRole": "chief",
+          "sender": "zeus-session-1",
+          "kind": "note",
+          "taskNumber": 1,
+          "replyTo": null,
+          "body": "Half of it is done",
+          "state": "queued",
+          "attempts": 0,
+          "reason": null,
+          "receipt": null,
+          "questions": null,
+          "choices": null,
+          "urgent": false,
+          "createdAt": "2026-09-21T14:13:42.000Z",
+          "deliveredAt": null
+        },
+        {
+          "id": 3,
+          "projectId": 1,
+          "recipient": "chief",
+          "recipientId": 2,
+          "recipientRole": "chief",
+          "sender": "zeus-session-1",
+          "kind": "question",
+          "taskNumber": 1,
+          "replyTo": null,
+          "body": "Which branch?",
+          "state": "queued",
+          "attempts": 0,
+          "reason": null,
+          "receipt": null,
+          "questions": null,
+          "choices": null,
+          "urgent": false,
+          "createdAt": "2026-09-21T14:13:44.000Z",
+          "deliveredAt": null
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "projectId": 1,
+      "number": 2,
+      "title": "Plan the week",
+      "body": "Plan the week",
+      "state": "queued",
+      "requester": "human",
+      "assignee": "chief",
+      "pool": null,
+      "tier": null,
+      "purpose": null,
+      "session": null,
+      "needs": [],
+      "blockedBy": [],
+      "heldUntil": null,
+      "pausedAt": null,
+      "deletedAt": null,
+      "createdAt": "2026-09-21T14:13:48.000Z",
+      "updatedAt": "2026-09-21T14:13:48.000Z",
+      "messages": [
+        {
+          "id": 4,
+          "projectId": 1,
+          "recipient": "chief",
+          "recipientId": 2,
+          "recipientRole": "chief",
+          "sender": "human",
+          "kind": "task",
+          "taskNumber": 2,
+          "replyTo": null,
+          "body": "Plan the week",
+          "state": "queued",
+          "attempts": 0,
+          "reason": null,
+          "receipt": null,
+          "questions": null,
+          "choices": null,
+          "urgent": false,
+          "createdAt": "2026-09-21T14:13:49.000Z",
+          "deliveredAt": null
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "projectId": 1,
+      "number": 3,
+      "title": "Docs",
+      "body": "Docs",
+      "state": "open",
+      "requester": "chief",
+      "assignee": null,
+      "pool": "worker",
+      "tier": "standard",
+      "purpose": null,
+      "session": null,
+      "needs": [
+        {
+          "number": 1,
+          "state": "waiting"
+        }
+      ],
+      "blockedBy": [
+        1
+      ],
+      "heldUntil": null,
+      "pausedAt": null,
+      "deletedAt": null,
+      "createdAt": "2026-09-21T14:13:51.000Z",
+      "updatedAt": "2026-09-21T14:13:51.000Z",
+      "messages": []
+    },
+    {
+      "id": 4,
+      "projectId": 1,
+      "number": 4,
+      "title": "Tests",
+      "body": "Tests",
+      "state": "done",
+      "requester": "chief",
+      "assignee": "diana-session-2",
+      "pool": "worker",
+      "tier": "standard",
+      "purpose": null,
+      "session": "diana-session-2",
+      "needs": [],
+      "blockedBy": [],
+      "heldUntil": null,
+      "pausedAt": null,
+      "deletedAt": null,
+      "createdAt": "2026-09-21T14:13:53.000Z",
+      "updatedAt": "2026-09-21T14:14:07.000Z",
+      "messages": [
+        {
+          "id": 5,
+          "projectId": 1,
+          "recipient": "diana-session-2",
+          "recipientId": 6,
+          "recipientRole": "worker",
+          "sender": "chief",
+          "kind": "task",
+          "taskNumber": 4,
+          "replyTo": null,
+          "body": "Tests",
+          "state": "delivered",
+          "attempts": 1,
+          "reason": null,
+          "receipt": {
+            "item": "i-5"
+          },
+          "questions": null,
+          "choices": null,
+          "urgent": false,
+          "createdAt": "2026-09-21T14:13:58.000Z",
+          "deliveredAt": "2026-09-21T14:14:02.000Z"
+        },
+        {
+          "id": 6,
+          "projectId": 1,
+          "recipient": "chief",
+          "recipientId": 2,
+          "recipientRole": "chief",
+          "sender": "diana-session-2",
+          "kind": "result",
+          "taskNumber": 4,
+          "replyTo": null,
+          "body": "Tests pass",
+          "state": "queued",
+          "attempts": 0,
+          "reason": null,
+          "receipt": null,
+          "questions": null,
+          "choices": null,
+          "urgent": false,
+          "createdAt": "2026-09-21T14:14:06.000Z",
+          "deliveredAt": null
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "projectId": 1,
+      "number": 5,
+      "title": "Cleanup",
+      "body": "Cleanup",
+      "state": "cancelled",
+      "requester": "chief",
+      "assignee": null,
+      "pool": "worker",
+      "tier": "standard",
+      "purpose": null,
+      "session": null,
+      "needs": [],
+      "blockedBy": [],
+      "heldUntil": null,
+      "pausedAt": null,
+      "deletedAt": null,
+      "createdAt": "2026-09-21T14:14:09.000Z",
+      "updatedAt": "2026-09-21T14:14:11.000Z",
+      "messages": []
+    },
+    {
+      "id": 6,
+      "projectId": 1,
+      "number": 6,
+      "title": "From the page",
+      "body": "From the page",
+      "state": "open",
+      "requester": "human",
+      "assignee": null,
+      "pool": "worker",
+      "tier": "standard",
+      "purpose": null,
+      "session": null,
+      "needs": [],
+      "blockedBy": [],
+      "heldUntil": null,
+      "pausedAt": null,
+      "deletedAt": null,
+      "createdAt": "2026-09-21T14:14:13.000Z",
+      "updatedAt": "2026-09-21T14:14:13.000Z",
+      "messages": []
+    }
+  ],
+  "fits": [
+    {
+      "id": 1,
+      "projectId": 1,
+      "number": 1,
+      "title": "Parser",
+      "body": "Parser",
+      "state": "waiting",
+      "requester": "chief",
+      "assignee": "zeus-session-1",
+      "pool": "worker",
+      "tier": "standard",
+      "purpose": null,
+      "session": "zeus-session-1",
+      "needs": [],
+      "blockedBy": [],
+      "heldUntil": null,
+      "pausedAt": null,
+      "deletedAt": null,
+      "createdAt": "2026-09-21T14:13:29.000Z",
+      "updatedAt": "2026-09-21T14:13:46.000Z",
+      "messages": [
+        {
+          "id": 1,
+          "projectId": 1,
+          "recipient": "zeus-session-1",
+          "recipientId": 5,
+          "recipientRole": "worker",
+          "sender": "chief",
+          "kind": "task",
+          "taskNumber": 1,
+          "replyTo": null,
+          "body": "Parser",
+          "state": "delivered",
+          "attempts": 1,
+          "reason": null,
+          "receipt": {
+            "item": "i-1"
+          },
+          "questions": null,
+          "choices": null,
+          "urgent": false,
+          "createdAt": "2026-09-21T14:13:34.000Z",
+          "deliveredAt": "2026-09-21T14:13:38.000Z"
+        },
+        {
+          "id": 2,
+          "projectId": 1,
+          "recipient": "chief",
+          "recipientId": 2,
+          "recipientRole": "chief",
+          "sender": "zeus-session-1",
+          "kind": "note",
+          "taskNumber": 1,
+          "replyTo": null,
+          "body": "Half of it is done",
+          "state": "queued",
+          "attempts": 0,
+          "reason": null,
+          "receipt": null,
+          "questions": null,
+          "choices": null,
+          "urgent": false,
+          "createdAt": "2026-09-21T14:13:42.000Z",
+          "deliveredAt": null
+        },
+        {
+          "id": 3,
+          "projectId": 1,
+          "recipient": "chief",
+          "recipientId": 2,
+          "recipientRole": "chief",
+          "sender": "zeus-session-1",
+          "kind": "question",
+          "taskNumber": 1,
+          "replyTo": null,
+          "body": "Which branch?",
+          "state": "queued",
+          "attempts": 0,
+          "reason": null,
+          "receipt": null,
+          "questions": null,
+          "choices": null,
+          "urgent": false,
+          "createdAt": "2026-09-21T14:13:44.000Z",
+          "deliveredAt": null
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "projectId": 1,
+      "number": 2,
+      "title": "Plan the week",
+      "body": "Plan the week",
+      "state": "queued",
+      "requester": "human",
+      "assignee": "chief",
+      "pool": null,
+      "tier": null,
+      "purpose": null,
+      "session": null,
+      "needs": [],
+      "blockedBy": [],
+      "heldUntil": null,
+      "pausedAt": null,
+      "deletedAt": null,
+      "createdAt": "2026-09-21T14:13:48.000Z",
+      "updatedAt": "2026-09-21T14:13:48.000Z",
+      "messages": [
+        {
+          "id": 4,
+          "projectId": 1,
+          "recipient": "chief",
+          "recipientId": 2,
+          "recipientRole": "chief",
+          "sender": "human",
+          "kind": "task",
+          "taskNumber": 2,
+          "replyTo": null,
+          "body": "Plan the week",
+          "state": "queued",
+          "attempts": 0,
+          "reason": null,
+          "receipt": null,
+          "questions": null,
+          "choices": null,
+          "urgent": false,
+          "createdAt": "2026-09-21T14:13:49.000Z",
+          "deliveredAt": null
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "projectId": 1,
+      "number": 3,
+      "title": "Docs",
+      "body": "Docs",
+      "state": "open",
+      "requester": "chief",
+      "assignee": null,
+      "pool": "worker",
+      "tier": "standard",
+      "purpose": null,
+      "session": null,
+      "needs": [
+        {
+          "number": 1,
+          "state": "waiting"
+        }
+      ],
+      "blockedBy": [
+        1
+      ],
+      "heldUntil": null,
+      "pausedAt": null,
+      "deletedAt": null,
+      "createdAt": "2026-09-21T14:13:51.000Z",
+      "updatedAt": "2026-09-21T14:13:51.000Z",
+      "messages": []
+    },
+    {
+      "id": 4,
+      "projectId": 1,
+      "number": 4,
+      "title": "Tests",
+      "body": "Tests",
+      "state": "done",
+      "requester": "chief",
+      "assignee": "diana-session-2",
+      "pool": "worker",
+      "tier": "standard",
+      "purpose": null,
+      "session": "diana-session-2",
+      "needs": [],
+      "blockedBy": [],
+      "heldUntil": null,
+      "pausedAt": null,
+      "deletedAt": null,
+      "createdAt": "2026-09-21T14:13:53.000Z",
+      "updatedAt": "2026-09-21T14:14:07.000Z",
+      "messages": [
+        {
+          "id": 5,
+          "projectId": 1,
+          "recipient": "diana-session-2",
+          "recipientId": 6,
+          "recipientRole": "worker",
+          "sender": "chief",
+          "kind": "task",
+          "taskNumber": 4,
+          "replyTo": null,
+          "body": "Tests",
+          "state": "delivered",
+          "attempts": 1,
+          "reason": null,
+          "receipt": {
+            "item": "i-5"
+          },
+          "questions": null,
+          "choices": null,
+          "urgent": false,
+          "createdAt": "2026-09-21T14:13:58.000Z",
+          "deliveredAt": "2026-09-21T14:14:02.000Z"
+        },
+        {
+          "id": 6,
+          "projectId": 1,
+          "recipient": "chief",
+          "recipientId": 2,
+          "recipientRole": "chief",
+          "sender": "diana-session-2",
+          "kind": "result",
+          "taskNumber": 4,
+          "replyTo": null,
+          "body": "Tests pass",
+          "state": "queued",
+          "attempts": 0,
+          "reason": null,
+          "receipt": null,
+          "questions": null,
+          "choices": null,
+          "urgent": false,
+          "createdAt": "2026-09-21T14:14:06.000Z",
+          "deliveredAt": null
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "projectId": 1,
+      "number": 5,
+      "title": "Cleanup",
+      "body": "Cleanup",
+      "state": "cancelled",
+      "requester": "chief",
+      "assignee": null,
+      "pool": "worker",
+      "tier": "standard",
+      "purpose": null,
+      "session": null,
+      "needs": [],
+      "blockedBy": [],
+      "heldUntil": null,
+      "pausedAt": null,
+      "deletedAt": null,
+      "createdAt": "2026-09-21T14:14:09.000Z",
+      "updatedAt": "2026-09-21T14:14:11.000Z",
+      "messages": []
+    },
+    {
+      "id": 6,
+      "projectId": 1,
+      "number": 6,
+      "title": "From the page",
+      "body": "From the page",
+      "state": "open",
+      "requester": "human",
+      "assignee": null,
+      "pool": "worker",
+      "tier": "standard",
+      "purpose": null,
+      "session": null,
+      "needs": [],
+      "blockedBy": [],
+      "heldUntil": null,
+      "pausedAt": null,
+      "deletedAt": null,
+      "createdAt": "2026-09-21T14:14:13.000Z",
+      "updatedAt": "2026-09-21T14:14:13.000Z",
+      "messages": []
+    }
+  ],
+  "transcripts": [
+    {
+      "items": [],
+      "total": 0,
+      "shown": 0
+    },
+    {
+      "items": [],
+      "total": 0,
+      "shown": 0
+    },
+    {
+      "items": [],
+      "total": 0,
+      "shown": 0
+    },
+    {
+      "items": [],
+      "total": 0,
+      "shown": 0
+    },
+    {
+      "items": [],
+      "total": 0,
+      "shown": 0
+    },
+    {
+      "items": [],
+      "total": 0,
+      "shown": 0
+    }
+  ],
+  "inboxes": [
+    {
+      "handle": "human",
+      "inbox": [],
+      "latest": {
+        "messages": [],
+        "total": 0,
+        "shown": 0
+      },
+      "unread": {
+        "messages": [],
+        "total": 0,
+        "shown": 0
+      }
+    },
+    {
+      "handle": "chief",
+      "inbox": [
+        {
+          "id": 6,
+          "projectId": 1,
+          "recipient": "chief",
+          "recipientId": 2,
+          "recipientRole": "chief",
+          "sender": "diana-session-2",
+          "kind": "result",
+          "taskNumber": 4,
+          "replyTo": null,
+          "body": "Tests pass",
+          "state": "queued",
+          "attempts": 0,
+          "reason": null,
+          "receipt": null,
+          "questions": null,
+          "choices": null,
+          "urgent": false,
+          "createdAt": "2026-09-21T14:14:06.000Z",
+          "deliveredAt": null
+        },
+        {
+          "id": 4,
+          "projectId": 1,
+          "recipient": "chief",
+          "recipientId": 2,
+          "recipientRole": "chief",
+          "sender": "human",
+          "kind": "task",
+          "taskNumber": 2,
+          "replyTo": null,
+          "body": "Plan the week",
+          "state": "queued",
+          "attempts": 0,
+          "reason": null,
+          "receipt": null,
+          "questions": null,
+          "choices": null,
+          "urgent": false,
+          "createdAt": "2026-09-21T14:13:49.000Z",
+          "deliveredAt": null
+        },
+        {
+          "id": 3,
+          "projectId": 1,
+          "recipient": "chief",
+          "recipientId": 2,
+          "recipientRole": "chief",
+          "sender": "zeus-session-1",
+          "kind": "question",
+          "taskNumber": 1,
+          "replyTo": null,
+          "body": "Which branch?",
+          "state": "queued",
+          "attempts": 0,
+          "reason": null,
+          "receipt": null,
+          "questions": null,
+          "choices": null,
+          "urgent": false,
+          "createdAt": "2026-09-21T14:13:44.000Z",
+          "deliveredAt": null
+        },
+        {
+          "id": 2,
+          "projectId": 1,
+          "recipient": "chief",
+          "recipientId": 2,
+          "recipientRole": "chief",
+          "sender": "zeus-session-1",
+          "kind": "note",
+          "taskNumber": 1,
+          "replyTo": null,
+          "body": "Half of it is done",
+          "state": "queued",
+          "attempts": 0,
+          "reason": null,
+          "receipt": null,
+          "questions": null,
+          "choices": null,
+          "urgent": false,
+          "createdAt": "2026-09-21T14:13:42.000Z",
+          "deliveredAt": null
+        }
+      ],
+      "latest": {
+        "messages": [
+          {
+            "id": 6,
+            "projectId": 1,
+            "recipient": "chief",
+            "recipientId": 2,
+            "recipientRole": "chief",
+            "sender": "diana-session-2",
+            "kind": "result",
+            "taskNumber": 4,
+            "replyTo": null,
+            "body": "Tests pass",
+            "state": "queued",
+            "attempts": 0,
+            "reason": null,
+            "receipt": null,
+            "questions": null,
+            "choices": null,
+            "urgent": false,
+            "createdAt": "2026-09-21T14:14:06.000Z",
+            "deliveredAt": null
+          },
+          {
+            "id": 4,
+            "projectId": 1,
+            "recipient": "chief",
+            "recipientId": 2,
+            "recipientRole": "chief",
+            "sender": "human",
+            "kind": "task",
+            "taskNumber": 2,
+            "replyTo": null,
+            "body": "Plan the week",
+            "state": "queued",
+            "attempts": 0,
+            "reason": null,
+            "receipt": null,
+            "questions": null,
+            "choices": null,
+            "urgent": false,
+            "createdAt": "2026-09-21T14:13:49.000Z",
+            "deliveredAt": null
+          },
+          {
+            "id": 3,
+            "projectId": 1,
+            "recipient": "chief",
+            "recipientId": 2,
+            "recipientRole": "chief",
+            "sender": "zeus-session-1",
+            "kind": "question",
+            "taskNumber": 1,
+            "replyTo": null,
+            "body": "Which branch?",
+            "state": "queued",
+            "attempts": 0,
+            "reason": null,
+            "receipt": null,
+            "questions": null,
+            "choices": null,
+            "urgent": false,
+            "createdAt": "2026-09-21T14:13:44.000Z",
+            "deliveredAt": null
+          },
+          {
+            "id": 2,
+            "projectId": 1,
+            "recipient": "chief",
+            "recipientId": 2,
+            "recipientRole": "chief",
+            "sender": "zeus-session-1",
+            "kind": "note",
+            "taskNumber": 1,
+            "replyTo": null,
+            "body": "Half of it is done",
+            "state": "queued",
+            "attempts": 0,
+            "reason": null,
+            "receipt": null,
+            "questions": null,
+            "choices": null,
+            "urgent": false,
+            "createdAt": "2026-09-21T14:13:42.000Z",
+            "deliveredAt": null
+          }
+        ],
+        "total": 4,
+        "shown": 4
+      },
+      "unread": {
+        "messages": [
+          {
+            "id": 2,
+            "projectId": 1,
+            "recipient": "chief",
+            "recipientId": 2,
+            "recipientRole": "chief",
+            "sender": "zeus-session-1",
+            "kind": "note",
+            "taskNumber": 1,
+            "replyTo": null,
+            "body": "Half of it is done",
+            "state": "queued",
+            "attempts": 0,
+            "reason": null,
+            "receipt": null,
+            "questions": null,
+            "choices": null,
+            "urgent": false,
+            "createdAt": "2026-09-21T14:13:42.000Z",
+            "deliveredAt": null
+          }
+        ],
+        "total": 1,
+        "shown": 1
+      }
+    },
+    {
+      "handle": "zeus",
+      "inbox": [],
+      "latest": {
+        "messages": [],
+        "total": 0,
+        "shown": 0
+      },
+      "unread": {
+        "messages": [],
+        "total": 0,
+        "shown": 0
+      }
+    },
+    {
+      "handle": "diana",
+      "inbox": [],
+      "latest": {
+        "messages": [],
+        "total": 0,
+        "shown": 0
+      },
+      "unread": {
+        "messages": [],
+        "total": 0,
+        "shown": 0
+      }
+    },
+    {
+      "handle": "zeus-session-1",
+      "inbox": [
+        {
+          "id": 1,
+          "projectId": 1,
+          "recipient": "zeus-session-1",
+          "recipientId": 5,
+          "recipientRole": "worker",
+          "sender": "chief",
+          "kind": "task",
+          "taskNumber": 1,
+          "replyTo": null,
+          "body": "Parser",
+          "state": "delivered",
+          "attempts": 1,
+          "reason": null,
+          "receipt": {
+            "item": "i-1"
+          },
+          "questions": null,
+          "choices": null,
+          "urgent": false,
+          "createdAt": "2026-09-21T14:13:34.000Z",
+          "deliveredAt": "2026-09-21T14:13:38.000Z"
+        }
+      ],
+      "latest": {
+        "messages": [
+          {
+            "id": 1,
+            "projectId": 1,
+            "recipient": "zeus-session-1",
+            "recipientId": 5,
+            "recipientRole": "worker",
+            "sender": "chief",
+            "kind": "task",
+            "taskNumber": 1,
+            "replyTo": null,
+            "body": "Parser",
+            "state": "delivered",
+            "attempts": 1,
+            "reason": null,
+            "receipt": {
+              "item": "i-1"
+            },
+            "questions": null,
+            "choices": null,
+            "urgent": false,
+            "createdAt": "2026-09-21T14:13:34.000Z",
+            "deliveredAt": "2026-09-21T14:13:38.000Z"
+          }
+        ],
+        "total": 1,
+        "shown": 1
+      },
+      "unread": {
+        "messages": [],
+        "total": 0,
+        "shown": 0
+      }
+    },
+    {
+      "handle": "diana-session-2",
+      "inbox": [
+        {
+          "id": 5,
+          "projectId": 1,
+          "recipient": "diana-session-2",
+          "recipientId": 6,
+          "recipientRole": "worker",
+          "sender": "chief",
+          "kind": "task",
+          "taskNumber": 4,
+          "replyTo": null,
+          "body": "Tests",
+          "state": "delivered",
+          "attempts": 1,
+          "reason": null,
+          "receipt": {
+            "item": "i-5"
+          },
+          "questions": null,
+          "choices": null,
+          "urgent": false,
+          "createdAt": "2026-09-21T14:13:58.000Z",
+          "deliveredAt": "2026-09-21T14:14:02.000Z"
+        }
+      ],
+      "latest": {
+        "messages": [
+          {
+            "id": 5,
+            "projectId": 1,
+            "recipient": "diana-session-2",
+            "recipientId": 6,
+            "recipientRole": "worker",
+            "sender": "chief",
+            "kind": "task",
+            "taskNumber": 4,
+            "replyTo": null,
+            "body": "Tests",
+            "state": "delivered",
+            "attempts": 1,
+            "reason": null,
+            "receipt": {
+              "item": "i-5"
+            },
+            "questions": null,
+            "choices": null,
+            "urgent": false,
+            "createdAt": "2026-09-21T14:13:58.000Z",
+            "deliveredAt": "2026-09-21T14:14:02.000Z"
+          }
+        ],
+        "total": 1,
+        "shown": 1
+      },
+      "unread": {
+        "messages": [],
+        "total": 0,
+        "shown": 0
+      }
+    }
+  ],
+  "members": [
+    {
+      "id": 3,
+      "handle": "zeus",
+      "agent": null,
+      "harness": "claude-code",
+      "tier": "standard",
+      "roles": [
+        "worker"
+      ],
+      "taken": 1,
+      "sessions": 1,
+      "outUntil": null
+    },
+    {
+      "id": 4,
+      "handle": "diana",
+      "agent": null,
+      "harness": "claude-code",
+      "tier": "standard",
+      "roles": [
+        "worker"
+      ],
+      "taken": 1,
+      "sessions": 0,
+      "outUntil": null
+    }
+  ]
+}

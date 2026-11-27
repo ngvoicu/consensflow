@@ -1,0 +1,773 @@
+{
+  "chief /api/whoami": {
+    "status": 200,
+    "body": {
+      "project": {
+        "id": 1,
+        "name": "app",
+        "directory": "/work/app"
+      },
+      "participant": {
+        "handle": "chief",
+        "role": "chief"
+      },
+      "task": null
+    }
+  },
+  "chief /api/staff": {
+    "status": 200,
+    "body": {
+      "members": [
+        {
+          "handle": "zeus",
+          "role": "worker",
+          "roles": [
+            "worker"
+          ],
+          "tier": "standard",
+          "harness": "claude-code",
+          "harnessName": "Claude Code",
+          "model": "claude-sonnet-5",
+          "nameApart": false,
+          "modelName": "zeus",
+          "effort": null
+        }
+      ],
+      "slots": [
+        {
+          "role": "worker",
+          "tier": "critical",
+          "holders": []
+        },
+        {
+          "role": "worker",
+          "tier": "complex",
+          "holders": []
+        },
+        {
+          "role": "worker",
+          "tier": "standard",
+          "holders": [
+            "zeus"
+          ]
+        },
+        {
+          "role": "worker",
+          "tier": "light",
+          "holders": []
+        },
+        {
+          "role": "frontend",
+          "tier": "critical",
+          "holders": []
+        },
+        {
+          "role": "frontend",
+          "tier": "complex",
+          "holders": []
+        },
+        {
+          "role": "frontend",
+          "tier": "standard",
+          "holders": []
+        },
+        {
+          "role": "frontend",
+          "tier": "light",
+          "holders": []
+        },
+        {
+          "role": "architect",
+          "tier": "critical",
+          "holders": []
+        },
+        {
+          "role": "architect",
+          "tier": "complex",
+          "holders": []
+        },
+        {
+          "role": "architect",
+          "tier": "standard",
+          "holders": []
+        },
+        {
+          "role": "architect",
+          "tier": "light",
+          "holders": []
+        },
+        {
+          "role": "researcher",
+          "tier": "critical",
+          "holders": []
+        },
+        {
+          "role": "researcher",
+          "tier": "complex",
+          "holders": []
+        },
+        {
+          "role": "researcher",
+          "tier": "standard",
+          "holders": []
+        },
+        {
+          "role": "researcher",
+          "tier": "light",
+          "holders": []
+        },
+        {
+          "role": "advisor",
+          "tier": "critical",
+          "holders": []
+        },
+        {
+          "role": "advisor",
+          "tier": "complex",
+          "holders": []
+        },
+        {
+          "role": "advisor",
+          "tier": "standard",
+          "holders": []
+        },
+        {
+          "role": "advisor",
+          "tier": "light",
+          "holders": []
+        },
+        {
+          "role": "reviewer",
+          "tier": "critical",
+          "holders": []
+        },
+        {
+          "role": "reviewer",
+          "tier": "complex",
+          "holders": []
+        },
+        {
+          "role": "reviewer",
+          "tier": "standard",
+          "holders": []
+        },
+        {
+          "role": "reviewer",
+          "tier": "light",
+          "holders": []
+        },
+        {
+          "role": "tester",
+          "tier": "critical",
+          "holders": []
+        },
+        {
+          "role": "tester",
+          "tier": "complex",
+          "holders": []
+        },
+        {
+          "role": "tester",
+          "tier": "standard",
+          "holders": []
+        },
+        {
+          "role": "tester",
+          "tier": "light",
+          "holders": []
+        },
+        {
+          "role": "integrator",
+          "tier": "critical",
+          "holders": []
+        },
+        {
+          "role": "integrator",
+          "tier": "complex",
+          "holders": []
+        },
+        {
+          "role": "integrator",
+          "tier": "standard",
+          "holders": []
+        },
+        {
+          "role": "integrator",
+          "tier": "light",
+          "holders": []
+        },
+        {
+          "role": "designer",
+          "tier": null,
+          "holders": []
+        }
+      ]
+    }
+  },
+  "chief /api/tasks": {
+    "status": 200,
+    "body": {
+      "open": [],
+      "lanes": [
+        {
+          "handle": "human",
+          "role": "human",
+          "tasks": []
+        },
+        {
+          "handle": "chief",
+          "role": "chief",
+          "tasks": [
+            {
+              "number": 2,
+              "title": "Plan the week",
+              "state": "queued",
+              "requester": "human",
+              "assignee": "chief",
+              "pool": null,
+              "tier": null,
+              "needs": [],
+              "blockedBy": [],
+              "updatedAt": "<time>"
+            }
+          ],
+          "runsOn": "mybuilder"
+        },
+        {
+          "handle": "zeus",
+          "role": "worker",
+          "tasks": [
+            {
+              "number": 1,
+              "title": "Parser",
+              "state": "working",
+              "requester": "chief",
+              "assignee": "zeus",
+              "pool": null,
+              "tier": null,
+              "needs": [],
+              "blockedBy": [],
+              "updatedAt": "<time>"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "chief /api/inbox": {
+    "status": 200,
+    "body": {
+      "messages": [
+        {
+          "id": 3,
+          "kind": "task",
+          "state": "queued",
+          "sender": "human",
+          "recipient": "chief",
+          "task": 2,
+          "preview": "Plan the week",
+          "questions": null,
+          "choices": null,
+          "createdAt": "<time>"
+        },
+        {
+          "id": 1,
+          "kind": "question",
+          "state": "queued",
+          "sender": "zeus",
+          "recipient": "chief",
+          "task": null,
+          "preview": "Which?",
+          "questions": null,
+          "choices": null,
+          "createdAt": "<time>"
+        }
+      ]
+    }
+  },
+  "chief /api/tasks/1": {
+    "status": 200,
+    "body": {
+      "task": {
+        "id": 1,
+        "projectId": 1,
+        "number": 1,
+        "title": "Parser",
+        "body": "Parser",
+        "state": "working",
+        "requester": "chief",
+        "assignee": "zeus",
+        "pool": null,
+        "tier": null,
+        "purpose": null,
+        "session": null,
+        "needs": [],
+        "blockedBy": [],
+        "heldUntil": null,
+        "pausedAt": null,
+        "deletedAt": null,
+        "createdAt": "<time>",
+        "updatedAt": "<time>",
+        "messages": [
+          {
+            "id": 2,
+            "projectId": 1,
+            "recipient": "zeus",
+            "recipientId": 3,
+            "recipientRole": "worker",
+            "sender": "chief",
+            "kind": "task",
+            "taskNumber": 1,
+            "replyTo": null,
+            "body": "Parser",
+            "state": "delivered",
+            "attempts": 1,
+            "reason": null,
+            "receipt": {
+              "item": "test"
+            },
+            "questions": null,
+            "choices": null,
+            "urgent": false,
+            "createdAt": "<time>",
+            "deliveredAt": "<time>"
+          }
+        ]
+      }
+    }
+  },
+  "chief /api/tasks/2": {
+    "status": 200,
+    "body": {
+      "task": {
+        "id": 2,
+        "projectId": 1,
+        "number": 2,
+        "title": "Plan the week",
+        "body": "Plan the week",
+        "state": "queued",
+        "requester": "human",
+        "assignee": "chief",
+        "pool": null,
+        "tier": null,
+        "purpose": null,
+        "session": null,
+        "needs": [],
+        "blockedBy": [],
+        "heldUntil": null,
+        "pausedAt": null,
+        "deletedAt": null,
+        "createdAt": "<time>",
+        "updatedAt": "<time>",
+        "messages": [
+          {
+            "id": 3,
+            "projectId": 1,
+            "recipient": "chief",
+            "recipientId": 2,
+            "recipientRole": "chief",
+            "sender": "human",
+            "kind": "task",
+            "taskNumber": 2,
+            "replyTo": null,
+            "body": "Plan the week",
+            "state": "queued",
+            "attempts": 0,
+            "reason": null,
+            "receipt": null,
+            "questions": null,
+            "choices": null,
+            "urgent": false,
+            "createdAt": "<time>",
+            "deliveredAt": null
+          }
+        ]
+      }
+    }
+  },
+  "zeus /api/whoami": {
+    "status": 200,
+    "body": {
+      "project": {
+        "id": 1,
+        "name": "app",
+        "directory": "/work/app"
+      },
+      "participant": {
+        "handle": "zeus",
+        "role": "worker"
+      },
+      "task": {
+        "number": 1,
+        "title": "Parser",
+        "state": "working",
+        "requester": "chief",
+        "assignee": "zeus",
+        "pool": null,
+        "tier": null,
+        "needs": [],
+        "blockedBy": [],
+        "updatedAt": "<time>"
+      }
+    }
+  },
+  "zeus /api/staff": {
+    "status": 200,
+    "body": {
+      "members": [
+        {
+          "handle": "zeus",
+          "role": "worker",
+          "roles": [
+            "worker"
+          ],
+          "tier": "standard",
+          "harness": "claude-code",
+          "harnessName": "Claude Code",
+          "model": "claude-sonnet-5",
+          "nameApart": false,
+          "modelName": "zeus",
+          "effort": null
+        }
+      ],
+      "slots": [
+        {
+          "role": "worker",
+          "tier": "critical",
+          "holders": []
+        },
+        {
+          "role": "worker",
+          "tier": "complex",
+          "holders": []
+        },
+        {
+          "role": "worker",
+          "tier": "standard",
+          "holders": [
+            "zeus"
+          ]
+        },
+        {
+          "role": "worker",
+          "tier": "light",
+          "holders": []
+        },
+        {
+          "role": "frontend",
+          "tier": "critical",
+          "holders": []
+        },
+        {
+          "role": "frontend",
+          "tier": "complex",
+          "holders": []
+        },
+        {
+          "role": "frontend",
+          "tier": "standard",
+          "holders": []
+        },
+        {
+          "role": "frontend",
+          "tier": "light",
+          "holders": []
+        },
+        {
+          "role": "architect",
+          "tier": "critical",
+          "holders": []
+        },
+        {
+          "role": "architect",
+          "tier": "complex",
+          "holders": []
+        },
+        {
+          "role": "architect",
+          "tier": "standard",
+          "holders": []
+        },
+        {
+          "role": "architect",
+          "tier": "light",
+          "holders": []
+        },
+        {
+          "role": "researcher",
+          "tier": "critical",
+          "holders": []
+        },
+        {
+          "role": "researcher",
+          "tier": "complex",
+          "holders": []
+        },
+        {
+          "role": "researcher",
+          "tier": "standard",
+          "holders": []
+        },
+        {
+          "role": "researcher",
+          "tier": "light",
+          "holders": []
+        },
+        {
+          "role": "advisor",
+          "tier": "critical",
+          "holders": []
+        },
+        {
+          "role": "advisor",
+          "tier": "complex",
+          "holders": []
+        },
+        {
+          "role": "advisor",
+          "tier": "standard",
+          "holders": []
+        },
+        {
+          "role": "advisor",
+          "tier": "light",
+          "holders": []
+        },
+        {
+          "role": "reviewer",
+          "tier": "critical",
+          "holders": []
+        },
+        {
+          "role": "reviewer",
+          "tier": "complex",
+          "holders": []
+        },
+        {
+          "role": "reviewer",
+          "tier": "standard",
+          "holders": []
+        },
+        {
+          "role": "reviewer",
+          "tier": "light",
+          "holders": []
+        },
+        {
+          "role": "tester",
+          "tier": "critical",
+          "holders": []
+        },
+        {
+          "role": "tester",
+          "tier": "complex",
+          "holders": []
+        },
+        {
+          "role": "tester",
+          "tier": "standard",
+          "holders": []
+        },
+        {
+          "role": "tester",
+          "tier": "light",
+          "holders": []
+        },
+        {
+          "role": "integrator",
+          "tier": "critical",
+          "holders": []
+        },
+        {
+          "role": "integrator",
+          "tier": "complex",
+          "holders": []
+        },
+        {
+          "role": "integrator",
+          "tier": "standard",
+          "holders": []
+        },
+        {
+          "role": "integrator",
+          "tier": "light",
+          "holders": []
+        },
+        {
+          "role": "designer",
+          "tier": null,
+          "holders": []
+        }
+      ]
+    }
+  },
+  "zeus /api/tasks": {
+    "status": 200,
+    "body": {
+      "open": [],
+      "lanes": [
+        {
+          "handle": "human",
+          "role": "human",
+          "tasks": []
+        },
+        {
+          "handle": "chief",
+          "role": "chief",
+          "tasks": [
+            {
+              "number": 2,
+              "title": "Plan the week",
+              "state": "queued",
+              "requester": "human",
+              "assignee": "chief",
+              "pool": null,
+              "tier": null,
+              "needs": [],
+              "blockedBy": [],
+              "updatedAt": "<time>"
+            }
+          ],
+          "runsOn": "mybuilder"
+        },
+        {
+          "handle": "zeus",
+          "role": "worker",
+          "tasks": [
+            {
+              "number": 1,
+              "title": "Parser",
+              "state": "working",
+              "requester": "chief",
+              "assignee": "zeus",
+              "pool": null,
+              "tier": null,
+              "needs": [],
+              "blockedBy": [],
+              "updatedAt": "<time>"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "zeus /api/inbox": {
+    "status": 200,
+    "body": {
+      "messages": [
+        {
+          "id": 2,
+          "kind": "task",
+          "state": "delivered",
+          "sender": "chief",
+          "recipient": "zeus",
+          "task": 1,
+          "preview": "Parser",
+          "questions": null,
+          "choices": null,
+          "createdAt": "<time>"
+        }
+      ]
+    }
+  },
+  "zeus /api/tasks/1": {
+    "status": 200,
+    "body": {
+      "task": {
+        "id": 1,
+        "projectId": 1,
+        "number": 1,
+        "title": "Parser",
+        "body": "Parser",
+        "state": "working",
+        "requester": "chief",
+        "assignee": "zeus",
+        "pool": null,
+        "tier": null,
+        "purpose": null,
+        "session": null,
+        "needs": [],
+        "blockedBy": [],
+        "heldUntil": null,
+        "pausedAt": null,
+        "deletedAt": null,
+        "createdAt": "<time>",
+        "updatedAt": "<time>",
+        "messages": [
+          {
+            "id": 2,
+            "projectId": 1,
+            "recipient": "zeus",
+            "recipientId": 3,
+            "recipientRole": "worker",
+            "sender": "chief",
+            "kind": "task",
+            "taskNumber": 1,
+            "replyTo": null,
+            "body": "Parser",
+            "state": "delivered",
+            "attempts": 1,
+            "reason": null,
+            "receipt": {
+              "item": "test"
+            },
+            "questions": null,
+            "choices": null,
+            "urgent": false,
+            "createdAt": "<time>",
+            "deliveredAt": "<time>"
+          }
+        ]
+      }
+    }
+  },
+  "zeus /api/tasks/2": {
+    "status": 200,
+    "body": {
+      "task": {
+        "id": 2,
+        "projectId": 1,
+        "number": 2,
+        "title": "Plan the week",
+        "body": "Plan the week",
+        "state": "queued",
+        "requester": "human",
+        "assignee": "chief",
+        "pool": null,
+        "tier": null,
+        "purpose": null,
+        "session": null,
+        "needs": [],
+        "blockedBy": [],
+        "heldUntil": null,
+        "pausedAt": null,
+        "deletedAt": null,
+        "createdAt": "<time>",
+        "updatedAt": "<time>",
+        "messages": [
+          {
+            "id": 3,
+            "projectId": 1,
+            "recipient": "chief",
+            "recipientId": 2,
+            "recipientRole": "chief",
+            "sender": "human",
+            "kind": "task",
+            "taskNumber": 2,
+            "replyTo": null,
+            "body": "Plan the week",
+            "state": "queued",
+            "attempts": 0,
+            "reason": null,
+            "receipt": null,
+            "questions": null,
+            "choices": null,
+            "urgent": false,
+            "createdAt": "<time>",
+            "deliveredAt": null
+          }
+        ]
+      }
+    }
+  }
+}

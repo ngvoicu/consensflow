@@ -6,7 +6,7 @@
 use hyper::Method;
 use serde_json::{json, Value};
 
-use crate::api::routes::tests::support::{api, state_of, working_task};
+use crate::api::routes::tests::support::{api, human_task_working, state_of, working_task};
 use crate::testing::{scene, Scene};
 
 async fn note(scene: &Scene, token: &str, body: &str) -> (u16, Value) {
@@ -172,4 +172,24 @@ async fn a_member_whose_task_was_cancelled_is_told_so_and_the_chief_never_is() {
     assert_eq!(scene.kicks.get(), 0);
     let (status, _) = note(&scene, &scene.chief, r#"{"body":"Noted."}"#).await;
     assert_eq!(status, 201);
+}
+
+#[tokio::test]
+async fn a_member_notes_the_human_when_the_human_gave_its_task_and_the_chief_hears_nothing() {
+    let scene = scene();
+    let number = human_task_working(&scene);
+    let (status, said) = note(&scene, &scene.zeus, r#"{"body":"The tests passed"}"#).await;
+    assert_eq!(status, 201, "{said}");
+    assert_eq!(said["message"]["recipient"], "human");
+    assert_eq!(said["message"]["task"], number);
+    // `--human` names the same place, and the chief's is never one it can name.
+    let (status, said) = note(&scene, &scene.zeus, r#"{"body":"Again","to":"human"}"#).await;
+    assert_eq!(status, 201, "{said}");
+    assert_eq!(said["message"]["recipient"], "human");
+    let chief = scene.id("chief");
+    let held = scene.context.ledger.borrow().inbox(chief, 100).unwrap();
+    assert!(
+        held.iter().all(|message| message.kind != "note"),
+        "{held:?}"
+    );
 }

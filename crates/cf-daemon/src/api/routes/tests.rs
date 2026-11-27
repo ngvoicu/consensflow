@@ -270,6 +270,7 @@ async fn every_route_is_answered_by_a_handler_of_its_own() {
 /// What the route tests stand on: the API as a client reaches it, and the
 /// board's state to start from.
 mod meeting;
+mod no_lead_views;
 
 pub(super) mod support {
 
@@ -333,6 +334,29 @@ pub(super) mod support {
             .confirm_delivery(brief, Some(&json!({ "item": "test" })))
             .unwrap();
         number
+    }
+
+    /// A task the human gave for a standard worker, which `zeus` took: working. Its
+    /// requester is the human, which is what a person's task from the page has.
+    pub(in crate::api::routes) fn human_task_working(scene: &Scene) -> i64 {
+        let mut ledger = scene.context.ledger.borrow_mut();
+        let created = ledger
+            .create_task(
+                scene.project.id,
+                &NewTask {
+                    from: "human".to_owned(),
+                    to: Some("zeus".to_owned()),
+                    body: "From the page".to_owned(),
+                    ..NewTask::default()
+                },
+            )
+            .unwrap();
+        let brief = created.message.unwrap().id;
+        ledger.begin_delivery(brief).unwrap();
+        ledger
+            .confirm_delivery(brief, Some(&json!({ "item": "test" })))
+            .unwrap();
+        created.task.number
     }
 
     /// A task the chief gave `zeus` by name, its brief queued for a window not
