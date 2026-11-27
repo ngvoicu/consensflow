@@ -4,7 +4,8 @@
 # runs them all.
 #
 # Not planted: the chief's own window (`participant.role == "chief"`): a chief has no task to hold,
-# and `failed_end` refuses one itself.
+# so it is guarded three ways (`login_tried_again`, `failed_end`, and no task to find); its case is
+# a test only.
 
 [run]
 login-dispatcher = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "login_retries"]
@@ -82,16 +83,6 @@ find = ".filter(|thread| matches!(thread.task.state.as_str(), \"queued\" | \"wor
 replace = ".filter(|thread| matches!(thread.task.state.as_str(), \"queued\" | \"working\" | \"waiting\"));"
 
 [[plant]]
-name = "login retry: a chief's refused login is tried"
-meant = "a_chief_s_refused_login_holds_at_once_with_the_tries_on"
-runs = ["login-dispatcher"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/turn_retry.rs"
-find = "        if participant.role == \"chief\" || !login_refused(because) {"
-replace = "        if !login_refused(because) {"
-
-[[plant]]
 name = "login retry: the press does not start the tries again"
 meant = "a_person_s_try_again_now_starts_the_tries_again_so_the_next_failure_gets_its_two"
 runs = ["login-dispatcher"]
@@ -127,9 +118,9 @@ meant = "the_hold_at_the_last_try_is_the_hold_of_a_first_refusal_but_for_the_try
 runs = ["login-dispatcher"]
 
 [[plant.edit]]
-file = "crates/cf-engine/src/scheduler.rs"
-find = "Some(Unwell::Account(because)) => format!(\"unavailable: {because}\"),"
-replace = "Some(Unwell::Account(because)) => format!(\"unavailable - {because}\"),"
+file = "crates/cf-engine/src/turn_retry.rs"
+find = "            Tried::Fails(_) => Ok(false),"
+replace = "            Tried::Fails(_) => {\n                let _ = self.seams.ledger.borrow_mut().hold_task(project.id, thread.task.number, \"9999-12-31T23:59:59.998Z\", \"plant\");\n                Ok(false)\n            }"
 
 # The model alone: a login refusal drawn as a step holds the member at once, or fails the task at
 # the last try.
