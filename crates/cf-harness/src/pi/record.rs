@@ -2,19 +2,20 @@
 //! writes beside it (the `evidence` module): the brain's `architecture/pi-turn-state.md`.
 //!
 //! **Whether a turn runs is Pi's own word.** The extension follows Pi's run state and writes
-//! it as one word (`working`, `busy`, `rest`) with a count of the runs that ended and the last
-//! of them: each its leaf and Pi's own flag of an abort. Where that word is there the session
-//! file never decides whether a turn runs: `working` is at work; `busy` is neither at rest nor
-//! at work (a compaction, a prompt in hand: nothing is interrupted, taken as a result or sent);
-//! `rest` is at rest once the file as read holds the leaf it names (a session with no file yet is
-//! at rest with nothing to read). A run that ended is never missed: each look reports the oldest
-//! end it has not reported, read up to that run's own leaf, whatever the word says now, one look
-//! for each, in order.
+//! it as one word (`working`, `busy`, `rest`) with the counts of the runs begun and ended, and the
+//! last end in the session: its leaf and Pi's own flag of an abort. Where that word is there the
+//! session file never decides whether a turn runs: `working` with more runs begun than ended is
+//! at work; `busy`, and `working` with as many ends as runs (an end being written), are neither at
+//! rest nor at work (nothing is interrupted, taken as a result or sent); `rest` is at rest. A turn
+//! is over at `rest` once the file as read holds the last end's leaf and the leaf Pi has selected,
+//! and is read along the selected leaf's own parents; until then the stop is paid and nothing is
+//! taken or sent. A session with no file yet and no end is at rest with nothing to read. A word
+//! whose process is gone says nothing of the present: an end it was writing is a finished turn.
 //!
 //! **The file gives the words, and how a run ended:** the last assistant step at or before the
-//! run's leaf since the last user message. `stop` is its answer; `length` and `deferred` failed
-//! with their cause; `aborted` was interrupted; `error` was interrupted where Pi's flag says it
-//! aborted, or where Pi's own omission names that very step (a `context_edit` of it with no
+//! selected leaf since the last user message. `stop` is its answer; `length` and `deferred` failed
+//! with their cause; `aborted` was interrupted; `error` was interrupted where Pi's flag of the last
+//! end says it aborted and that end's step is the selected one, or where Pi's own omission names that very step (a `context_edit` of it with no
 //! replacement, and no step after it: a retry cancelled in its backoff), and failed otherwise; a
 //! `toolUse` step, a tool's result or no step ended with no answer, interrupted. A call in a step
 //! that ended `aborted` or `error` never ran: never open, never named. A step Pi omitted is left
@@ -71,6 +72,17 @@ const QUIET_MS: i64 = 120_000;
 /// reset a refusal names at a time of day, and in no zone, is read in
 /// `local`.
 pub fn reader(session: &str, env: &Env, local: &TimeZone) -> Box<dyn Look + Send> {
+    reader_asking(session, env, local, cf_process::alive)
+}
+
+/// [`reader`], asking `alive` whether the process that wrote the extension's word is there: the
+/// system's, and a test's own where it must say.
+pub(crate) fn reader_asking(
+    session: &str,
+    env: &Env,
+    local: &TimeZone,
+    alive: fn(u32) -> bool,
+) -> Box<dyn Look + Send> {
     let locating = session.to_owned();
     let searched = env.clone();
     let reading: Arc<str> = Arc::from(session);
@@ -82,20 +94,18 @@ pub fn reader(session: &str, env: &Env, local: &TimeZone) -> Box<dyn Look + Send
             Box::new(move || transcript(&locating, &searched)),
             Box::new(move |_: &Path| Session::new(Arc::clone(&reading), local.clone())),
         ),
-        taken: None,
+        alive,
     })
 }
 
 /// A session's reader: its transcript followed, the environment that says where the
-/// extension's word is, and the ends of runs it has reported.
+/// extension's word is, and how it asks whether the process that wrote the word is there.
 struct Reader {
     session: Arc<str>,
     env: Env,
     transcript: Followed<Session>,
-    /// The launch whose word the reader read, and how many of its runs' ends it has reported. A
-    /// reader made new (the daemon restarted, a reader forgotten unread) starts from the word's
-    /// count.
-    taken: Option<(String, u64)>,
+    /// Whether a process is alive: the system's, and a test's own where it must say.
+    alive: fn(u32) -> bool,
 }
 
 impl Look for Reader {
@@ -115,8 +125,8 @@ enum Turn {
     /// The word says `busy`, or a run's end is being written (Pi cleared its run and the word
     /// does not say `rest` yet): neither at rest nor at work.
     Busy,
-    /// The word says `rest`, and what the result is read from is not there yet: an end the
-    /// reader has still to take, or the leaf it rests at not yet in the file.
+    /// The word says `rest`, and the file as read lacks the last end's leaf or the selected one:
+    /// the stop is paid, and the result and the next message wait for it.
     Rested,
     /// A run ended, with Pi's flag.
     Ended { flag: Option<bool> },
@@ -148,9 +158,8 @@ impl Reader {
             Some(read) => Some(&*read.state),
             None => None,
         };
-        let (ended, pending) = take_end(&mut self.taken, &word, session);
-        let mut record = present(&word, session, pending);
-        record.lines.ended = ended.map(|ended| Arc::new(Reading::Known(ended)));
+        let gone = word.pid.is_some_and(|pid| !(self.alive)(pid));
+        let mut record = present(&word, session, gone);
         if let Some(read) = read {
             record.lines.lost = read.lost;
         }
@@ -168,69 +177,52 @@ fn holds(session: Option<&Session>, leaf: Option<&String>) -> bool {
     }
 }
 
-/// The oldest end of the word's that the reader has not taken (`taken` counts those taken), read
-/// as of its own leaf, where the file holds it; and whether an end is still to take after this
-/// look. An end whose leaf is not in the file yet is not taken: its result waits. More ends than
-/// the word keeps between two looks are taken together as the oldest kept. A reader made new
-/// starts from the word's count.
-fn take_end(
-    taken_so_far: &mut Option<(String, u64)>,
-    word: &Word,
-    session: Option<&Session>,
-) -> (Option<Record>, bool) {
-    let mut taken = match &*taken_so_far {
-        Some((launch, taken)) if *launch == word.launch => (*taken).min(word.ended),
-        _ => word.ended,
-    };
-    let mut ended = None;
-    if word.ended > taken {
-        match word.ends.iter().find(|end| end.n > taken) {
-            Some(end) if holds(session, end.leaf.as_ref()) => {
-                ended = Some(match session {
-                    Some(session) => {
-                        session.as_of(end.leaf.as_deref(), &Turn::Ended { flag: end.aborted })
-                    }
-                    None => Session::nothing(&Turn::Ended { flag: end.aborted }),
-                });
-                taken = end.n;
-            }
-            Some(_) => {}
-            // The ends between are no longer kept: nothing to read of them.
-            None => taken = word.ended,
-        }
-    }
-    *taken_so_far = Some((word.launch.clone(), taken));
-    (ended, taken < word.ended)
-}
-
 /// The window as Pi's word says it is now, with the file as read: at work only while a run is
 /// on (`working`, with more runs begun than ended); `busy`, and the moment a run's end is being
-/// written, neither; `rest` at rest, read along its leaf's own parents, where the file holds that
-/// leaf and no end waits to be taken.
-fn present(word: &Word, session: Option<&Session>, pending: bool) -> Record {
+/// written, neither; `rest` at rest ([`rest`]). Once the process that wrote the word is gone
+/// (`gone`), an end it was writing is the turn's end: Pi had settled, and no pass of its timer
+/// will say `rest` now.
+fn present(word: &Word, session: Option<&Session>, gone: bool) -> Record {
     let turn = match word.state {
         State::Working if word.begun > word.ended => Turn::AtWork,
+        State::Working if gone => return rest(word, session),
         State::Working | State::Busy => Turn::Busy,
-        // No file and no end to take: a new session at its empty prompt, at rest (D5).
-        State::Rest if pending || (session.is_some() && !holds(session, word.leaf.as_ref())) => {
-            Turn::Rested
-        }
-        State::Rest => Turn::Ended {
-            flag: word
-                .ends
-                .last()
-                .filter(|end| end.n == word.ended)
-                .and_then(|end| end.aborted),
-        },
+        State::Rest => return rest(word, session),
     };
-    match (session, &turn) {
-        (None, _) => Session::nothing(&turn),
-        (Some(session), Turn::Ended { .. }) => session.as_of(word.leaf.as_deref(), &turn),
-        (Some(session), Turn::Rested) if holds(Some(session), word.leaf.as_ref()) => {
-            session.as_of(word.leaf.as_deref(), &turn)
-        }
-        (Some(session), _) => session.whole(&turn),
+    match session {
+        None => Session::nothing(&turn),
+        Some(session) => session.whole(&turn),
     }
+}
+
+/// A window at rest by Pi's word: over once the file holds the last end's leaf and the selected
+/// leaf, read along the selected leaf's own parents. Pi's flag of the last end counts only where
+/// that end's step is the selected one: a person's `/tree` back to another step takes that step's
+/// own outcome. No file yet and no end in the session: a new session at its empty prompt, at rest
+/// with nothing to read (Pi writes the file at a conversation's first message).
+fn rest(word: &Word, session: Option<&Session>) -> Record {
+    let last = word.last.as_ref();
+    let end_leaf = last.and_then(|last| last.leaf.as_ref());
+    let Some(session) = session else {
+        return Session::nothing(&if end_leaf.is_some() {
+            Turn::Rested
+        } else {
+            Turn::Ended { flag: None }
+        });
+    };
+    if !holds(Some(session), end_leaf) || !holds(Some(session), word.leaf.as_ref()) {
+        return match word.leaf.as_deref() {
+            Some(leaf) if session.index.contains_key(leaf) => {
+                session.as_of(Some(leaf), &Turn::Rested)
+            }
+            _ => session.whole(&Turn::Rested),
+        };
+    }
+    let selected = word.leaf.as_deref();
+    let flag = last
+        .filter(|last| session.terminal(last.leaf.as_deref()) == session.terminal(selected))
+        .and_then(|last| last.aborted);
+    session.as_of(selected, &Turn::Ended { flag })
 }
 
 /// The last assistant step since the last user message, and what it says of the run's end.
@@ -684,8 +676,8 @@ impl Session {
         leave_out(&mut record.items, &self.omitted);
         record.last_call.clone_from(&self.last_call);
         let step = self.step.as_ref();
-        // While Pi's word says a run is on, or rests with its end still to take, a refusal is
-        // no turn's yet: Pi handles it (its retry). With no word, the file's last step's, as it
+        // While Pi's word says a run is on, or rests with the file behind it, a refusal is no
+        // turn's yet: Pi handles it (its retry). With no word, the file's last step's, as it
         // stands.
         if !matches!(turn, Turn::AtWork | Turn::Busy | Turn::Rested) {
             record.quota = step.and_then(|step| step.quota.clone());
@@ -716,6 +708,22 @@ impl Session {
         }
         chain.reverse();
         Some(chain)
+    }
+
+    /// The id of the run's last assistant step as of `leaf` along its own parents, since the last
+    /// user message: the step a run that ended there ended at. None where there is none, and for
+    /// no leaf.
+    fn terminal(&self, leaf: Option<&str>) -> Option<Arc<str>> {
+        let chain = self.chain(leaf?)?;
+        let mut step = None;
+        for &at in &chain {
+            match &self.entries[at].effect {
+                Effect::User => step = None,
+                Effect::Assistant { step: of, .. } => step = Some(Arc::clone(&of.id)),
+                Effect::Nothing | Effect::Omits(_) => {}
+            }
+        }
+        step
     }
 
     /// The reading as of the leaf `leaf`, along its own parents: what that branch said there,
@@ -763,10 +771,13 @@ impl Session {
         }
         leave_out(&mut record.items, &omitted);
         record.lines.places = Some(places);
-        record.quota = step
-            .as_ref()
-            .filter(|step| !step.omitted)
-            .and_then(|step| step.quota.clone());
+        // A refusal is a turn's only once it ended there.
+        if matches!(turn, Turn::Ended { .. }) {
+            record.quota = step
+                .as_ref()
+                .filter(|step| !step.omitted)
+                .and_then(|step| step.quota.clone());
+        }
         of_turn(&mut record, turn, step.as_ref());
         record
     }

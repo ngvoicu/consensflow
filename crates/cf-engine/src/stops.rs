@@ -113,17 +113,13 @@ const RECHECK_EVERY_MS: i64 = 10_000;
 pub(crate) enum Says {
     /// Nothing.
     Nothing,
-    /// It waits at its prompt (Claude Code's status): the window may be misread.
-    AtPrompt,
     /// A turn is on (Pi's extension's word): the window is not misread.
     AtWork,
 }
 
 impl Says {
     fn of(observed: &Observed) -> Self {
-        if observed.at_prompt {
-            Self::AtPrompt
-        } else if matches!(observed.reading.as_deref(), Some(Reading::Known(record)) if record.lines.said_at_work)
+        if matches!(observed.reading.as_deref(), Some(Reading::Known(record)) if record.lines.said_at_work)
         {
             Self::AtWork
         } else {
@@ -294,16 +290,6 @@ fn kept_words(
             ),
             format!(
                 "T-{number}'s window (@{handle}) did not stop: its turn went on through the interrupt, and it runs work that closing it would end: {runs}. ConsensFlow keeps the window open for it{task}, ends none of it, and interrupts the turn again once that work has ended;{result}{after} only the human can end the work sooner, by deleting its session."
-            ),
-        ),
-        // The harness's own status says it waits at its prompt: the window is more likely
-        // misread than hung, and a short prompt typed into it ends the turn that is awaited.
-        None if says == Says::AtPrompt => (
-            format!(
-                "@{handle} did not stop for T-{number}: its turn went on through the interrupt {rounds} times, but its harness says it waits at its prompt, so ConsensFlow may be misreading the window: typing a short prompt into it ends the turn ConsensFlow waits for. ConsensFlow keeps the window open{task}, closes nothing, and interrupts the turn again every minute. Failing that, {end}."
-            ),
-            format!(
-                "T-{number}'s window (@{handle}) did not stop: its turn went on through the interrupt, but its harness says it waits at its prompt, so ConsensFlow may be misreading the window, and a short prompt typed into it ends the turn ConsensFlow waits for. ConsensFlow keeps the window open{task}, closes nothing, and interrupts the turn again every minute;{result}{after} only the human can end it sooner, by typing into the window or deleting its session."
             ),
         ),
         // The harness's own word says a turn is on (Pi's extension): no misreading of its record.
@@ -1322,28 +1308,6 @@ mod tests {
         for said in [&human, &told] {
             assert!(said.ends_with("Its window began no turn on m-42 again after ConsensFlow relaunched it once, so it is relaunched no more."), "{said}");
         }
-        // A window its harness says waits at its prompt is said misread first, and the
-        // delete of its session last.
-        let (human, told) = kept_words(
-            "zeus",
-            1,
-            3,
-            None,
-            Some("paused"),
-            true,
-            None,
-            Says::AtPrompt,
-        );
-        for words in [&human, &told] {
-            assert!(words.contains("waits at its prompt"), "{words}");
-            assert!(words.contains("short prompt"), "{words}");
-            assert!(!words.contains("may be hung"), "{words}");
-        }
-        assert!(
-            human.ends_with("Failing that, pause T-1 and delete @zeus's session.")
-                || human.ends_with("Failing that, delete @zeus's session."),
-            "{human}"
-        );
         // A window whose harness itself says a turn is on (Pi's word) is said so, and may be hung.
         let (human, told) =
             kept_words("zeus", 1, 3, None, Some("paused"), true, None, Says::AtWork);

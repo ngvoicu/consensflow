@@ -2,10 +2,11 @@
 //! sessions and words Pi's own loop wrote, read with the word and without it.
 //!
 //! The fixtures in `tests/fixtures/pi-turn-state/<Pi>/<case>-<form>/<moment>/` were written by
-//! `tests/pi-loop/drive.mjs --record` over the published Pi 1.6.0 and 1.6.1 (ConsensFlow's
-//! extension loaded from the command line, a person's from the settings, Pi's own stand-in for
-//! the model): each moment's session file as Pi wrote it, the word the extension had written by
-//! then, and what the driver saw (`expect.json`). Each case is in two forms: plain, and with a
+//! `tests/pi-loop/drive.mjs --record` over the published Pi 0.87.0, 1.1.0, 1.6.0 and 1.6.1
+//! (ConsensFlow's extension loaded from the command line, a person's from the settings, Pi's own
+//! stand-in for the model): each moment's session file as Pi wrote it, the word the extension had
+//! written by then (on 0.87.0 and 1.1.0, once a run had begun, its mark that the launch has no
+//! word), and what the driver saw (`expect.json`). Each case is in two forms: plain, and with a
 //! person's extension's own entries inside the open turn and after its end.
 
 use std::path::Path as FsPath;
@@ -21,6 +22,16 @@ struct Moment {
     text: Option<String>,
     word: Option<Value>,
     expect: Value,
+}
+
+impl Moment {
+    /// Whether the extension had written a word by then: a state, not its mark of a launch with
+    /// none.
+    fn worded(&self) -> bool {
+        self.word
+            .as_ref()
+            .is_some_and(|word| word.get("state").is_some())
+    }
 }
 
 fn moments() -> Vec<Moment> {
@@ -59,13 +70,23 @@ fn moments() -> Vec<Moment> {
             }
         }
     }
-    assert!(all.len() >= 60, "the recorded moments: {}", all.len());
+    assert!(all.len() >= 120, "the recorded moments: {}", all.len());
     all
 }
 
 /// A stage holding `text` (none: no file), and the options that name the launch.
 fn staged(text: Option<&str>) -> (Stage, Options) {
     let mut stage = Stage::new();
+    if let Some(text) = text {
+        stage.write_text(text);
+    }
+    let options = evidence_files::options(&stage, LAUNCH);
+    (stage, options)
+}
+
+/// [`staged`], with a reader that finds the process that wrote the word gone.
+fn staged_gone(text: Option<&str>) -> (Stage, Options) {
+    let mut stage = Stage::gone();
     if let Some(text) = text {
         stage.write_text(text);
     }
@@ -150,10 +171,59 @@ fn every_recorded_moment_reads_with_the_word_as_pi_said_and_without_it_by_the_cl
     for moment in moments() {
         let what = &moment.name;
         // With the word, the moment it was written: what Pi said, at once.
-        let (mut stage, options) = staged(moment.text.as_deref());
-        if let Some(word) = &moment.word {
+        if moment.worded() {
+            with_the_word(&moment);
+        } else if let Some(word) = &moment.word {
+            // The mark of a launch with no word (Pi 0.87.0 and 1.1.0 once a run began): read as no
+            // word at all.
+            assert_eq!(word["late"], true, "{what}: {word}");
+            if moment.text.is_none() {
+                continue;
+            }
+        }
+        // Without the word (an extension that did not load, a window an older ConsensFlow
+        // opened, a Pi that sets its run flag late): the file, by its entries' times.
+        let Some(text) = moment.text.as_deref() else {
+            continue;
+        };
+        let (mut stage, options) = staged(Some(text));
+        if let Some(word) = moment.word.as_ref().filter(|_| !moment.worded()) {
             put_word(&stage, word);
         }
+        let early = known(&stage.reader.look(&options, newest(text) + 1_000));
+        assert!(
+            early.in_flight && early.settlement == Settlement::InFlight,
+            "{what}, no word, 1 s: {early:?}"
+        );
+        let late = known(&stage.reader.look(&options, newest(text) + 121_000));
+        if tail_asks(text) {
+            assert!(
+                late.in_flight && late.lines.settles_at.is_none(),
+                "{what}, no word: a request to make: {late:?}"
+            );
+            continue;
+        }
+        // No call of an aborted or failed step holds it open, and the quiet ends it as the word
+        // would have.
+        assert!(
+            late.settlement == Settlement::Settled && !late.in_flight,
+            "{what}, no word, 121 s: {late:?}"
+        );
+        // A person's `/tree` back to another step is read along its branch only with the word;
+        // without it the file's last step stands (a limit of a window with no word).
+        if moment.expect["at"] == "rest" && !what.contains("/tree") {
+            ended_as(&late, &moment.expect, &format!("{what}, no word"));
+        }
+    }
+}
+
+/// A moment read with the word as the extension wrote it, the moment it was written: what Pi said,
+/// at once; and, for an end being written, once the process that wrote the word is gone.
+fn with_the_word(moment: &Moment) {
+    let what = &moment.name;
+    {
+        let (mut stage, options) = staged(moment.text.as_deref());
+        put_word(&stage, moment.word.as_ref().unwrap());
         let now = moment.text.as_deref().map_or(WRITTEN, newest) + 1_000;
         let record = known(&stage.reader.look(&options, now));
         // A run's end being written (Pi cleared its run; the word says `working` with as many
@@ -186,220 +256,124 @@ fn every_recorded_moment_reads_with_the_word_as_pi_said_and_without_it_by_the_cl
             "neither" => assert!(record.neither() && !record.in_flight, "{what}: {record:?}"),
             other => panic!("{what}: {other}"),
         }
-        // Without the word (an extension that did not load): the file, by its entries' times.
-        let Some(text) = moment.text.as_deref() else {
-            continue;
-        };
-        let (mut stage, options) = staged(Some(text));
-        let early = known(&stage.reader.look(&options, newest(text) + 1_000));
+    }
+    // An end being written, and the window's process gone before the next pass: the turn is over,
+    // read as at rest (finding 16).
+    if let Some(gone) = moment.expect["gone"].as_str() {
+        let mut word = moment.word.clone().unwrap();
+        // Its process alive (this test's own): the word stands.
+        word["pid"] = json!(std::process::id());
+        let (mut stage, options) = staged(moment.text.as_deref());
+        put_word(&stage, &word);
+        let now = moment.text.as_deref().map_or(WRITTEN, newest) + 1_000;
+        let record = known(&stage.reader.look(&options, now));
+        assert!(record.neither(), "{what}: its process alive: {record:?}");
+        let (mut stage, options) = staged_gone(moment.text.as_deref());
+        put_word(&stage, &word);
+        let now = moment.text.as_deref().map_or(WRITTEN, newest) + 1_000;
+        let record = known(&stage.reader.look(&options, now));
         assert!(
-            early.in_flight && early.settlement == Settlement::InFlight,
-            "{what}, no word, 1 s: {early:?}"
+            record.settlement == Settlement::Settled && !record.in_flight && !record.neither(),
+            "{what}: gone, at rest: {record:?}"
         );
-        let late = known(&stage.reader.look(&options, newest(text) + 121_000));
-        if tail_asks(text) {
-            assert!(
-                late.in_flight && late.lines.settles_at.is_none(),
-                "{what}, no word: a request to make: {late:?}"
-            );
-            continue;
-        }
-        // No call of an aborted or failed step holds it open, and the quiet ends it as the word
-        // would have.
-        assert!(
-            late.settlement == Settlement::Settled && !late.in_flight,
-            "{what}, no word, 121 s: {late:?}"
-        );
-        // A person's `/tree` back to an earlier answer is read along its branch only with the
-        // word; without it the file's last step stands (a limit of a window with no word).
-        if moment.expect["at"] == "rest" && !what.contains("/tree-") {
-            ended_as(&late, &moment.expect, &format!("{what}, no word"));
-        }
+        let mut expect = moment.expect.clone();
+        expect["ended"] = json!(gone);
+        ended_as(&record, &expect, &format!("{what}, gone"));
     }
 }
 
-/// The recorded moments of one case, in both versions and forms.
+/// The recorded moments of one case with the word, in both versions and forms.
 fn case(name: &str) -> Vec<Moment> {
     let moments: Vec<Moment> = moments()
         .into_iter()
         .filter(|m| {
-            m.name
-                .split('/')
-                .nth(1)
-                .is_some_and(|c| c.starts_with(&format!("{name}-")))
+            m.worded()
+                && m.name
+                    .split('/')
+                    .nth(1)
+                    .is_some_and(|c| c.starts_with(&format!("{name}-")))
         })
         .collect();
     assert!(moments.len() >= 4, "{name}");
     moments
 }
 
-/// The run that ended and that a look reports beside the present (`Lines::ended`).
-fn ended_of(record: &Record) -> Option<Record> {
-    match record.lines.ended.as_deref() {
-        Some(Reading::Known(ended)) => Some(ended.clone()),
-        Some(other) => panic!("an end that is no record: {other:?}"),
-        None => None,
-    }
+/// The rows of a session's text.
+fn rows(text: &str) -> Vec<Value> {
+    text.lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect()
 }
 
 #[test]
-fn each_ended_run_is_taken_once_in_order_read_as_of_its_own_leaf_beside_the_present() {
-    // D3 and R1: a run's answer, `agent_settled`, then a run a person's extension triggered from
-    // it, ended too before any look. Each end is taken once, in order, read as of its own leaf;
-    // the present is the word's alone, `working` with as many ends as runs: an end being written.
+fn a_run_begun_before_a_look_goes_on_with_the_turn_and_an_end_being_written_is_neither() {
+    // D3, finding 4: a run's answer, `agent_settled`, then a run a person's extension triggered
+    // from it, ended too before any look. The present is the word's alone: `working` with as many
+    // ends as runs is an end being written, neither. At rest, the turn is read along the selected
+    // leaf, and its words are the member's since the latest message: both runs' answers.
     for moment in case("triggered-after-settle") {
         let what = &moment.name;
         let text = moment.text.as_deref().unwrap();
         let word = moment.word.clone().unwrap();
-        assert_eq!(word["ended"], 2, "{what}");
+        assert_eq!(
+            (word["begun"].clone(), word["ended"].clone()),
+            (json!(2), json!(2)),
+            "{what}"
+        );
         let (mut stage, options) = staged(Some(text));
         let now = newest(text) + 1_000;
-        // A look before either end, run 1 on: the reader has taken none.
-        let mut before = word.clone();
-        before["begun"] = json!(1);
-        before["ended"] = json!(0);
-        before["ends"] = json!([]);
-        put_word(&stage, &before);
-        let on = known(&stage.reader.look(&options, now));
-        assert!(
-            on.in_flight && on.lines.said_at_work && ended_of(&on).is_none(),
-            "{what}"
-        );
         put_word(&stage, &word);
-        let first = known(&stage.reader.look(&options, now));
+        let writing = known(&stage.reader.look(&options, now));
         assert!(
-            first.neither() && !first.in_flight,
-            "{what}: the present is the word's: {first:?}"
+            writing.neither() && !writing.in_flight && writing.quota.is_none(),
+            "{what}: {writing:?}"
         );
-        let end = ended_of(&first).expect("end 1");
+        let mut rested = word.clone();
+        rested["state"] = json!("rest");
+        put_word(&stage, &rested);
+        let rest = known(&stage.reader.look(&options, now));
         assert!(
-            end.settlement == Settlement::Settled && !end.failed && !end.aborted,
-            "{what}: {end:?}"
+            rest.settlement == Settlement::Settled && !rest.failed && !rest.aborted,
+            "{what}: {rest:?}"
         );
         assert_eq!(
-            answer(&end),
-            vec!["First answer done.".to_owned()],
-            "{what}: as of its own leaf"
-        );
-        let second = known(&stage.reader.look(&options, now));
-        let end = ended_of(&second).expect("end 2");
-        assert_eq!(
-            last_answer(&end),
-            Some("Automatically continued."),
-            "{what}"
-        );
-        let third = known(&stage.reader.look(&options, now));
-        assert!(
-            ended_of(&third).is_none() && third.neither(),
-            "{what}: nothing more to take: {third:?}"
-        );
-        // A reader made new starts from the word's count: no end is taken twice.
-        let (mut fresh, options) = staged(Some(text));
-        put_word(&fresh, &word);
-        assert!(
-            ended_of(&known(&fresh.reader.look(&options, now))).is_none(),
+            answer(&rest),
+            vec![
+                "First answer done.".to_owned(),
+                "Automatically continued.".to_owned()
+            ],
             "{what}"
         );
     }
     // Finding 8 of round one: a retry cancelled in its backoff, then a run triggered from its end:
-    // the first end interrupted (Pi's flag false, its omission names the failed step), and run 2
-    // at work now.
+    // run 2 at work, and no refusal or result of run 1 is read beside it.
     for moment in case("cancelled-then-triggered") {
         let what = &moment.name;
         let text = moment.text.as_deref().unwrap();
-        let word = moment.word.clone().unwrap();
         let (mut stage, options) = staged(Some(text));
-        let now = newest(text) + 1_000;
-        let mut before = word.clone();
-        before["begun"] = json!(1);
-        before["ended"] = json!(0);
-        before["ends"] = json!([]);
-        put_word(&stage, &before);
-        assert!(known(&stage.reader.look(&options, now)).in_flight);
-        put_word(&stage, &word);
-        let look = known(&stage.reader.look(&options, now));
+        put_word(&stage, moment.word.as_ref().unwrap());
+        let look = known(&stage.reader.look(&options, newest(text) + 1_000));
         assert!(
-            look.in_flight && look.lines.said_at_work,
+            look.in_flight && look.lines.said_at_work && look.quota.is_none() && !look.failed,
             "{what}: run 2 is on: {look:?}"
         );
-        let end = ended_of(&look).expect("end 1");
-        assert!(
-            end.settlement == Settlement::Settled && end.aborted && !end.failed,
-            "{what}: {end:?}"
-        );
-        assert!(
-            answer(&end).is_empty(),
-            "{what}: the omitted step's words are none: {end:?}"
-        );
-        assert!(
-            ended_of(&known(&stage.reader.look(&options, now))).is_none(),
-            "{what}"
-        );
     }
 }
 
 #[test]
-fn more_ends_than_the_word_keeps_between_two_looks_are_merged_into_the_oldest_kept() {
-    // A failed step, so that each end's own flag shows which end a look reports.
-    let mut stage = Stage::with(&[
-        header(),
-        user("u1", "go"),
-        assistant("a1", "error", "partial"),
-    ]);
-    let options = evidence_files::options(&stage, LAUNCH);
-    let word = |ends: &[(u64, Value, Value)]| -> Value {
-        let mut word: Value = serde_json::from_str(&evidence_files::word(
-            LAUNCH,
-            SESSION,
-            "rest",
-            &json!("a1"),
-            ends,
-        ))
-        .unwrap();
-        word["begun"] = word["ended"].clone();
-        word
-    };
-    put_word(&stage, &word(&[(2, json!("a1"), json!(false))]));
-    assert!(ended_of(&known(&stage.look(1_000, &options))).is_none());
-    // Nine more runs ended before the next look; the word keeps the last eight (4 to 11).
-    let ends: Vec<(u64, Value, Value)> =
-        (4..=11).map(|n| (n, json!("a1"), json!(n == 4))).collect();
-    put_word(&stage, &word(&ends));
-    let look = known(&stage.look(1_000, &options));
-    assert!(look.lines.rested, "at rest, ends still to take: {look:?}");
-    let merged = ended_of(&look).unwrap();
-    assert!(
-        merged.aborted && !merged.failed,
-        "runs 3 and 4 as 4, with 4's flag: {merged:?}"
-    );
-    for n in 5..=11 {
-        let end =
-            ended_of(&known(&stage.look(1_000, &options))).unwrap_or_else(|| panic!("run {n}"));
-        assert!(
-            end.failed && !end.aborted,
-            "run {n}, with its own flag: {end:?}"
-        );
-    }
-    let last = known(&stage.look(1_000, &options));
-    assert!(
-        ended_of(&last).is_none() && last.settlement == Settlement::Settled,
-        "{last:?}"
-    );
-}
-
-#[test]
-fn an_end_or_a_rest_whose_leaf_the_file_lacks_waits_and_is_not_taken() {
-    // R1, R2 (findings 3 and 8): the word rests at a leaf the file has not yet; the present is at
-    // rest (a stop is paid), and no result is read until the file holds it. An end whose file is
-    // not there yet is not taken either.
+fn a_rest_whose_leaf_the_file_lacks_is_paid_and_takes_nothing_until_it_has_it() {
+    // Findings 3 (its second half) and 8: the word rests at the last end's leaf, which the file as
+    // read has not yet: rested (the stop is paid with no key; no result, no message) until the
+    // file holds it. No file at all with an end named is the same; a new session with no file
+    // and no end is at rest with nothing to read.
     for moment in case("stop")
         .into_iter()
         .filter(|m| m.name.ends_with("answered"))
     {
+        let what = &moment.name;
         let text = moment.text.as_deref().unwrap();
         let word = moment.word.clone().unwrap();
-        // The file as it was before the run's answer: its end's leaf not yet written.
-        let leaf = word["ends"][0]["leaf"].as_str().unwrap().to_owned();
+        let leaf = word["last"]["leaf"].as_str().unwrap().to_owned();
         let lines: Vec<&str> = text.lines().collect();
         let cut = lines
             .iter()
@@ -407,104 +381,266 @@ fn an_end_or_a_rest_whose_leaf_the_file_lacks_waits_and_is_not_taken() {
             .unwrap();
         let behind = format!("{}\n", lines[..cut].join("\n"));
         let now = newest(text) + 1_000;
-        // The run's end written before the file: a reader that had taken none.
-        let mut before = word.clone();
-        before["begun"] = json!(1);
-        before["ended"] = json!(0);
-        before["ends"] = json!([]);
-        before["state"] = json!("working");
         for file in [None, Some(behind.as_str())] {
             let (mut stage, options) = staged(file);
-            put_word(&stage, &before);
-            let _ = stage.reader.look(&options, now);
             put_word(&stage, &word);
             let early = known(&stage.reader.look(&options, now));
             assert!(
-                early.lines.rested && early.settlement != Settlement::Settled,
-                "{}: {early:?}",
-                moment.name
-            );
-            assert!(
-                ended_of(&early).is_none(),
-                "{}: not taken while its leaf is missing",
-                moment.name
+                early.lines.rested
+                    && early.settlement != Settlement::Settled
+                    && !early.in_flight
+                    && early.quota.is_none(),
+                "{what}: {early:?}"
             );
             stage.write_text(text);
             let caught = known(&stage.reader.look(&options, now));
-            let end = ended_of(&caught)
-                .unwrap_or_else(|| panic!("{}: taken once the file holds it", moment.name));
-            assert_eq!(answer(&end), vec!["Done.".to_owned()], "{}", moment.name);
-            let rest = known(&stage.reader.look(&options, now));
-            assert_eq!(rest.settlement, Settlement::Settled, "{}", moment.name);
+            assert!(
+                caught.settlement == Settlement::Settled && !caught.lines.rested,
+                "{what}: {caught:?}"
+            );
+            assert_eq!(answer(&caught), vec!["Done.".to_owned()], "{what}");
         }
+    }
+    for moment in case("new-session") {
+        let (mut stage, options) = staged(moment.text.as_deref());
+        assert!(moment.text.is_none() && moment.word.as_ref().unwrap()["last"].is_null());
+        put_word(&stage, moment.word.as_ref().unwrap());
+        let record = known(&stage.reader.look(&options, WRITTEN));
+        assert!(
+            record.settlement == Settlement::Settled
+                && !record.lines.rested
+                && record.items.is_empty(),
+            "{}: {record:?}",
+            moment.name
+        );
     }
 }
 
 #[test]
-fn an_omission_written_after_an_end_changes_nothing_of_that_end() {
-    // R2 (finding 5): with run 1's end not yet taken, an entry after it omits run 1's answer.
+fn an_omission_is_read_along_the_selected_leaf_only() {
+    // Finding 5: Pi's omissions apply along the selected leaf's own parents. An omission of the
+    // first run's answer on another branch changes nothing; one on the selected chain leaves that
+    // step's words out.
     for moment in case("triggered-after-settle") {
         let what = &moment.name;
         let text = moment.text.as_deref().unwrap();
         let mut word = moment.word.clone().unwrap();
-        let first = text
-            .lines()
-            .map(|line| serde_json::from_str::<Value>(line).unwrap())
+        word["state"] = json!("rest");
+        let all = rows(text);
+        let first = all
+            .iter()
             .find(|row| row["message"]["role"] == "assistant")
             .unwrap()["id"]
             .clone();
-        let omission = json!({ "type": "context_edit", "id": "later-edit", "parentId": word["leaf"], "timestamp": "2026-11-27T10:00:00.000Z", "targetId": first, "replacement": null });
-        let updated = format!("{text}{omission}\n");
-        let (mut stage, options) = staged(Some(&updated));
-        let mut before = word.clone();
-        before["begun"] = json!(1);
-        before["ended"] = json!(0);
-        before["ends"] = json!([]);
-        put_word(&stage, &before);
-        let _ = stage.reader.look(&options, newest(text) + 1_000);
+        // Off the selected chain: a child of the session's first entry.
+        let root = all
+            .iter()
+            .find(|row| row["parentId"].is_null() && row["type"] != "session")
+            .unwrap()["id"]
+            .clone();
+        let aside = json!({ "type": "context_edit", "id": "aside-edit", "parentId": root, "timestamp": "2026-11-27T10:00:00.000Z", "targetId": first, "replacement": null });
+        let (mut stage, options) = staged(Some(&format!("{text}{aside}\n")));
+        put_word(&stage, &word);
+        let record = known(&stage.reader.look(&options, newest(text) + 1_000));
+        assert_eq!(
+            answer(&record),
+            vec![
+                "First answer done.".to_owned(),
+                "Automatically continued.".to_owned()
+            ],
+            "{what}: an omission on another branch"
+        );
+        // On the selected chain: the selected leaf is the omission.
+        let on = json!({ "type": "context_edit", "id": "later-edit", "parentId": word["leaf"], "timestamp": "2026-11-27T10:00:00.000Z", "targetId": first, "replacement": null });
+        let (mut stage, options) = staged(Some(&format!("{text}{on}\n")));
         word["leaf"] = json!("later-edit");
         put_word(&stage, &word);
-        let end = ended_of(&known(&stage.reader.look(&options, newest(text) + 1_000))).unwrap();
+        let record = known(&stage.reader.look(&options, newest(text) + 1_000));
         assert_eq!(
-            answer(&end),
-            vec!["First answer done.".to_owned()],
-            "{what}: {end:?}"
+            answer(&record),
+            vec!["Automatically continued.".to_owned()],
+            "{what}: an omitted step gives no words"
         );
     }
 }
 
 #[test]
 fn a_rest_after_a_persons_tree_navigation_is_read_along_its_branch() {
-    // R2 (finding 7): an answer, a later failure, then `/tree` back to the answer with a label.
+    // Finding 7, with the word: an answer, a later failure, then `/tree` back to the answer with
+    // a label: the answer, not the abandoned branch's failure.
     for moment in case("tree") {
         let what = &moment.name;
-        let (mut stage, options) = staged(moment.text.as_deref());
+        let text = moment.text.as_deref().unwrap();
+        let (mut stage, options) = staged(Some(text));
         put_word(&stage, moment.word.as_ref().unwrap());
-        let record = known(
-            &stage
-                .reader
-                .look(&options, newest(moment.text.as_deref().unwrap()) + 1_000),
-        );
+        let record = known(&stage.reader.look(&options, newest(text) + 1_000));
+        if what.contains("/tree-abort-") {
+            continue;
+        }
         assert!(
-            record.settlement == Settlement::Settled && !record.failed && !record.aborted,
+            record.settlement == Settlement::Settled
+                && !record.failed
+                && !record.aborted
+                && record.quota.is_none(),
             "{what}: {record:?}"
         );
         assert_eq!(answer(&record), vec!["First answer".to_owned()], "{what}");
-        // The end of run 2, taken by a reader that had taken only run 1's, is the failure, as
-        // of its own leaf.
-        let mut word = moment.word.clone().unwrap();
-        let (mut stage, options) = staged(moment.text.as_deref());
-        let mut before = word.clone();
-        before["ended"] = json!(1);
-        before["ends"] = json!([word["ends"][0]]);
-        put_word(&stage, &before);
-        let _ = stage.reader.look(&options, 1);
-        word["state"] = json!("rest");
+    }
+}
+
+#[test]
+fn the_last_ends_abort_counts_only_where_its_step_is_the_selected_one() {
+    // Finding 17: a genuine final 400, a later run interrupted, then `/tree` back to the 400: the
+    // selected step's own failure, not the abandoned run's abort.
+    for moment in case("tree-abort") {
+        let what = &moment.name;
+        let text = moment.text.as_deref().unwrap();
+        let word = moment.word.clone().unwrap();
+        assert_eq!(word["last"]["aborted"], true, "{what}");
+        let (mut stage, options) = staged(Some(text));
         put_word(&stage, &word);
-        let end = ended_of(&known(&stage.reader.look(&options, 1))).unwrap();
+        let record = known(&stage.reader.look(&options, newest(text) + 1_000));
+        assert!(record.failed && !record.aborted, "{what}: {record:?}");
+        assert_eq!(
+            record.failure.as_deref(),
+            Some("400 Invalid request."),
+            "{what}"
+        );
+    }
+    // A label after the same terminal step keeps its abort: the interrupted answer stays so.
+    for moment in case("escape-text") {
+        let what = &moment.name;
+        let text = moment.text.as_deref().unwrap();
+        let mut word = moment.word.clone().unwrap();
+        let step = rows(text)
+            .iter()
+            .rev()
+            .find(|row| row["message"]["role"] == "assistant")
+            .unwrap()["id"]
+            .clone();
+        let label = json!({ "type": "label", "id": "a-label", "parentId": word["leaf"], "timestamp": "2026-11-27T10:00:00.000Z", "targetId": step, "label": "Kept" });
+        let (mut stage, options) = staged(Some(&format!("{text}{label}\n")));
+        word["leaf"] = json!("a-label");
+        put_word(&stage, &word);
+        let record = known(&stage.reader.look(&options, newest(text) + 1_000));
+        assert!(record.aborted && !record.failed, "{what}: {record:?}");
+    }
+}
+
+/// A step that a provider refused for a moment (`503`), as Pi writes it.
+fn refused(id: &str) -> Value {
+    message(
+        id,
+        json!({ "role": "assistant", "stopReason": "error", "errorMessage": "503 Service Unavailable: overloaded",
+            "timestamp": 1_790_000_000_000_i64, "content": [{ "type": "text", "text": "partial" }] }),
+    )
+}
+
+#[test]
+fn a_refusal_is_published_only_at_rest_with_its_failure_and_never_inside_a_run() {
+    // Findings 1 and 20: a refusal is the turn's only where the turn ended at it, at rest, with its
+    // failure in the same look; inside a run that Pi goes on from (its retry) it is never
+    // published; a refusal Pi omitted is none.
+    let rows = vec![header(), user("u1", "go"), refused("a1")];
+    let word = |state: &str, ended: &[(u64, Value, Value)]| -> Value {
+        serde_json::from_str(&evidence_files::word(
+            LAUNCH,
+            SESSION,
+            state,
+            &json!("a1"),
+            ended,
+        ))
+        .unwrap()
+    };
+    let mut stage = Stage::with(&rows);
+    let options = evidence_files::options(&stage, LAUNCH);
+    put_word(&stage, &word("working", &[]));
+    let on = known(&stage.look(1_000, &options));
+    assert!(
+        on.in_flight && on.quota.is_none() && !on.failed,
+        "inside the run: {on:?}"
+    );
+    let mut writing = word("working", &[(1, json!("a1"), json!(false))]);
+    writing["begun"] = json!(1);
+    put_word(&stage, &writing);
+    let ending = known(&stage.look(1_000, &options));
+    assert!(
+        ending.neither() && ending.quota.is_none(),
+        "an end being written: {ending:?}"
+    );
+    // At rest, with the file behind the last end: nothing of it yet.
+    put_word(
+        &stage,
+        &word("rest", &[(1, json!("not-written-yet"), json!(false))]),
+    );
+    let behind = known(&stage.look(1_000, &options));
+    assert!(
+        behind.lines.rested && behind.quota.is_none() && !behind.failed,
+        "the file behind: {behind:?}"
+    );
+    put_word(&stage, &word("rest", &[(1, json!("a1"), json!(false))]));
+    let rest = known(&stage.look(1_000, &options));
+    assert!(
+        rest.quota.is_some() && rest.failed,
+        "at rest, with its failure: {rest:?}"
+    );
+    // Pi's own omission of it (a retry cancelled in its backoff): no refusal, interrupted.
+    let mut omitted = rows.clone();
+    omitted.push(json!({ "type": "context_edit", "id": "e1", "timestamp": "2026-09-21T14:13:21.000Z", "targetId": "a1", "replacement": null }));
+    let mut stage = Stage::with(&omitted);
+    let options = evidence_files::options(&stage, LAUNCH);
+    let mut cancelled = word("rest", &[(1, json!("e1"), json!(false))]);
+    cancelled["leaf"] = json!("e1");
+    put_word(&stage, &cancelled);
+    let rest = known(&stage.look(1_000, &options));
+    assert!(
+        rest.quota.is_none() && !rest.failed && rest.aborted,
+        "omitted: {rest:?}"
+    );
+}
+
+#[test]
+fn a_word_whose_process_is_gone_says_nothing_of_the_present() {
+    // Finding 16: inside `agent_settled` the word says `working` with as many ends as runs; the
+    // window gone before the next pass, that is a finished turn. A run still on, a word that is
+    // busy, or an end whose leaf the file lacks, says nothing more for being gone.
+    for moment in case("stop")
+        .into_iter()
+        .filter(|m| m.name.ends_with("settling"))
+    {
+        let what = &moment.name;
+        let text = moment.text.as_deref().unwrap();
+        let mut word = moment.word.clone().unwrap();
+        word["pid"] = json!(4242);
+        let now = newest(text) + 1_000;
+        let (mut stage, options) = staged_gone(Some(text));
+        put_word(&stage, &word);
+        let over = known(&stage.reader.look(&options, now));
         assert!(
-            end.failed,
-            "{what}: run 2 failed, as of its own leaf: {end:?}"
+            over.settlement == Settlement::Settled && !over.neither(),
+            "{what}: {over:?}"
+        );
+        assert_eq!(answer(&over), vec!["Done.".to_owned()], "{what}");
+        let mut on = word.clone();
+        on["begun"] = json!(2);
+        put_word(&stage, &on);
+        assert!(
+            known(&stage.reader.look(&options, now)).in_flight,
+            "{what}: a run on"
+        );
+        let mut busy = word.clone();
+        busy["state"] = json!("busy");
+        put_word(&stage, &busy);
+        assert!(
+            known(&stage.reader.look(&options, now)).neither(),
+            "{what}: busy"
+        );
+        let mut missing = word.clone();
+        missing["last"]["leaf"] = json!("not-written-yet");
+        put_word(&stage, &missing);
+        assert!(
+            known(&stage.reader.look(&options, now)).lines.rested,
+            "{what}: its leaf to come"
         );
     }
 }

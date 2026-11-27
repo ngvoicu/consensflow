@@ -561,7 +561,6 @@ fn looked(agent: &FakeAgent, session: &str) -> Observed {
                 lost: agent.lost.clone(),
                 places,
                 said_at_work: agent.said_at_work,
-                ended: agent.ended.clone(),
                 ..Lines::default()
             }),
             beside: Vec::new(),

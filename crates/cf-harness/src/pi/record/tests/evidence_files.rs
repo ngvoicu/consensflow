@@ -36,9 +36,9 @@ pub(super) fn put(stage: &Stage, name: &str, contents: impl AsRef<[u8]>) {
     put_in(&folder(stage), name, contents);
 }
 
-/// The word the extension writes: `state` at the leaf `leaf`, with `ends` ended runs, each
-/// `(n, leaf, aborted)`, the last of them the count of runs ended; `working` with one run more
-/// begun than ended (a run on).
+/// The word the extension writes: `state` at the leaf `leaf`, after the runs `ends` ended, each
+/// `(n, leaf, aborted)`: the count of runs ended is the last one's `n`, and the last end in the
+/// session is its leaf and flag; `working` with one run more begun than ended (a run on).
 pub(super) fn word(
     launch: &str,
     session: &str,
@@ -50,8 +50,8 @@ pub(super) fn word(
     json!({
         "launchId": launch, "sessionId": session, "state": state, "leaf": leaf,
         "begun": ended + u64::from(state == "working"), "ended": ended,
-        "ends": ends.iter().map(|(n, leaf, aborted)| json!({ "n": n, "leaf": leaf, "aborted": aborted })).collect::<Vec<_>>(),
-        "n": 1, "at": 1
+        "last": ends.last().map(|(_, leaf, aborted)| json!({ "leaf": leaf, "aborted": aborted })),
+        "held": null, "n": 1, "at": 1
     })
     .to_string()
 }
@@ -95,6 +95,9 @@ fn a_word_of_this_launch_and_session_decides_and_any_other_is_no_word() {
         json!({ "launchId": "launch-1", "sessionId": SESSION, "state": "rest", "ended": -1 })
             .to_string(),
         json!({ "launchId": 1, "sessionId": SESSION, "state": "rest", "ended": 0 }).to_string(),
+        // The extension's mark that this launch has no word (a Pi that sets its run flag late).
+        json!({ "launchId": "launch-1", "late": true }).to_string(),
+        json!({ "launchId": "launch-1", "sessionId": SESSION, "late": true }).to_string(),
         json!(["rest"]).to_string(),
         json!(null).to_string(),
     ] {

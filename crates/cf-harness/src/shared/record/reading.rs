@@ -192,7 +192,7 @@ impl ModelMoved {
 /// Where a record's lines stand, as its reader read them (T-223, T-290, T-483). Behind a box in
 /// [`Record`], which a reader's `Err` holds too ([`crate::records::Open`]): a reading stays
 /// as small as one without them (the merge with turn-end, T-494).
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Lines {
     /// The lines of the record that were torn and passed over, each by the
     /// place among the records it stood at, in order: records lost, which the
@@ -223,13 +223,9 @@ pub struct Lines {
     /// by what its record shows.
     pub said_at_work: bool,
     /// The harness says its window rests, and the record has not yet what the result is read
-    /// from (an end the reader has still to take, or the leaf it rests at not yet in the file):
-    /// a stop is paid and words may go in, and no result is taken from this reading.
+    /// from (Pi's word names a leaf the file as read lacks): a stop is paid, and no result is taken
+    /// and no words go in until it has.
     pub rested: bool,
-    /// A run that ended and was not reported before, read as of its own end: its result is taken
-    /// from it whatever the window does now ([`crate::contract::Observed::ended`]). Pi's, whose
-    /// extension counts each run's end.
-    pub ended: Option<Arc<Reading>>,
 }
 
 /// A monitor a turn armed that its harness has said no end of: its task's id, what its

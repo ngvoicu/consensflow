@@ -1,12 +1,12 @@
-{"type":"session","version":3,"id":"01a21c72-178e-7193-91ef-068a83aa9232","timestamp":"2026-11-27T09:59:28.910Z","cwd":"<run>/cancelled-then-triggered-extras"}
-{"type":"model_change","id":"defa6fb3","parentId":null,"timestamp":"2026-11-27T09:59:28.915Z","provider":"stand-in","modelId":"stand-in-model"}
-{"type":"thinking_level_change","id":"4ecc5d30","parentId":"defa6fb3","timestamp":"2026-11-27T09:59:28.915Z","thinkingLevel":"off"}
-{"type":"custom","customType":"keeper","data":{"count":1},"id":"5ce9b659","parentId":"4ecc5d30","timestamp":"2026-11-27T09:59:28.917Z"}
-{"type":"message","id":"c1c2c70b","parentId":"5ce9b659","timestamp":"2026-11-27T09:59:28.917Z","message":{"role":"system","content":"","sections":{},"timestamp":1795773568917,"toolsAdded":[{"name":"read"},{"name":"bash"},{"name":"edit"},{"name":"write"}]}}
-{"type":"message","id":"c6a9e0d0","parentId":"c1c2c70b","timestamp":"2026-11-27T09:59:28.917Z","message":{"role":"user","content":[{"type":"text","text":"Run the long script"}],"timestamp":1795773568917}}
-{"type":"message","id":"1edf80a9","parentId":"c6a9e0d0","timestamp":"2026-11-27T09:59:28.918Z","message":{"role":"assistant","content":[{"type":"text","text":"Partial text"}],"api":"faux:1795773568908:t9jtomn3k1","provider":"stand-in","model":"stand-in-model","usage":{"input":0,"output":3,"cacheRead":0,"cacheWrite":1405,"totalTokens":1408,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}},"stopReason":"error","errorMessage":"503 Service Unavailable: overloaded","timestamp":1795773568916,"thinkingLevel":"off"}}
-{"type":"context_edit","id":"cea1b0ef","parentId":"1edf80a9","timestamp":"2026-11-27T09:59:28.918Z","targetId":"1edf80a9","replacement":null}
-{"type":"custom","customType":"keeper","data":{"count":2},"id":"982e498c","parentId":"cea1b0ef","timestamp":"2026-11-27T09:59:28.923Z"}
-{"type":"custom_message","customType":"keeper","content":"Kept the cache warm.","display":true,"id":"258ff087","parentId":"982e498c","timestamp":"2026-11-27T09:59:28.923Z"}
-{"type":"custom","customType":"keeper","data":{"count":1},"id":"a0c1d178","parentId":"258ff087","timestamp":"2026-11-27T09:59:28.924Z"}
-{"type":"custom_message","customType":"keeper","content":"Continue automatically","display":false,"id":"1ba89472","parentId":"a0c1d178","timestamp":"2026-11-27T09:59:28.924Z"}
+{"type":"session","version":3,"id":"01a21e50-9ea1-72fc-8173-90a8d633bdf1","timestamp":"2026-11-27T18:42:09.697Z","cwd":"<run>/cancelled-then-triggered-extras"}
+{"type":"model_change","id":"b0940ed9","parentId":null,"timestamp":"2026-11-27T18:42:09.700Z","provider":"stand-in","modelId":"stand-in-model"}
+{"type":"thinking_level_change","id":"d2154340","parentId":"b0940ed9","timestamp":"2026-11-27T18:42:09.700Z","thinkingLevel":"off"}
+{"type":"custom","customType":"keeper","data":{"count":1},"id":"2693bda0","parentId":"d2154340","timestamp":"2026-11-27T18:42:09.701Z"}
+{"type":"message","id":"ee01f9ef","parentId":"2693bda0","timestamp":"2026-11-27T18:42:09.701Z","message":{"role":"system","content":"","sections":{},"timestamp":1795804929701,"toolsAdded":[{"name":"read"},{"name":"bash"},{"name":"edit"},{"name":"write"}]}}
+{"type":"message","id":"26de856e","parentId":"ee01f9ef","timestamp":"2026-11-27T18:42:09.701Z","message":{"role":"user","content":[{"type":"text","text":"Run the long script"}],"timestamp":1795804929701}}
+{"type":"message","id":"30d8c766","parentId":"26de856e","timestamp":"2026-11-27T18:42:09.702Z","message":{"role":"assistant","content":[{"type":"text","text":"Partial text"}],"api":"faux:1795804929696:t5ipy15btw","provider":"stand-in","model":"stand-in-model","usage":{"input":0,"output":3,"cacheRead":0,"cacheWrite":1444,"totalTokens":1447,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}},"stopReason":"error","errorMessage":"503 Service Unavailable: overloaded","timestamp":1795804929701,"thinkingLevel":"off"}}
+{"type":"context_edit","id":"6ace687e","parentId":"30d8c766","timestamp":"2026-11-27T18:42:09.702Z","targetId":"30d8c766","replacement":null}
+{"type":"custom","customType":"keeper","data":{"count":2},"id":"a4498bdb","parentId":"6ace687e","timestamp":"2026-11-27T18:42:09.707Z"}
+{"type":"custom_message","customType":"keeper","content":"Kept the cache warm.","display":true,"id":"41c295cf","parentId":"a4498bdb","timestamp":"2026-11-27T18:42:09.707Z"}
+{"type":"custom","customType":"keeper","data":{"count":1},"id":"ce2a76ef","parentId":"41c295cf","timestamp":"2026-11-27T18:42:09.707Z"}
+{"type":"custom_message","customType":"keeper","content":"Continue automatically","display":false,"id":"3569b262","parentId":"ce2a76ef","timestamp":"2026-11-27T18:42:09.707Z"}

@@ -56,6 +56,20 @@ impl Stage {
         Self::with_vars(&[])
     }
 
+    /// A stage with no session file whose reader finds no process alive: the window that wrote
+    /// the extension's word is gone.
+    fn gone() -> Self {
+        let mut stage = Self::new();
+        let home = stage.home.path().to_str().unwrap().to_owned();
+        stage.reader = reader_asking(
+            SESSION,
+            &Env::from_vars([("HOME", home.as_str())]),
+            &TimeZone::UTC,
+            |_| false,
+        );
+        stage
+    }
+
     /// A stage whose session file holds `records`.
     fn with(records: &[Value]) -> Self {
         let mut stage = Self::new();

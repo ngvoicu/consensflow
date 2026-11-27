@@ -32,7 +32,8 @@ once, with the reason here and in the commit.
   In both platforms' launch recordings the extension's text and its hash were replaced by the new
   extension's in every Pi scenario, and the steps that wrote the older extension's files were
   edited by hand to write its word instead: the working marker became a `working` word, each
-  settlement file naming a leaf a `rest` word at that leaf after one ended run.
+  settlement file naming a leaf a `rest` word at that leaf after one ended run, whose last end is
+  that leaf (T-2401 wrote the word's `last` in place of its list of ends).
 
 - **T-1986 Codex's launch survives a slow first start.** Node's launch gave Codex's
   app-server ten seconds from its spawn to answer both requests. Rust gives it ten

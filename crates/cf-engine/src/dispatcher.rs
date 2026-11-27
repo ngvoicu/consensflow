@@ -1886,19 +1886,7 @@ impl Dispatcher {
         }
         // A turn that ended with the window's answer ends the outage its last failure told of.
         self.answered_again(record, &observed);
-        // A run that ended and that this look reports for the first time, read as of its own end
-        // (Pi's word counts each run's end): its result is taken from it, whatever the window does
-        // now, which the rest of this step reads.
-        let past = observed.ended();
         if participant.role != "chief" {
-            if let Some(past) = &past {
-                let watching = self.watch_monitors(participant, record, past).await;
-                self.collect(project, participant, record, past, watching)
-                    .await?;
-                if self.forgotten(record) {
-                    return Ok(());
-                }
-            }
             returning(self.settle_stop(project, participant, record, &observed, starting)).await?;
             if self.forgotten(record) {
                 return Ok(());
@@ -1943,9 +1931,6 @@ impl Dispatcher {
         } else if observed.failed && !self.cut_short(&observed) {
             // A refusal for quota is the quota's to say; any other failure is the human's to hear.
             self.tell_chief_failed(project, participant, record, &observed)
-                .await?;
-        } else if let Some(past) = past.filter(|past| past.failed && !self.cut_short(past)) {
-            self.tell_chief_failed(project, participant, record, &past)
                 .await?;
         }
         // A launch's first message that its window is delivered once it is up goes

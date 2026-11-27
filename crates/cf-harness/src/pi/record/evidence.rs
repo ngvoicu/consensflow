@@ -84,11 +84,10 @@ pub(crate) enum State {
     Rest,
 }
 
-/// A run that ended: its count in the launch, the session's leaf at its end, and Pi's own flag
-/// of an abort (none where Pi gave none, or the run was dropped).
+/// The last run that ended in the session: the session's leaf at its end, and Pi's own flag of an
+/// abort (none where Pi gave none, or the run was dropped).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct End {
-    pub(crate) n: u64,
     pub(crate) leaf: Option<String>,
     pub(crate) aborted: Option<bool>,
 }
@@ -96,21 +95,22 @@ pub(crate) struct End {
 /// The extension's word for this launch and session.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Word {
-    /// The launch it is of: a reader's count of the ends it took is the launch's.
-    pub(crate) launch: String,
     pub(crate) state: State,
-    /// The session's leaf when it was written.
+    /// The session's leaf when it was written: the one Pi has selected.
     pub(crate) leaf: Option<String>,
     /// How many runs of the launch began, and how many ended.
     pub(crate) begun: u64,
     pub(crate) ended: u64,
-    /// The last ended runs, oldest first.
-    pub(crate) ends: Vec<End>,
+    /// The last run that ended in this session, if one did.
+    pub(crate) last: Option<End>,
+    /// The process that wrote it: Pi's own.
+    pub(crate) pid: Option<u32>,
 }
 
 /// The extension's word for `session`, where it wrote one for this launch: none where there is
 /// none, it is another launch's or session's, or it is no word (a state it does not say, a count
-/// that is no whole number). A file that cannot be read for any other reason fails the look.
+/// that is no whole number, the extension's mark that the launch has none). A file that cannot be
+/// read for any other reason fails the look.
 pub(crate) fn word(session: &str, env: &Env, options: &Options) -> Result<Option<Word>, String> {
     let Some(launch) = launch(env, options) else {
         return Ok(None);
@@ -136,28 +136,23 @@ pub(crate) fn word(session: &str, env: &Env, options: &Options) -> Result<Option
     let Some(ended) = word.get("ended").and_then(Value::as_u64) else {
         return Ok(None);
     };
-    let ends = word
-        .get("ends")
-        .and_then(Value::as_array)
-        .map(|ends| {
-            ends.iter()
-                .filter_map(|end| {
-                    Some(End {
-                        n: end.get("n")?.as_u64()?,
-                        leaf: leaf(end.get("leaf")),
-                        aborted: end.get("aborted").and_then(Value::as_bool),
-                    })
-                })
-                .collect()
-        })
-        .unwrap_or_default();
+    let last = word
+        .get("last")
+        .filter(|last| last.is_object())
+        .map(|last| End {
+            leaf: leaf(last.get("leaf")),
+            aborted: last.get("aborted").and_then(Value::as_bool),
+        });
     let begun = word.get("begun").and_then(Value::as_u64).unwrap_or(ended);
     Ok(Some(Word {
-        launch: launch.id,
         state,
         leaf: leaf(word.get("leaf")),
         begun,
         ended,
-        ends,
+        last,
+        pid: word
+            .get("pid")
+            .and_then(Value::as_u64)
+            .and_then(|pid| u32::try_from(pid).ok()),
     }))
 }
