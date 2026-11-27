@@ -176,10 +176,8 @@ runs = ["rest-pi-message"]
 
 [[plant.edit]]
 file = "hosts/pi-extension/consensflow-delivery.mjs"
-find = "          if (settledIds.has(id)) {"
-replace = "          if (false && settledIds.has(id)) {"
-
-# --- the hop chain of a queued message (results-held-at-the-gate) ---
+find = "        if (settledIds.has(id)) {"
+replace = "        if (false && settledIds.has(id)) {"
 
 [[plant]]
 name = "held-rest: a queue removal names a message by its exact words, and one whose envelope has other attributes stays queued"

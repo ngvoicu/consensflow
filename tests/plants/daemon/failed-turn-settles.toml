@@ -26,8 +26,8 @@ runs = ["failed-turn-pi-retry"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/pi/record.rs"
-find = "        record.failed = self.failed && (native_settled || can_settle);\n"
-replace = "        record.failed = self.failed;\n"
+find = "        Turn::Quiet { settles_at } => {\n            record.in_flight = true;\n"
+replace = "        Turn::Quiet { settles_at } => {\n            record.in_flight = true;\n            record.failed = step.is_some_and(|step| step.stop.as_deref() == Some(\"error\"));\n"
 
 [[plant]]
 name = "failed turn: Pi's output-limit and deferred replies never end"
@@ -36,8 +36,8 @@ runs = ["failed-turn-pi"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/pi/record.rs"
-find = '''            Some(reason @ ("length" | "deferred")) => {'''
-replace = '''            Some(reason @ ("missing-length" | "missing-deferred")) => {'''
+find = "                Some((step, Some(\"length\" | \"deferred\"))) => {"
+replace = "                Some((step, Some(\"never-length\" | \"never-deferred\"))) => {"
 
 [[plant]]
 name = "failed turn: Pi's reader never settles a failed step by the file's quiet (the field's)"
@@ -46,8 +46,8 @@ runs = ["failed-turn-pi", "failed-turn-goldens"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/pi/record.rs"
-find = "        let can_settle = self.terminal.is_some() && quiet && !open;\n"
-replace = "        let can_settle = self.terminal.is_some() && quiet && !open && !self.failed;\n"
+find = "                _ => ended,\n"
+replace = "                _ if self.step.as_ref().is_some_and(|step| step.stop.as_deref() == Some(\"error\")) => Turn::Open,\n                _ => ended,\n"
 
 [[plant]]
 name = "failed turn: Pi's reader takes a failure just written, which Pi may retry, for a turn at rest"
@@ -56,8 +56,8 @@ runs = ["failed-turn-pi"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/pi/record.rs"
-find = "                Some(_) => !(quiet || native_settled),\n"
-replace = "                Some(_) => !(quiet || native_settled || self.failed),\n"
+find = "                Some(since) if now_ms < since + QUIET_MS => Turn::Quiet {\n"
+replace = "                Some(since) if now_ms < since + QUIET_MS && self.step.as_ref().is_none_or(|step| step.stop.as_deref() != Some(\"error\")) => Turn::Quiet {\n"
 
 [[plant]]
 name = "failed turn: a Pi window whose turn failed and whose extension said nothing of its end reads at work for good (the field's)"
@@ -66,5 +66,6 @@ runs = ["failed-turn-window"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/pi/record.rs"
-find = "        let can_settle = self.terminal.is_some() && quiet && !open;\n"
-replace = "        let can_settle = self.terminal.is_some() && quiet && !open && !self.failed;\n"
+find = "                _ => ended,\n"
+replace = "                _ if self.step.as_ref().is_some_and(|step| step.stop.as_deref() == Some(\"error\")) => Turn::Open,\n                _ => ended,\n"
+

@@ -647,10 +647,8 @@ runs = ["mc-pi-extension"]
 
 [[plant.edit]]
 file = "hosts/pi-extension/consensflow-delivery.mjs"
-find = '''    if (!(compaction < usage.contextWindow)) return false
-'''
-replace = '''
-'''
+find = "    return compaction < usage.contextWindow\n"
+replace = "    return true\n"
 
 [[plant]]
 name = "members compaction: the extension compacts after a turn the human aborted"
@@ -659,14 +657,8 @@ runs = ["mc-pi-extension"]
 
 [[plant.edit]]
 file = "hosts/pi-extension/consensflow-delivery.mjs"
-find = '''    if (event?.aborted === true) return false
-'''
-replace = '''
-'''
-
-# T-1272's blocker: real Pi is not idle for a whole compaction. Each plant below is caught by
-# the extension's tests on that semantics (the fake stays not idle while it compacts, and ends
-# it in Pi's order), the first through the real Rust channel (`pi-send`).
+find = "    if (aborted) return false\n"
+replace = ""
 
 [[plant]]
 name = "members compaction: a compacting window's handover waits behind the idle check, as before T-1272"
@@ -675,9 +667,8 @@ runs = ["mc-pi-extension"]
 
 [[plant.edit]]
 file = "hosts/pi-extension/consensflow-delivery.mjs"
-find = '''          if (compactingNow()) {'''
-replace = '''          if (context?.isIdle?.() !== true) break
-          if (compactingNow()) {'''
+find = "        if (now_ === 'busy') {\n"
+replace = "        if (context?.isIdle?.() !== true) break\n        if (now_ === 'busy') {\n"
 
 [[plant]]
 name = "members compaction: the extension sends a delivery while its own compaction runs"
@@ -686,8 +677,8 @@ runs = ["mc-pi-extension"]
 
 [[plant.edit]]
 file = "hosts/pi-extension/consensflow-delivery.mjs"
-find = '''          if (compactingNow()) {'''
-replace = '''          if (false) {'''
+find = "        if (now_ === 'busy') {\n"
+replace = "        if (now_ === 'busy' && !compacting) {\n"
 
 [[plant]]
 name = "members compaction: the extension does not follow a compaction Pi began itself"
@@ -696,31 +687,8 @@ runs = ["mc-pi-extension"]
 
 [[plant.edit]]
 file = "hosts/pi-extension/consensflow-delivery.mjs"
-find = '''    piCompacting = true'''
-replace = '''    void piCompacting'''
-
-[[plant]]
-name = "members compaction: an idle Pi is still taken for one that compacts"
-meant = "refuses every delivery as busy while Pi's own compaction runs, and delivers exactly one after it ends (endUntold)"
-runs = ["mc-pi-extension"]
-
-[[plant.edit]]
-file = "hosts/pi-extension/consensflow-delivery.mjs"
-find = '''    if (piCompacting && context?.isIdle?.() === true) piCompacting = false
-'''
-replace = '''
-'''
-
-[[plant]]
-name = "members compaction: a compaction's end leaves a turn that goes on busy"
-meant = "leaves a delivery waiting, unanswered, in a turn that goes on after Pi compacted in its middle"
-runs = ["mc-pi-extension"]
-
-[[plant.edit]]
-file = "hosts/pi-extension/consensflow-delivery.mjs"
-find = '''    piCompacting = false
-    await consume()'''
-replace = '''    await consume()'''
+find = "    if (inHand !== null || compacting || !idle()) return 'busy'\n"
+replace = "    if (inHand !== null || compacting) return 'busy'\n"
 
 [[plant]]
 name = "members compaction: a handover for another session is refused busy while Pi compacts"
@@ -855,7 +823,6 @@ runs = ["mc-pi-extension"]
 
 [[plant.edit]]
 file = "hosts/pi-extension/consensflow-delivery.mjs"
-find = '''    if (compacting) return true
-'''
-replace = '''
-'''
+find = "    if (inHand !== null || compacting || !idle()) return 'busy'\n"
+replace = "    if (inHand !== null || !idle()) return 'busy'\n"
+

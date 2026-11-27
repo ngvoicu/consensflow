@@ -227,11 +227,8 @@ runs = ["failure-reason-pi"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/pi/record.rs"
-find = '''
-        record.failure = self.failure.clone().filter(|said| !said.trim().is_empty());
-'''
-replace = '''
-'''
+find = "                    record.failure = step.failure.clone().filter(|said| !said.trim().is_empty());\n"
+replace = ""
 
 [[plant]]
 name = "failure reason: Pi's placeholder for no words is taken for its words"
@@ -240,14 +237,8 @@ runs = ["failure-reason-pi"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/pi/record.rs"
-find = '''
-                let said = !matches!(field("errorMessage"), None | Some(Value::Null));
-                self.failure = said.then(|| failure.clone());
-'''
-replace = '''
-                let said = true;
-                self.failure = said.then(|| failure.clone());
-'''
+find = "                let said = !matches!(field(\"errorMessage\"), None | Some(Value::Null));\n                step.failure = said.then(|| failure.clone());\n"
+replace = "                let said = true;\n                step.failure = said.then(|| failure.clone());\n"
 
 [[plant]]
 name = "failure reason: the next message keeps Pi's last failure's words"
@@ -256,12 +247,8 @@ runs = ["failure-reason-pi"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/pi/record.rs"
-find = '''
-                        failure: self.failure.take(),
-'''
-replace = '''
-                        failure: self.failure.clone(),
-'''
+find = "                        step: self.step.take(),"
+replace = "                        step: self.step.clone(),"
 
 [[plant]]
 name = "failure reason: Devin's turn that ended in an error keeps none of its words"
@@ -1239,8 +1226,8 @@ runs = ["failure-reason-pi"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/pi/record.rs"
-find = '''        record.last_call.clone_from(&self.last_call);'''
-replace = '''        let _ = &self.last_call;'''
+find = "        record.last_call.clone_from(last_call);"
+replace = "        let _ = last_call;"
 
 [[plant]]
 name = "failure reason: Devin's reader does not say its last tool call"

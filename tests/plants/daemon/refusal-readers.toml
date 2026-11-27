@@ -69,8 +69,8 @@ runs = ["refusal-readers-pi", "refusal-readers-held"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/pi/record.rs"
-find = "                        quota: self.quota.take(),"
-replace = "                        quota: self.quota.clone(),"
+find = "                        step: self.step.take(),"
+replace = "                        step: self.step.clone(),"
 
 [[plant]]
 name = "refusal readers: Pi clears the refusal at a tool result"

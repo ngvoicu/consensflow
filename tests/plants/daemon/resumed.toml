@@ -105,8 +105,8 @@ runs = ["harness-launch-pi-resumed"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/pi/adapter.rs"
-find = '                && !working(&session, &self.env, &options)?'
-replace = '                && !working(&session, &self.env, &options).map(|_| false)?'
+find = "                && word(&session, &self.env, &options)?.is_none()"
+replace = "                && word(&session, &self.env, &options).map(|_| true)?"
 
 [[plant]]
 name = "resumed: a Pi window its extension has not named is read at rest by the turn the quit cut"

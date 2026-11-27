@@ -1418,8 +1418,8 @@ runs = ["it-pi"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/pi/record.rs"
-find = '            Some("compaction") => self.compaction(&record, at, &seq),'
-replace = '            Some("compactions") => self.compaction(&record, at, &seq),'
+find = "            Some(\"compaction\") => self.compaction(&record, at, &seq)?,"
+replace = "            Some(\"compactions\") => self.compaction(&record, at, &seq)?,"
 
 [[plant]]
 name = "items: Pi's edit says no change"

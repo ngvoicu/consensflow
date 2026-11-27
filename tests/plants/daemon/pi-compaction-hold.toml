@@ -204,18 +204,18 @@ runs = ["pch-extension"]
 
 [[plant.edit]]
 file = "hosts/pi-extension/consensflow-delivery.mjs"
-find = "    if (asking && !(await writeCompactionWord())) {"
-replace = "    if (asking && !(await Promise.resolve(true))) {"
+find = "wantsCompaction(ends.at(-1)?.aborted === true, context) && (await writeCompactionWord())"
+replace = "wantsCompaction(ends.at(-1)?.aborted === true, context) && (await Promise.resolve(true))"
 
 [[plant]]
 name = "pi compaction hold: the extension writes its word after the settlement evidence the engine takes the result by"
-meant = "is in place before the settlement evidence the result is taken by is"
+meant = "is in place before the word that Pi rests, which the result is taken by"
 runs = ["pch-extension"]
 
 [[plant.edit]]
 file = "hosts/pi-extension/consensflow-delivery.mjs"
-find = "    if (asking && !(await writeCompactionWord())) {\n      compacting = false\n      asking = false\n    }\n    await writeSettlement()"
-replace = "    await writeSettlement()\n    if (asking && !(await writeCompactionWord())) {\n      compacting = false\n      asking = false\n    }"
+find = "          wantsCompaction(ends.at(-1)?.aborted === true, context) && (await writeCompactionWord())\n      }\n      await say(true)\n"
+replace = "          wantsCompaction(ends.at(-1)?.aborted === true, context)\n      }\n      await say(true)\n      asking = asking && (await writeCompactionWord())\n"
 
 [[plant]]
 name = "pi compaction hold: the extension keeps its word when Pi says the compaction ended"
@@ -234,8 +234,8 @@ runs = ["pch-extension"]
 
 [[plant.edit]]
 file = "hosts/pi-extension/consensflow-delivery.mjs"
-find = "      compacting = false\n      void takeCompactionWordBack()\n      void consume()"
-replace = "      compacting = false\n      void consume()"
+find = "      void takeCompactionWordBack().then(() => pass())\n"
+replace = "      void pass()\n"
 
 [[plant]]
 name = "pi compaction hold: the extension keeps its word when Pi refuses the ask at once"
@@ -264,8 +264,8 @@ runs = ["pch-extension"]
 
 [[plant.edit]]
 file = "hosts/pi-extension/consensflow-delivery.mjs"
-find = "    piCompacting = true\n  })"
-replace = "    piCompacting = true\n    void writeCompactionWord()\n  })"
+find = "  pi.on('session_compact', compactionEnded)\n"
+replace = "  pi.on('session_before_compact', () => void writeCompactionWord())\n  pi.on('session_compact', compactionEnded)\n"
 
 [[plant]]
 name = "pi compaction hold: the extension asks for a compaction though its word could not be written"
@@ -274,8 +274,8 @@ runs = ["pch-extension"]
 
 [[plant.edit]]
 file = "hosts/pi-extension/consensflow-delivery.mjs"
-find = "    if (asking && !(await writeCompactionWord())) {"
-replace = "    if (asking && !(await writeCompactionWord()) && false) {"
+find = "wantsCompaction(ends.at(-1)?.aborted === true, context) && (await writeCompactionWord())"
+replace = "wantsCompaction(ends.at(-1)?.aborted === true, context) && ((await writeCompactionWord()) || true)"
 
 [[plant]]
 name = "pi compaction hold: the extension writes a word with no conversation to name"
