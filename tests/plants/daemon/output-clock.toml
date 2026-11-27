@@ -1,0 +1,784 @@
+# N17's delivery checks, and the output clock under them (T-2125, T-2144, T-2164, T-2233). A
+# delivery's decisions about a window's input box rest on one observation, a look: the pane host's
+# snapshot with the screen's last lines, read under the screen's lock, named by `seen` (a digest of
+# those lines and the cursor). A look exists only where the pane is current: the terminal holds
+# nothing (asked under a gate the reader reads inside), and read equals drawn. Every act on the box
+# (a paste, an Enter that is not a paste's first, the key that empties it) carries the `seen` that
+# licensed it, and the host checks it again where it writes, with the pane's writer held, then the
+# screen's lock, the pane's input state and the gate:
+#
+# - the pane current, for every paste with a look and every `pane.enter`;
+# - the digest made again equals the look's, and no key of the human's came since;
+# - a box read empty sets the count of the human's keys aside only on evidence the host took at the
+#   key ("erased", "typed elsewhere"), which the paste names and the host checks; no time does;
+# - a read is counted inside the gate, before the lock of the activity time;
+# - a paste's first Enter waits for a current pane up to the cap and a grace, and is checked again
+#   with the writer held; `pane.enter` is never written while the pane is not current;
+# - a window that takes its messages through a channel is given no look.
+#
+# Each plant here is caught by a fixed schedule of the model (`cf-panes`' `model::cases`) or a test
+# of the host or the reader; the random walks (`model::walks`) run where they can see it. Every
+# name holds `output clock`, so `cargo xtask plants daemon "output clock"` runs them.
+
+[run]
+oc-model = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "--", "model::cases::"]
+oc-walks = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "--", "model::walks::"]
+oc-feed = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "--", "pane_handlers::feeding_tests::", "pane_handlers::native_tests::"]
+oc-pty = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "--", "pty::tests::a_read_is_counted"]
+oc-harness = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "--", "shared::look::tests::", "shared::input_box::tests::"]
+oc-engine = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "--", "pastes_nothing_again", "a_look_the_host_did_not_give", "presses_no_enter_once_more_while", "stale_box::", "still_there::", "a_paced_paste_goes_only_on_a_look_its_window_approved", "a_paste_into_a_box_read_empty_retires_the_mark"]
+oc-conpty = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "--", "pty::conpty::tests::a_windows_output_pipe"]
+oc-devin = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "--", "devin::adapter::tests::bypass::"]
+oc-gate = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "--", "pty::tests::a_gate_asked_with_the_writer_held"]
+
+[[plant]]
+name = "output clock: the Enter goes at the cap with no grace"
+meant = "t2132_the_cap_goes_on_a_feed_that_does_not_end"
+runs = ["oc-model", "oc-walks"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/arbiter/timing.rs"
+find = """        self.most_ms.saturating_add(PENDING_GRACE_MS)"""
+replace = """        self.most_ms"""
+
+[[plant]]
+name = "output clock: a give-up leaves the count pending for ever"
+meant = "the_counts_settle_where_they_stand_when_nobody_takes_the_output_in"
+runs = ["oc-feed"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/arbiter/timing.rs"
+find = """        self.drawn.fetch_max(read, Ordering::AcqRel);"""
+replace = """"""
+
+[[plant]]
+name = "output clock: a pending read is not quiet"
+meant = "a_window_is_not_quiet_while_bytes_it_printed_are_not_in_its_screen"
+runs = ["oc-feed"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/arbiter/timing.rs"
+find = """        if self.counts.pending() {
+            return Some(0);
+        }"""
+replace = """"""
+
+[[plant]]
+name = "output clock: a pane whose feed panicked still admits input"
+meant = "t2132_a_feed_that_panics_admits_nothing"
+runs = ["oc-model", "oc-feed"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/arbiter/state.rs"
+find = """    if state.input_failed || state.output.counts().is_broken() {"""
+replace = """    if state.input_failed {"""
+
+[[plant]]
+name = "output clock: a counts-only snapshot waits for the screen's lock"
+meant = "a_counts_only_snapshot_does_not_wait_for_the_screen_lock"
+runs = ["oc-feed"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pane_handlers.rs"
+find = """        _ => ((None, None), counts()),"""
+replace = """        Some(screen) => screen.observe(lines, counts),
+        _ => ((None, None), counts()),"""
+
+[[plant]]
+name = "output clock: the cursor is left out of the name of what the screen shows"
+meant = "t2160_a_cursor_only_echo_after_the_look"
+runs = ["oc-model", "oc-walks", "oc-feed"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/screen.rs"
+find = """            Some(cursor) => {
+                1u8.hash(&mut hasher);
+                (cursor.line, cursor.col, cursor.shown, cursor.plain_after).hash(&mut hasher);
+            }
+            None => 0u8.hash(&mut hasher),"""
+replace = """            Some(_) => 1u8.hash(&mut hasher),
+            None => 0u8.hash(&mut hasher),"""
+
+[[plant]]
+name = "output clock: what the screen shows is named by the grid's digest"
+meant = "t2160_a_key_typed_and_erased_since_the_look"
+runs = ["oc-model", "oc-walks", "oc-feed"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/screen.rs"
+find = """        Seen::of(&self.bottom(BOTTOM_LINES))"""
+replace = """        Seen(self.shows)"""
+
+[[plant]]
+name = "output clock: a look is taken of a screen that lacks bytes the host has read"
+meant = "a_snapshot_at_6_over_5_is_no_look_and_one_with_no_seen_or_not_ok_is_none_either"
+runs = ["oc-model", "oc-walks", "oc-harness"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/look.rs"
+find = """            if read > drawn {
+                return Err(NoLook::Behind);
+            }"""
+replace = """            let _ = (read, drawn);"""
+
+[[plant]]
+name = "output clock: a look is taken of a snapshot the host said was not ok"
+meant = "a_snapshot_at_6_over_5_is_no_look_and_one_with_no_seen_or_not_ok_is_none_either"
+runs = ["oc-harness"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/look.rs"
+find = """        if snapshot.get("ok") != Some(&Value::Bool(true)) {
+            return Err(NoLook::NoAnswer);
+        }
+        let count"""
+replace = """        let count"""
+
+[[plant]]
+name = "output clock: a whole wait with no look pastes the message again"
+meant = "after_a_whole_wait_no_look_pastes_nothing_and_a_box_that_holds_the_paste_gets_an_enter"
+runs = ["oc-model", "oc-harness", "oc-engine"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/look.rs"
+find = """    let Ok(look) = look else {
+        return AfterWait::LookAgain;
+    };
+    if look"""
+replace = """    let Ok(look) = look else {
+        return AfterWait::PasteAgain;
+    };
+    if look"""
+
+[[plant]]
+name = "output clock: a paste goes into a box the reader reads as holding words"
+meant = "a_box_that_holds_the_humans_draft_waits_whatever_the_counts_say_after"
+runs = ["oc-harness"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/look.rs"
+find = """    if !over_count && !stale && reads == BoxReading::Holds {
+        return PasteLicence::Wait(Held::Unsent);
+    }"""
+replace = """"""
+
+[[plant]]
+name = "output clock: a paste goes in over a key of the human's less than a second old"
+meant = "a_key_younger_than_a_second_waits_for_the_screen_to_catch_up"
+runs = ["oc-harness"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/look.rs"
+find = """    if look
+        .typed_quiet_ms()
+        .is_some_and(|typed| typed < SETTLED_MS)
+    {"""
+replace = """    if false {"""
+
+[[plant]]
+name = "output clock: a refused paste has written the key that empties the box"
+meant = "a_refused_paste_writes_no_clearing_key"
+runs = ["oc-feed"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/arbiter.rs"
+find = """        let mut bytes = paste.clear_first.map(<[u8]>::to_vec).unwrap_or_default();
+        bytes.extend_from_slice(&bracketed(&body));"""
+replace = """        if let Some(key) = paste.clear_first {
+            writer.write(pane, key)?;
+        }
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&bracketed(&body));"""
+
+[[plant]]
+# T-2414: the daemon's events count a hand-over refused for its look as no paste (cf-e2e's
+# `handed`), on the host's word that it wrote nothing. A host that wrote the paste and then
+# answered look-again would make that count hide a doubled message.
+name = "output clock: a paste refused for its look has been written"
+meant = "a_cursor_only_echo_since_the_look_refuses_the_paste"
+runs = ["oc-feed"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/arbiter.rs"
+find = """        let Some((output, enter)) = admitted else {
+            return Err(match first {
+                Err(Gated::Refused(refused)) => refused,"""
+replace = """        let Some((output, enter)) = admitted else {
+            return Err(match first {
+                Err(Gated::Refused(refused)) => {
+                    if matches!(refused, ArbiterError::LookAgain(_)) {
+                        let _ = writer.write(pane, &bytes);
+                    }
+                    refused
+                }"""
+
+[[plant]]
+name = "output clock: a paced paste goes on a look its window's readiness has not approved"
+meant = "a_paced_paste_goes_only_on_a_look_its_window_approved"
+runs = ["oc-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/pacing.rs"
+find = """                match self.readiness_of_look(record, window, pane, look).await? {"""
+replace = """                match match self.licence_of(record, pane, window, look) {
+                    cf_harness::PasteLicence::Wait(held) => Readiness::Held(held),
+                    cf_harness::PasteLicence::Go { .. } => Readiness::Ready,
+                } {"""
+
+[[plant]]
+name = "output clock: the mark of a stale paste outlives the replacement that went into an empty box"
+meant = "a_paste_into_a_box_read_empty_retires_the_mark_of_the_stale_paste_it_replaced"
+runs = ["oc-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = """        if wrote && matches!(&licence, Some(PasteLicence::Go { .. })) {"""
+replace = """        if wrote
+            && matches!(
+                &licence,
+                Some(PasteLicence::Go {
+                    clear_first: Some(_),
+                    ..
+                })
+            )
+        {"""
+
+[[plant]]
+name = "output clock: the pair is sampled read first"
+meant = "a_snapshot_samples_the_counts_drawn_first_and_once"
+runs = ["oc-feed"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/arbiter/timing.rs"
+find = """        let drawn = self.drawn.load(Ordering::Acquire);
+        crate::sync::point("both.drawn");
+        #[cfg(test)]
+        if let Some(between) = BETWEEN_LOADS.with(|slot| slot.take()) {
+            between();
+        }
+        let pair = (self.read.load(Ordering::Acquire), drawn);"""
+replace = """        let read = self.read.load(Ordering::Acquire);
+        crate::sync::point("both.drawn");
+        #[cfg(test)]
+        if let Some(between) = BETWEEN_LOADS.with(|slot| slot.take()) {
+            between();
+        }
+        let pair = (read, self.drawn.load(Ordering::Acquire));"""
+
+[[plant]]
+name = "output clock: a snapshot samples each count apart"
+meant = "a_snapshot_takes_both_counts_from_one_sampling"
+runs = ["oc-feed"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/arbiter/state.rs"
+find = """        let (output_read, output_drawn, output_caught_up) = self.output.counts().sample();"""
+replace = """        let (output_read, _, output_caught_up) = self.output.counts().sample();
+        let output_drawn = self.output.counts().both().1;"""
+
+[[plant]]
+name = "output clock: a read is counted after the lock of the activity time"
+meant = "t2139_a_read_is_counted_before_the_activity_lock"
+runs = ["oc-model", "oc-pty"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty/flow.rs"
+find = """            let byte_count = self.inner.read(buffer)?;
+            if byte_count > 0 {
+                self.counts.took(byte_count);
+            }
+            byte_count
+        };
+        if byte_count > 0 {
+            *crate::sync::lock(&self.last_activity)
+                .map_err(|_| io::Error::other("pane activity lock is poisoned"))? = Instant::now();
+        }"""
+replace = """            self.inner.read(buffer)?
+        };
+        if byte_count > 0 {
+            *crate::sync::lock(&self.last_activity)
+                .map_err(|_| io::Error::other("pane activity lock is poisoned"))? = Instant::now();
+            self.counts.took(byte_count);
+        }"""
+
+[[plant]]
+name = "output clock: the Enter is written without a look at the pane with the writer held"
+meant = "t2139_the_enter_after_the_final_check_at_the_writer"
+runs = ["oc-model", "oc-walks"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/arbiter.rs"
+find = """            if overdue || output.counts().current() {"""
+replace = """            let _ = &output;
+            if true || overdue {"""
+
+[[plant]]
+name = "output clock: the read is made outside the gate"
+meant = "t2233_a_look_waits_for_bytes_in_hand"
+runs = ["oc-model"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty/flow.rs"
+find = """            let _intake = self.counts.intake();
+"""
+replace = """"""
+
+[[plant]]
+name = "output clock: a look does not ask the terminal"
+meant = "t2233_the_room_gives_no_look_and_nothing_goes_again"
+runs = ["oc-model", "oc-feed"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/arbiter/timing.rs"
+find = """        let waiting = intake.waiting.as_ref().is_some_and(|waiting| waiting());"""
+replace = """        let waiting = false;"""
+
+[[plant]]
+name = "output clock: the question to the terminal answers that nothing waits"
+meant = "a_reader_held_at_the_room_is_behind_on_a_real_terminal"
+runs = ["oc-feed"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty/output_end.rs"
+find = """    answered != 0"""
+replace = """    let _ = answered;
+    false"""
+
+[[plant]]
+name = "output clock: admission does not ask whether the pane is current"
+meant = "t2233_printed_since_the_look_a_paste"
+runs = ["oc-model", "oc-walks"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/arbiter.rs"
+find = """            if !state.output.counts().current() {
+                return Gate::Refuse(ArbiterError::LookAgain(Why::OutputPending));
+            }
+"""
+replace = """"""
+
+[[plant]]
+name = "output clock: pane.enter's gate does not ask"
+meant = "t2233_printed_since_the_look_pane_enter_waits_and_is_refused"
+runs = ["oc-model", "oc-walks"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/arbiter.rs"
+find = """        if state.output.counts().current() {
+            return Gate::Go;
+        }"""
+replace = """        let _ = (started, PENDING_GRACE_MS);
+        if true {
+            return Gate::Go;
+        }"""
+
+[[plant]]
+name = "output clock: the first Enter ignores the terminal"
+meant = "t2233_the_first_enter_waits_for_the_terminal_and_goes_at_the_cap"
+runs = ["oc-model"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/arbiter/timing.rs"
+find = """            if since < self.pending_cap_ms() && !output.counts().current() {"""
+replace = """            if since < self.pending_cap_ms() && output.counts().pending() {"""
+
+[[plant.edit]]
+file = "crates/cf-panes/src/arbiter.rs"
+find = """            if overdue || output.counts().current() {"""
+replace = """            if overdue || !output.counts().pending() {"""
+
+[[plant]]
+name = "output clock: the first Enter never goes while the terminal holds bytes"
+meant = "t2233_the_first_enter_waits_for_the_terminal_and_goes_at_the_cap"
+runs = ["oc-model"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/arbiter.rs"
+find = """            if overdue || output.counts().current() {"""
+replace = """            let _ = overdue;
+            if output.counts().current() {"""
+
+[[plant]]
+name = "output clock: admission's digest and current check are made without the screen's lock"
+meant = "t2160_the_digest_and_the_pending_check_are_under_one_lock"
+runs = ["oc-model", "oc-walks"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/arbiter.rs"
+find = """            let mut gate = Gate::Wait;
+            screening(&mut |screen| {
+                let seen = screen.map(Screen::seen);
+                gate = self.paste_gate(&state, pane, &paste, seen, &body, &mut admitted);
+            });
+            gate"""
+replace = """            let mut seen = None;
+            screening(&mut |screen| seen = screen.map(Screen::seen));
+            self.paste_gate(&state, pane, &paste, seen, &body, &mut admitted)"""
+
+[[plant]]
+name = "output clock: a key of the human's since the look is no reason"
+meant = "t2160_a_key_typed_and_erased_since_the_look"
+runs = ["oc-model", "oc-walks", "oc-feed"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/arbiter.rs"
+find = """            if state.typed != at.typed {
+                return Gate::Refuse(ArbiterError::Unsent);
+            }
+"""
+replace = """"""
+
+[[plant]]
+name = "output clock: a snapshot with no outputCaughtUp is a look"
+meant = "a_snapshot_that_does_not_say_it_is_current_is_no_look"
+runs = ["oc-harness"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/look.rs"
+find = """        if snapshot.get("outputCaughtUp") != Some(&Value::Bool(true)) {"""
+replace = """        if snapshot.get("outputCaughtUp") == Some(&Value::Bool(false)) {"""
+
+[[plant]]
+name = "output clock: a second since the last key sets the count aside"
+meant = "t2230_a_late_echo_beside_other_output_holds_the_paste"
+runs = ["oc-model"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/look.rs"
+find = """        } = &self.unsent_at;"""
+replace = """        } = &self.unsent_at;
+        if self.typed_quiet_ms.is_some_and(|typed| typed >= 1_000) {
+            return Some(Evidence::Erased);
+        }"""
+
+[[plant.edit]]
+file = "crates/cf-panes/src/arbiter/state.rs"
+find = """        typed == self.typed
+            && match by {"""
+replace = """        if by == Evidence::Erased {
+            return true;
+        }
+        typed == self.typed
+            && match by {"""
+
+[[plant]]
+name = "output clock: five seconds since the last key set the count aside"
+meant = "t2230_a_silent_late_echo_holds_the_paste"
+runs = ["oc-model"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/look.rs"
+find = """        } = &self.unsent_at;"""
+replace = """        } = &self.unsent_at;
+        if self.typed_quiet_ms.is_some_and(|typed| typed >= 5_000) {
+            return Some(Evidence::Erased);
+        }"""
+
+[[plant.edit]]
+file = "crates/cf-panes/src/arbiter/state.rs"
+find = """        typed == self.typed
+            && match by {"""
+replace = """        if by == Evidence::Erased {
+            return true;
+        }
+        typed == self.typed
+            && match by {"""
+
+[[plant]]
+name = "output clock: the licence ignores the screen kept over a key that added nothing"
+meant = "t2233_erased_and_seen_the_message_is_taken"
+runs = ["oc-model", "oc-harness"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/look.rs"
+find = """        if erased {
+            return Some(Evidence::Erased);
+        }"""
+replace = """        let _ = erased;"""
+
+[[plant]]
+name = "output clock: a character keeps the screen kept over an earlier erase"
+meant = "t2233_a_character_after_the_erase_holds"
+runs = ["oc-model", "oc-feed"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/arbiter/state.rs"
+find = """            at.pressed_over = None;
+"""
+replace = """"""
+
+[[plant]]
+name = "output clock: the licence ignores the screens the keys were typed into"
+meant = "t2233_a_dialog_answered_the_message_is_taken"
+runs = ["oc-model", "oc-harness"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/look.rs"
+find = """        elsewhere.then_some(Evidence::Elsewhere)"""
+replace = """        let _ = elsewhere;
+        None"""
+
+[[plant]]
+name = "output clock: only one write may be evidence of typing elsewhere"
+meant = "t2255_a_picker_filtered_key_by_key_and_left_with_escape_the_message_is_taken"
+runs = ["oc-model", "oc-harness"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/look.rs"
+find = """        let elsewhere = !typed_more
+"""
+replace = """        let elsewhere = !typed_more
+            && typed_at.len() == 1
+"""
+
+[[plant]]
+name = "output clock: only the first screen typed into is asked"
+meant = "t2255_a_key_at_the_box_after_a_dialog_holds"
+runs = ["oc-model", "oc-harness"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/look.rs"
+find = """typed_at.iter().all("""
+replace = """typed_at.iter().take(1).all("""
+
+[[plant]]
+name = "output clock: only the first and the last screen typed into are asked"
+meant = "keys_typed_into_a_dialog_and_nowhere_else_set_the_count_aside"
+runs = ["oc-harness"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/look.rs"
+find = """typed_at.iter().all("""
+replace = """typed_at.first().into_iter().chain(typed_at.last()).all("""
+
+[[plant]]
+name = "output clock: the last screen's current is not asked"
+meant = "t2255_a_last_key_typed_with_the_pickers_frame_at_the_terminal_holds"
+runs = ["oc-model", "oc-feed", "oc-harness"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/look.rs"
+find = """                last.current
+                    ||"""
+replace = """                true || last.current
+                    ||"""
+
+[[plant.edit]]
+file = "crates/cf-panes/src/arbiter/state.rs"
+find = """last.current || over)"""
+replace = """true || last.current || over)"""
+
+[[plant]]
+name = "output clock: the screen at the next key does not stand for the last"
+meant = "t2255_the_screen_at_the_next_key_stands_for_a_last_one_that_was_behind"
+runs = ["oc-model", "oc-feed", "oc-harness"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/look.rs"
+find = """                    || pressed_over
+"""
+replace = """                    || false && pressed_over
+"""
+
+[[plant.edit]]
+file = "crates/cf-panes/src/arbiter/state.rs"
+find = """last.current || over)"""
+replace = """last.current || false && over)"""
+
+[[plant]]
+name = "output clock: keys past the screens kept are not asked about"
+meant = "t2255_more_keys_than_screens_are_kept_of_holds"
+runs = ["oc-model", "oc-feed", "oc-harness"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/look.rs"
+find = """        let elsewhere = !typed_more
+"""
+replace = """        let elsewhere = (true || !typed_more)
+"""
+
+[[plant.edit]]
+file = "crates/cf-panes/src/arbiter/state.rs"
+find = """!at.typed_more && """
+replace = """(true || !at.typed_more) && """
+
+[[plant]]
+name = "output clock: a paste over the count does not wait for a still screen"
+meant = "t2255_a_dialogs_end_and_the_key_typed_ahead_drawn_in_two_frames_holds"
+runs = ["oc-model", "oc-harness"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/look.rs"
+find = """            .is_none_or(|quiet| quiet < SETTLED_MS)
+        {
+            return PasteLicence::Wait(Held::Settling);"""
+replace = """            .is_none_or(|quiet| quiet < SETTLED_MS && false)
+        {
+            return PasteLicence::Wait(Held::Settling);"""
+
+[[plant]]
+name = "output clock: a screen that never holds still keeps the paste with no words"
+meant = "t2255_a_screen_that_never_holds_still_keeps_the_paste_until_ctrl_u"
+runs = ["oc-model", "oc-harness"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/look.rs"
+find = """            .is_none_or(|quiet| quiet < SETTLED_MS)
+        {
+            return PasteLicence::Wait(Held::Settling);"""
+replace = """            .is_none_or(|quiet| quiet < SETTLED_MS)
+        {
+            return PasteLicence::Wait(Held::Because("the screen changed".to_owned()));"""
+
+[[plant]]
+name = "output clock: the host admits readEmpty on the daemon's word"
+meant = "t2233_a_paste_naming_evidence_the_host_lacks_is_refused"
+runs = ["oc-model", "oc-feed"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/arbiter/state.rs"
+find = """        typed == self.typed
+            && match by {"""
+replace = """        typed == self.typed
+            || match by {"""
+
+[[plant]]
+name = "output clock: Devin's command is pasted again only before any act"
+meant = "a_box_known_empty_that_lost_its_bypass_while_the_mode_is_normal_gets_the_command_again"
+runs = ["oc-devin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/adapter.rs"
+find = """            Found::Empty(licence) if drawn && due => {"""
+replace = """            Found::Empty(licence) if drawn && due && switch.acted.is_none() => {"""
+
+[[plant]]
+name = "output clock: Devin's adapter holds a count the evidence set aside"
+meant = "a_word_erase_of_the_command_lets_it_be_pasted_again"
+runs = ["oc-devin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/adapter.rs"
+find = """    let reads = look.reads(Harness::Devin);
+    if look.unsent() && reads != BoxReading::Empty {"""
+replace = """    let reads = look.reads(Harness::Devin);
+    if look.unsent() {"""
+
+[[plant]]
+name = "output clock: Devin's launch time runs while the person holds it"
+meant = "the_launch_is_not_given_up_while_the_person_types"
+runs = ["oc-devin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/adapter.rs"
+find = """        if !matches!(found, Found::Held(_)) {"""
+replace = """        if true {"""
+
+[[plant]]
+name = "output clock: Devin's Enter goes on any box that holds words"
+meant = "no_enter_goes_over_the_persons_words_behind_the_command"
+runs = ["oc-devin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/adapter.rs"
+find = """            if look.words(Harness::Devin).as_deref() == Some(BYPASS) {"""
+replace = """            if look.words(Harness::Devin).is_some() {"""
+
+[[plant]]
+name = "output clock: a gate asks the pane table for the screen with the writer held"
+meant = "a_gate_asked_with_the_writer_held_asks_the_table_for_nothing"
+runs = ["oc-gate"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty.rs"
+find = """        let screening = |under: &mut dyn FnMut(Option<&Screen>)| {
+            screen.with_screen(&mut |screen| under(Some(screen)));
+        };"""
+replace = """        let _ = &screen;
+        let screening = |under: &mut dyn FnMut(Option<&Screen>)| {
+            PaneInputWriter::with_screen(self, key, under);
+        };"""
+
+[[plant]]
+name = "output clock: the screen is fed before the journal takes the read"
+meant = "a_feed_that_panics_leaves_the_journal_whole_and_handed_on"
+runs = ["oc-feed"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/screen.rs"
+find = """        kept(bytes);
+        let changed = screen.feed(bytes);
+        #[cfg(test)]
+        self.hook.at(FeedStage::Fed);"""
+replace = """        let changed = screen.feed(bytes);
+        #[cfg(test)]
+        self.hook.at(FeedStage::Fed);
+        kept(bytes);"""
+
+[[plant]]
+name = "output clock: what the journal holds past a panicked feed is not handed on"
+meant = "a_feed_that_panics_leaves_the_journal_whole_and_handed_on"
+runs = ["oc-feed"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pane_handlers.rs"
+find = """            if let Some(journal) = &journal {
+                hand_on_the_rest(&key, journal, &output, taken.get());
+            }"""
+replace = """            let _ = (&journal, taken.get(), hand_on_the_rest);"""
+
+[[plant]]
+name = "output clock: a read is counted drawn before it is in the journal"
+meant = "a_read_is_in_the_screen_and_the_journal_before_it_is_counted_drawn"
+runs = ["oc-feed"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/screen.rs"
+find = """        kept(bytes);
+        let changed = screen.feed(bytes);
+        #[cfg(test)]
+        self.hook.at(FeedStage::Fed);
+        crate::sync::point("feed.fed");
+        // The clock first: between the two the window still reads as having output pending.
+        printed.note(changed);
+        crate::sync::point("feed.noted");
+        printed.counts().drew(bytes.len());"""
+replace = """        let changed = screen.feed(bytes);
+        #[cfg(test)]
+        self.hook.at(FeedStage::Fed);
+        crate::sync::point("feed.fed");
+        // The clock first: between the two the window still reads as having output pending.
+        printed.note(changed);
+        crate::sync::point("feed.noted");
+        printed.counts().drew(bytes.len());
+        kept(bytes);"""
+
+[[plant]]
+name = "output clock: our put-back in a box that does not read holds the message with no key of the person's counted"
+meant = "n6_our_put_back_with_no_key_of_the_persons_is_cleared_and_pasted_though_the_box_does_not_read"
+runs = ["oc-model", "oc-harness"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/look.rs"
+find = """state.put_back_by_our_stop && look.at().typed == 0"""
+replace = """state.put_back_by_our_stop && false"""
+
+[[plant]]
+name = "output clock: our put-back in a box that does not read is cleared blind after a key of the person's"
+meant = "the_limit_a_key_of_the_persons_was_counted_and_our_put_back_sits_in_a_box_that_does_not_read"
+runs = ["oc-model", "oc-harness"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/look.rs"
+find = """state.put_back_by_our_stop && look.at().typed == 0"""
+replace = """state.put_back_by_our_stop && true"""
+
+[[plant]]
+name = "output clock: our put-back in a box that reads is cleared after a key of the person's since"
+meant = "a_put_back_in_a_box_that_reads_is_not_cleared_after_a_key_of_the_persons_since"
+runs = ["oc-harness"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/look.rs"
+find = """            .is_some_and(|typed| look.at().typed > typed)"""
+replace = """            .is_some_and(|typed| look.at().typed > typed && false)"""

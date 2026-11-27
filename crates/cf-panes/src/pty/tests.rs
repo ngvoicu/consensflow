@@ -1952,3 +1952,105 @@ mod windows {
         table.kill(&key).expect("kill the pane");
     }
 }
+
+/// N17 (T-2139 finding 1): a read is counted the moment the pty returns it, before the lock of
+/// the pane's activity time: a thread kept from that lock has told the window's readers of its
+/// bytes (the child's `Z` was read and the count still 258/258 while the activity mutex was
+/// held, and the paste's Enter went).
+#[cfg(unix)]
+#[test]
+fn a_read_is_counted_while_the_activity_lock_is_held() {
+    let _pty_guard = serial_pty_test();
+    let table = Arc::new(PaneTable::new());
+    let streamed = table
+        .open_streamed(
+            Path::new("/tmp"),
+            &shell("/bin/sleep 1.5; printf x; /bin/sleep 1000"),
+            PaneEnvironment::new(&HashMap::new(), &[]),
+            terminal_size(24, 80),
+            1024,
+        )
+        .expect("open delayed-output pane");
+    let activity = Arc::clone(
+        &table
+            .lock_panes()
+            .unwrap()
+            .get(&streamed.key)
+            .expect("the pane")
+            .last_activity,
+    );
+    let held = activity.lock().unwrap();
+    let until = Instant::now() + Duration::from_secs(10);
+    while streamed.counts.both().0 == 0 {
+        assert!(
+            Instant::now() < until,
+            "the byte the pty gave was not counted while the activity lock was held"
+        );
+        thread::sleep(Duration::from_millis(5));
+    }
+    assert_eq!(streamed.counts.both(), (1, 0), "read, and not yet drawn");
+    drop(held);
+    table.kill(&streamed.key).expect("kill the pane");
+}
+
+/// T-2198 note 5: a gate asked with the pane's writer held looks at the screen it was given with
+/// the writer, and asks the pane table for nothing: while a resize or the opening of another pane
+/// holds the table through a native call, the writer of this pane would be held behind it.
+/// Here another thread holds the table, as they do, from the moment the gate is asked until the
+/// gate has looked (or three seconds).
+#[cfg(unix)]
+#[test]
+fn a_gate_asked_with_the_writer_held_asks_the_table_for_nothing() {
+    let _serial = serial_pty_test();
+    let table = Arc::new(PaneTable::new());
+    let OpenedPane {
+        key: pane_key,
+        mut reader,
+    } = open_shell(&table, "exec /bin/cat");
+    // The window's output is read, as the host reads it: a program that ends with its terminal
+    // output unread waits for it to drain.
+    let drain = thread::spawn(move || {
+        let mut sink = [0; 256];
+        while reader.read(&mut sink).is_ok_and(|read| read > 0) {}
+    });
+    let (asked_tx, asked) = std::sync::mpsc::channel();
+    let (held_tx, held) = std::sync::mpsc::channel();
+    let (looked_tx, looked) = std::sync::mpsc::channel();
+    let holder = {
+        let table = Arc::clone(&table);
+        thread::spawn(move || {
+            asked
+                .recv_timeout(Duration::from_secs(10))
+                .expect("the gate is asked");
+            let busy = table.lock_panes().expect("the table");
+            held_tx.send(()).unwrap();
+            let waited = looked.recv_timeout(Duration::from_secs(3)).is_err();
+            drop(busy);
+            waited
+        })
+    };
+    let (writing, key) = (Arc::clone(&table), pane_key.clone());
+    let writer = thread::spawn(move || {
+        writing
+            .write_gated(&key, b"x", &mut |screening| {
+                asked_tx.send(()).unwrap();
+                held.recv_timeout(Duration::from_secs(10))
+                    .expect("the table is held");
+                let mut shown = false;
+                screening(&mut |seen| shown = seen.is_some());
+                looked_tx.send(()).unwrap();
+                assert!(shown, "the screen was looked at");
+                super::Gate::Go
+            })
+            .is_ok()
+    });
+    let written = writer.join().unwrap();
+    let waited = holder.join().unwrap();
+    table.kill(&pane_key).expect("kill the pane");
+    drain.join().unwrap();
+    assert!(written, "the write went");
+    assert!(
+        !waited,
+        "the gate waited for the table while it held the writer"
+    );
+}

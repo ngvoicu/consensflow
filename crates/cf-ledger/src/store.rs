@@ -21,6 +21,9 @@ use crate::Event;
 /// dates it, within one write.
 pub(crate) const ENDING: i64 = -1;
 
+/// Told the cause when the ledger breaks.
+type BrokenHook = Box<dyn FnMut(&str)>;
+
 pub(crate) struct Store {
     pub(crate) db: Connection,
     pub(crate) question_run: String,
@@ -41,6 +44,12 @@ pub(crate) struct Store {
     /// An operation's write is open: what it logs waits for its commit, even where SQLite
     /// has ended the transaction under it (a full disk rolls it back).
     open: bool,
+    /// Why the ledger can go on no more: a rollback did not take and a
+    /// transaction is open still, so whatever is done now would join it and
+    /// never be committed. Every write after it is refused.
+    broken: Option<String>,
+    /// Told once, the moment the ledger breaks.
+    on_broken: Option<BrokenHook>,
 }
 
 impl Store {
@@ -61,7 +70,26 @@ impl Store {
             trace,
             logged: Vec::new(),
             open: false,
+            broken: None,
+            on_broken: None,
         }
+    }
+
+    /// Whether the connection is in a transaction that was never rolled back (a
+    /// test's look).
+    #[cfg(test)]
+    pub(crate) fn left_open(&self) -> bool {
+        !self.db.is_autocommit()
+    }
+
+    /// Why the ledger is broken, if it is.
+    pub(crate) fn broken(&self) -> Option<&str> {
+        self.broken.as_deref()
+    }
+
+    /// Who is told, once, when the ledger breaks.
+    pub(crate) fn on_broken(&mut self, hook: Box<dyn FnMut(&str)>) {
+        self.on_broken = Some(hook);
     }
 
     /// A fresh session name: two words.
@@ -77,6 +105,7 @@ impl Store {
         &mut self,
         work: impl FnOnce(&mut Self) -> Result<T, LedgerError>,
     ) -> Result<T, LedgerError> {
+        self.refuse_if_broken()?;
         if self.open {
             self.lost()?;
             return work(self);
@@ -100,18 +129,20 @@ impl Store {
                     }
                     Ok(value)
                 }
-                Err(cause) => {
-                    self.roll_back();
-                    Err(cause.into())
-                }
+                Err(cause) => Err(self.roll_back(cause.into())),
             },
-            Ok(Err(cause)) => {
-                self.roll_back();
-                Err(cause)
-            }
+            Ok(Err(cause)) => Err(self.roll_back(cause)),
             Err(unwound) => {
-                self.roll_back();
-                panic::resume_unwind(unwound)
+                // The panic goes on whatever the rollback did, as it was; a rollback
+                // that failed is said after its words, and the ledger refuses
+                // everything after it if the transaction is open still.
+                let rolled = self.roll_back(LedgerError::refused("panicked", "a panic"));
+                match (rolled, crate::rollback::words_of(&unwound)) {
+                    (LedgerError::Unrolled { rollback, .. }, Some(words)) => panic::resume_unwind(
+                        Box::new(format!("{words}; its rollback failed too: {rollback}")),
+                    ),
+                    _ => panic::resume_unwind(unwound),
+                }
             }
         }
     }
@@ -134,6 +165,18 @@ impl Store {
         Ok(())
     }
 
+    /// A broken ledger refuses whatever is asked of it, a read as a write.
+    pub(crate) fn refuse_if_broken(&self) -> Result<(), LedgerError> {
+        match &self.broken {
+            Some(cause) => Err(LedgerError::refused_with(
+                "ledger-broken",
+                format!("the ledger cannot save any more: {cause}"),
+                500,
+            )),
+            None => Ok(()),
+        }
+    }
+
     /// An operation that never read the clock after a holding ended dates its end by
     /// the reading before it.
     fn settle_ends_unread(&mut self) -> rusqlite::Result<()> {
@@ -144,13 +187,45 @@ impl Store {
         Ok(())
     }
 
-    /// Rolls back the transaction and drops everything it logged.
-    fn roll_back(&mut self) {
+    /// Rolls back the transaction and drops everything it logged. `first`,
+    /// what the operation failed with, comes back as it was, or with a
+    /// rollback that failed added to it; a transaction still open after that
+    /// breaks the ledger. Where SQLite ended the transaction itself there is
+    /// nothing to roll back.
+    fn roll_back(&mut self, first: LedgerError) -> LedgerError {
         self.open = false;
         self.ending = false;
         self.end_failed = None;
-        let _ = self.db.execute_batch("ROLLBACK");
         self.logged.clear();
+        let rolled = crate::rollback::roll_back(&self.db);
+        if let Err(cause) = &rolled {
+            if !self.db.is_autocommit() {
+                self.break_with(&format!("a rollback did not take: {cause}"));
+            }
+        }
+        crate::rollback::said(first, rolled)
+    }
+
+    /// The ledger can go on no more; whoever asked is told once. The one broken
+    /// state is set first, and the connection is shut by SQLite itself: its
+    /// authorizer denies every statement from now on, so that a read or a write by
+    /// any path that does not look at the flag fails too, and nothing of the open
+    /// transaction (never committed) can be read. Nothing here allocates or opens
+    /// anything that can fail, so the break cannot be half made. The connection is
+    /// kept, so that its lock holds while the process ends.
+    fn break_with(&mut self, cause: &str) {
+        if self.broken.is_some() {
+            return;
+        }
+        self.broken = Some(cause.to_owned());
+        let _ = self
+            .db
+            .authorizer(Some(|_: rusqlite::hooks::AuthContext<'_>| {
+                rusqlite::hooks::Authorization::Deny
+            }));
+        if let Some(hook) = self.on_broken.as_mut() {
+            hook(cause);
+        }
     }
 
     /// The operation stops where SQLite ended its transaction (a settlement that failed
@@ -167,6 +242,7 @@ impl Store {
         &mut self,
         work: impl FnOnce(&mut Self) -> Result<T, LedgerError>,
     ) -> Result<T, LedgerError> {
+        self.refuse_if_broken()?;
         if self.open || !self.db.is_autocommit() {
             return Err(LedgerError::refused(
                 "nested-batch",
@@ -220,6 +296,7 @@ impl Store {
 
     /// A project's row, or a refusal naming the id.
     pub(crate) fn project_row(&self, id: i64) -> Result<ProjectRow, LedgerError> {
+        self.refuse_if_broken()?;
         self.db
             .query_row("SELECT * FROM project WHERE id = ?", [id], ProjectRow::read)
             .optional()?
@@ -230,6 +307,7 @@ impl Store {
 
     /// A participant's row, its member's handle with it, or a refusal naming the id.
     pub(crate) fn participant_row(&self, id: i64) -> Result<ParticipantRow, LedgerError> {
+        self.refuse_if_broken()?;
         self.db
             .query_row(
                 &format!("{PARTICIPANT_SELECT} WHERE p.id = ?"),
@@ -286,6 +364,7 @@ impl Store {
 
     /// A task of the project by its number, or a refusal naming it.
     pub(crate) fn task_row(&self, project_id: i64, number: i64) -> Result<TaskRow, LedgerError> {
+        self.refuse_if_broken()?;
         self.db
             .query_row(
                 "SELECT * FROM task WHERE project_id = ? AND number = ?",
@@ -304,6 +383,7 @@ impl Store {
 
     /// One message, or none.
     pub(crate) fn message(&self, id: i64) -> Result<Option<MessageView>, LedgerError> {
+        self.refuse_if_broken()?;
         Ok(self
             .db
             .query_row(
@@ -655,5 +735,137 @@ mod tests {
             })
             .unwrap();
         assert_eq!(kinds(&events), ["outer"]);
+    }
+
+    fn broken_refusal(attempt: Result<(), LedgerError>) -> bool {
+        matches!(attempt, Err(ref cause) if cause.code() == Some("ledger-broken"))
+    }
+
+    #[test]
+    fn a_rollback_that_fails_is_said_after_the_failure_that_asked_for_it_and_breaks_the_ledger() {
+        let (mut store, _) = store();
+        let told = Rc::new(RefCell::new(Vec::new()));
+        let hook = Rc::clone(&told);
+        store.on_broken(Box::new(move |cause| {
+            hook.borrow_mut().push(cause.to_owned())
+        }));
+        crate::rollback::refuse_next_rollback();
+        let failed = store.write(|store| {
+            store.log(1, "lost", serde_json::json!({}))?;
+            Err::<(), _>(LedgerError::refused("no", "no way"))
+        });
+        let said = failed.unwrap_err().to_string();
+        assert!(
+            said.starts_with("no way; its rollback failed too: "),
+            "{said}"
+        );
+        assert!(store.left_open(), "the refused rollback left it open");
+        assert!(
+            store.message(1).is_err(),
+            "a read after the break shows nothing of what was not committed"
+        );
+        assert_eq!(told.borrow().len(), 1, "told once");
+        assert!(store.broken().is_some());
+        // A later operation is refused, and nothing is written.
+        assert!(broken_refusal(store.write(|store| store.log(
+            1,
+            "later",
+            serde_json::json!({})
+        ))));
+        assert!(broken_refusal(store.write_batch(|store| store.log(
+            1,
+            "later",
+            serde_json::json!({})
+        ))));
+        assert_eq!(told.borrow().len(), 1, "told once, however often asked");
+    }
+
+    #[test]
+    fn a_read_that_looks_at_no_flag_is_refused_by_sqlite_itself_once_the_ledger_broke() {
+        let (mut store, _) = store();
+        crate::rollback::refuse_next_rollback();
+        let _ = store.write(|store| {
+            store.log(1, "dirty", serde_json::json!({}))?;
+            Err::<(), _>(LedgerError::refused("no", "no way"))
+        });
+        assert!(
+            store.left_open(),
+            "the uncommitted row is in the open transaction"
+        );
+        // Straight through the connection, as a path that forgot the flag would read.
+        assert!(store
+            .db
+            .query_row("SELECT COUNT(*) FROM event", [], |row| row.get::<_, i64>(0))
+            .is_err());
+        assert!(store
+            .db
+            .execute(
+                "INSERT INTO event (project_id, at, kind, data) VALUES (1, 'x', 'y', 'z')",
+                []
+            )
+            .is_err());
+    }
+
+    #[test]
+    fn a_commit_that_fails_and_a_rollback_that_fails_break_the_ledger() {
+        let (mut store, _) = store();
+        store
+            .db
+            .execute_batch(
+                "PRAGMA foreign_keys = ON;
+                 CREATE TABLE parent (id INTEGER PRIMARY KEY);
+                 CREATE TABLE child (parent INTEGER REFERENCES parent(id))",
+            )
+            .unwrap();
+        crate::rollback::refuse_next_rollback();
+        let failed = store.write(|store| {
+            store
+                .db
+                .execute_batch("PRAGMA defer_foreign_keys = ON; INSERT INTO child VALUES (7)")?;
+            Ok(())
+        });
+        let said = failed.unwrap_err().to_string();
+        assert!(said.contains("FOREIGN KEY"), "{said}");
+        assert!(said.contains("its rollback failed too"), "{said}");
+        assert!(store.broken().is_some());
+        assert!(broken_refusal(store.write(|store| store.log(
+            1,
+            "later",
+            serde_json::json!({})
+        ))));
+    }
+
+    #[test]
+    fn a_panic_whose_rollback_fails_breaks_the_ledger_and_the_panic_goes_on() {
+        let (mut store, _) = store();
+        crate::rollback::refuse_next_rollback();
+        let unwound = panic::catch_unwind(AssertUnwindSafe(|| {
+            let _ = store.write(|store| -> Result<(), LedgerError> {
+                store.log(1, "lost", serde_json::json!({}))?;
+                panic!("in the middle of an operation");
+            });
+        }));
+        let said = crate::rollback::words_of(&unwound.unwrap_err()).unwrap();
+        assert!(
+            said.starts_with("in the middle of an operation; its rollback failed too: "),
+            "the panic's words come first: {said}"
+        );
+        assert!(store.broken().is_some());
+        assert!(broken_refusal(store.write(|store| store.log(
+            1,
+            "later",
+            serde_json::json!({})
+        ))));
+    }
+
+    #[test]
+    fn a_rollback_that_takes_leaves_the_ledger_usable_and_the_failure_as_it_was() {
+        let (mut store, _) = store();
+        let failed = store.write(|_| Err::<(), _>(LedgerError::refused("no", "no way")));
+        assert_eq!(failed.unwrap_err().code(), Some("no"));
+        assert!(store.broken().is_none());
+        store
+            .write(|store| store.log(1, "after", serde_json::json!({})))
+            .unwrap();
     }
 }

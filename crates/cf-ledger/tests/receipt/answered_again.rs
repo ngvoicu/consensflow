@@ -158,6 +158,28 @@ fn a_same_window_reopen_reminds_the_chief_when_approval_declined_the_answer() {
 }
 
 #[test]
+fn a_task_finished_with_a_declined_answer_and_then_reopened_tells_nobody_to_answer_it_again() {
+    // The answer was declined, the chief finished the task with the question open (Finish
+    // closes it with the result's reason: nothing can answer it now), and the task is sent
+    // back: the one asked is not told to answer a question `cf answer` refuses.
+    let mut w = gated_world();
+    let (task, question, answer) = answered_at_the_gate(&mut w);
+    w.ledger.decline_message(answer, "human").unwrap();
+    let previous_notes = notes(&w, "chief").len();
+    w.ledger
+        .record_finished(w.project, task, "The words it ended on", (0, 0))
+        .expect("finished");
+    let reason = format!("T-{task} gave its result with it unanswered");
+    assert_eq!(w.message(question).reason.as_deref(), Some(reason.as_str()));
+    w.ledger
+        .reopen_task(w.project, task, "human", "Try again")
+        .expect("sent back");
+    assert_eq!(notes(&w, "chief").len(), previous_notes);
+    assert_eq!(w.message(question).state, "cancelled");
+    assert_eq!(w.message(question).reason.as_deref(), Some(reason.as_str()));
+}
+
+#[test]
 fn a_failed_task_returns_its_answer_once_and_does_not_reopen_the_old_question() {
     let mut w = gated_world();
     let (task, question, answer) = answered_at_the_gate(&mut w);

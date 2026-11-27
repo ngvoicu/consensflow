@@ -59,6 +59,7 @@
 use std::path::PathBuf;
 
 use cf_e2e::devin_store;
+use cf_e2e::handed;
 use cf_e2e::rig::{Config, Project, Rig};
 use cf_e2e::Error;
 use serde_json::{json, Value};
@@ -249,21 +250,7 @@ fn once_each(settle: Option<&str>) -> Outcome {
     // proof: the stand-in runs a message it is handed in a turn when that turn ends, so
     // a second copy of a note is read by the chief only after the turns before it,
     // later than this looks.
-    let events = rig.events_settled();
-    for (id, what) in notes {
-        let of_note = |kind: &str| -> Vec<&Value> {
-            events
-                .iter()
-                .filter(|event| event["kind"] == kind && event["data"]["message"] == id)
-                .collect()
-        };
-        let (pasted, retried) = (of_note("delivery.begun"), of_note("delivery.retried"));
-        assert!(
-            pasted.len() == 1 && retried.is_empty(),
-            "{what} (m-{id}) was pasted {} times; the daemon took it for lost: {retried:?}",
-            pasted.len()
-        );
-    }
+    pasted_once_each(&rig.events_settled(), notes);
 
     // What the chief had read by then: each note once.
     let given = devin_store::messages(&store)?;
@@ -287,6 +274,70 @@ fn once_each(settle: Option<&str>) -> Outcome {
     }
     rig.close()?;
     Ok(())
+}
+
+/// What the daemon's own word says of `notes`: it pasted each once, and took no paste of either
+/// for lost. A hand-over the pane host refused before writing anything is no paste
+/// ([`handed`]); what the chief was given is read from its store after this, whatever the
+/// events say.
+fn pasted_once_each(events: &[Value], notes: [(i64, &str); 2]) {
+    for (id, what) in notes {
+        let (pasted, retried) = (
+            handed::pastes(events, id),
+            handed::retried_after_a_paste(events, id),
+        );
+        assert!(
+            pasted.len() == 1 && retried.is_empty(),
+            "{what} (m-{id}) was pasted {} times; the daemon took it for lost: {retried:?}",
+            pasted.len()
+        );
+    }
+}
+
+/// T-2414: CI's run 46057354251 (hosted Windows, the case with no settle on Devin 3000.12), its
+/// event 39 as the run logged it, the rest in its order. The stand-in writes a turn's end to its record and wire before it draws the
+/// turn's last words; the daemon read the chief at rest and looked between the two, and the
+/// words drawn after the look changed the box. The pane host refused m-4's hand-over for it
+/// before writing a byte (`box-changed`), and pasted it at the next look: the chief's screen
+/// took two pastes, one a note. That is no second paste, and no paste taken for lost.
+#[test]
+fn a_hand_over_refused_for_its_box_before_anything_was_written_is_no_second_paste() {
+    let event = |n: i64, kind: &str, message: i64, reason: Option<&str>| {
+        let mut data = json!({ "message": message });
+        if let Some(reason) = reason {
+            data["reason"] = json!(reason);
+        }
+        json!({ "n": n, "kind": kind, "project": 1, "data": data })
+    };
+    let events = [
+        event(38, "delivery.begun", 4, None),
+        event(
+            39,
+            "delivery.retried",
+            4,
+            Some("the window changed as the message was handed over: box-changed"),
+        ),
+        event(40, "delivery.begun", 4, None),
+        event(41, "delivery.confirmed", 4, None),
+        event(42, "delivery.begun", 5, None),
+        event(43, "delivery.confirmed", 5, None),
+    ];
+    pasted_once_each(
+        &events,
+        [
+            (4, "the note of T-1's cancel"),
+            (5, "the note of T-2's cancel"),
+        ],
+    );
+}
+
+/// The words the cases read a refused hand-over by are the engine's own.
+#[test]
+fn the_words_of_a_refused_hand_over_are_the_engine_s() {
+    assert_eq!(
+        handed::CHANGED_AS_HANDED_OVER,
+        cf_engine::CHANGED_AS_HANDED_OVER
+    );
 }
 
 // The same on the wire log of Devin 3000.12.43, the installed Devin (T-1423): the case as

@@ -42,9 +42,15 @@ pub mod seams;
 mod shared;
 
 pub use devin::forget_kept;
+pub use shared::admission::Sent;
 pub use shared::launch_files::{forget_launch, sweep_launches, NotRemoved};
+pub use shared::look::{
+    after_wait, licence_enter, licence_paste, AfterWait, At, BoxReading, BoxState, EnterFor,
+    EnterLicence, Look, NoLook, PasteLicence, NO_LOOK, SCREEN_QUIET_FOR_ENTER_MS,
+};
 pub use shared::off_thread::OVER as CALLED_OFF;
 pub use shared::off_thread::{called_off, late_step, launch_wanted, while_wanted};
+pub use shared::pane::{enter, look};
 pub use shared::specmint::bundled_specmint;
 
 // Fakes other crates' tests compile too: a failure in one is the test's.

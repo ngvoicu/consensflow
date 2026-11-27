@@ -65,13 +65,12 @@ fn typed_at(items: &[crate::live::ask::Item], id: &Value) -> Vec<usize> {
         .collect()
 }
 
-/// How many of the daemon's events of `kind` are about the message `id`.
+/// How many of the daemon's events of `kind` are about the message `id`; a hand-over refused
+/// before anything was written is no paste ([`crate::handed`]).
 fn events_of(snapshot: &Snapshot, kind: &str, id: &Value) -> usize {
-    snapshot
-        .events
-        .iter()
-        .filter(|event| event["kind"] == kind && event["data"]["message"] == *id)
-        .count()
+    id.as_i64().map_or(0, |id| {
+        crate::handed::of_message(&snapshot.events, kind, id).len()
+    })
 }
 
 /// The checks that the one message of `kind` about the task bound to `name` was delivered, went
@@ -379,7 +378,7 @@ pub fn deliveries() -> Vec<Scenario> {
                     restarts: false,
                     name: "the chief answers it in a turn of its own",
                     asks: |_| "Work for half a minute on the plan in your head. Our worker will ask you a question meanwhile: answer it with `cf answer` and the word JSON, without waiting for it to be typed to you. Tell me in one line when its result is back.".to_owned(),
-                    stand_in: |_| "SLEEP 30 CF answer m-2 :: JSON".to_owned(),
+                    stand_in: |bindings| format!("SLEEP 30 CF answer m-{} :: JSON", bindings.next_message.max(1)),
                     reached: |snapshot, bindings| answered(snapshot, bindings, "A", 0),
                 },
                 Step {

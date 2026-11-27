@@ -23,6 +23,15 @@ pub const TOOL_FOLDERS: &str = "CONSENSFLOW_TOOL_FOLDERS";
 /// the app's own terminal would not have otherwise (T-540).
 pub const TERMINAL_ENV: &str = "CONSENSFLOW_TERMINAL_ENV";
 
+/// The variable macOS's `path_helper` reads the root of its files from.
+pub const PATH_HELPER_ROOT: &str = "PATH_HELPER_ROOT";
+
+/// The member guard's root, beside [`PATH_HELPER_ROOT`] in a window that is given it: what
+/// tells that root from one of the person's own, which is theirs. A harness that hands its
+/// commands only ConsensFlow's variables (Codex's `shell_environment_policy`) is given the
+/// root by it.
+pub const GUARD_ROOT: &str = "CONSENSFLOW_PATH_HELPER_ROOT";
+
 /// The mark the pane host puts in every window's environment on macOS, one value a window
 /// (Windows ends a window's programs by its job, and sets none). Whatever the window starts
 /// inherits it, which is how a close names a program that carries it as possibly the

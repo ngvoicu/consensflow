@@ -26,6 +26,7 @@
 use std::thread::sleep;
 use std::time::Duration;
 
+use cf_e2e::handed::of_message;
 use cf_e2e::rig::{Project, Rig};
 use serde_json::{json, Value};
 
@@ -44,14 +45,6 @@ const STALL: Duration = Duration::from_secs(200);
 /// window's own cf, which the footer names by its whole path (`…/cf` on the Mac,
 /// `…/cf.exe` on Windows, T-1049).
 const RESULT_WORDS: &str = " task accept T-1";
-
-/// The daemon's events of `kind` about the message `id`.
-fn of_message<'a>(events: &'a [Value], kind: &str, id: i64) -> Vec<&'a Value> {
-    events
-        .iter()
-        .filter(|event| event["kind"] == kind && event["data"]["message"] == id)
-        .collect()
-}
 
 /// How many of the prompts in a Claude record hold `words`: what the window was given,
 /// not the stand-in's replies, which quote the header they answer.

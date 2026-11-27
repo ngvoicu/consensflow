@@ -112,6 +112,7 @@ pub mod devin_store;
 pub mod door;
 mod error;
 pub mod files;
+pub mod handed;
 pub mod http;
 pub mod live;
 pub mod matrix;

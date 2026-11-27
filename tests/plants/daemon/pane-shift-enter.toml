@@ -225,17 +225,17 @@ runs = ["pse-arbiter"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/arbiter/keys.rs"
-find = '''            b'\n' => {
+find = """            b'\\n' => {
                 classes.with("text");
+                added = true;
                 unsent += 1;
             }
-'''
-replace = '''            b'\n' => {
+"""
+replace = """            b'\\n' => {
                 classes.with("enter");
                 unsent = 0;
             }
-'''
-
+"""
 
 [[plant]]
 name = "pane shift enter: a line feed is no character of the draft"
@@ -244,14 +244,14 @@ runs = ["pse-arbiter"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/arbiter/keys.rs"
-find = '''                classes.with("text");
+find = """                classes.with("text");
+                added = true;
                 unsent += 1;
             }
-            0x03 => {'''
-replace = '''                classes.with("text");
+            0x03 => {"""
+replace = """                classes.with("text");
             }
-            0x03 => {'''
-
+            0x03 => {"""
 
 [[plant]]
 name = "pane shift enter: the pane does not say the harness its window was launched with"

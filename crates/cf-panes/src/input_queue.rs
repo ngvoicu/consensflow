@@ -13,7 +13,9 @@ use futures_channel::oneshot;
 use futures_util::future::{BoxFuture, FutureExt, Shared};
 use serde_json::{json, Value};
 
-use crate::arbiter::{ArbiterError, InputArbiter};
+use cf_proto::panes::ReadEmpty;
+
+use crate::arbiter::{ArbiterError, At, InputArbiter, Paste};
 use crate::pty::{PaneKey, PaneTable};
 use crate::validation::{validate_page_input, INVALID_BODY};
 
@@ -49,7 +51,7 @@ const LOCK_POISONED: &str = "lock-poisoned";
 /// A call numbered at or below what the pane's count has passed: a late
 /// original after its skip, or a repeat. Nothing of it is written.
 const INPUT_SEQUENCE_STALE: &str = "pane-input-sequence-stale";
-const INPUT_STALE_PAGE: &str = "pane-input-stale-page";
+pub(crate) const INPUT_STALE_PAGE: &str = "pane-input-stale-page";
 /// A skip whose number cannot be spent yet: the page asks again, and the skip stays pending.
 pub const SKIP_PENDING: &str = "pane-input-skip-pending";
 const INPUT_FAILED: &str = "input-failed";
@@ -71,8 +73,12 @@ pub enum InputWork {
     Reply(Vec<u8>),
     Paste {
         body: Vec<u8>,
-        read_empty: Option<u64>,
+        at: Option<At>,
+        read_empty: Option<ReadEmpty>,
+        clear_first: Option<Vec<u8>>,
     },
+    /// An Enter of a delivery that is not a paste's first ([`InputArbiter::enter`]).
+    Enter(At),
     Claim,
 }
 
@@ -81,6 +87,7 @@ impl InputWork {
         match self {
             Self::Typed(bytes) | Self::Write(bytes) | Self::Reply(bytes) => bytes.len(),
             Self::Paste { body, .. } => body.len().saturating_add(13),
+            Self::Enter(_) => 1,
             Self::Claim => 0,
         }
     }
@@ -165,6 +172,9 @@ impl From<ArbiterError> for InputError {
             ArbiterError::Busy => "paste-in-flight",
             ArbiterError::InputFailed => INPUT_FAILED,
             ArbiterError::Unsent => "unsent-text",
+            ArbiterError::LookAgain(why) => {
+                return Self::refused("look-again", why.cause().to_string())
+            }
             ArbiterError::InvalidBody(_) => INVALID_BODY,
             ArbiterError::LockPoisoned => LOCK_POISONED,
         };
@@ -464,6 +474,8 @@ struct Flags {
 }
 
 /// A number of the page's, waiting for the numbers before it.
+// A parked call is held by value: a paste now carries its look, its evidence and its clearing key.
+#[allow(clippy::large_enum_variant)]
 enum Slot {
     /// A call that came early. It holds its bytes, and the worker it goes to.
     Parked {
@@ -1084,6 +1096,10 @@ pub struct InputQueue {
     senders: Mutex<HashMap<PaneKey, InputRoute>>,
     workers: Mutex<HashMap<PaneKey, Vec<JoinHandle<()>>>>,
     page: Arc<PageShared>,
+    /// Counts the changes of the current page, each made under the page lock before the page
+    /// changes: a call that checked its page and needs to know, later and without the lock, that
+    /// the page has not changed since asks [`InputQueue::page_unchanged`].
+    page_epoch: AtomicU64,
     accepting: AtomicBool,
 }
 
@@ -1127,6 +1143,7 @@ impl InputQueue {
                 next_loss: counter,
                 orphans: Mutex::new(Vec::new()),
             }),
+            page_epoch: AtomicU64::new(0),
             accepting: AtomicBool::new(true),
         }
     }
@@ -1338,7 +1355,7 @@ impl InputQueue {
                     return refuse(&mut page, events, error, false);
                 }
             }
-            InputWork::Claim => {}
+            InputWork::Claim | InputWork::Enter(_) => {}
         }
         if page.completions.len() >= MAX_PENDING_INPUT_TICKETS {
             return refuse(
@@ -1815,6 +1832,7 @@ impl InputQueue {
                 }
             }
         }
+        self.page_epoch.fetch_add(1, Ordering::SeqCst);
         page.current = Some(page_id.to_owned());
         page.current_nonce = nonce.to_owned();
         Ok(())
@@ -1840,6 +1858,18 @@ impl InputQueue {
         Ok(result)
     }
 
+    /// The page `page_id` as of now, if it is the current page: a count that stays the same until
+    /// the current page changes ([`InputQueue::page_unchanged`]). The page's lock is held only
+    /// for this.
+    pub fn current_page_epoch(&self, page_id: &str) -> Result<u64, String> {
+        self.with_current_page(page_id, || self.page_epoch.load(Ordering::SeqCst))
+    }
+
+    /// Whether the current page has not changed since `epoch` was read. No lock is taken.
+    pub fn page_unchanged(&self, epoch: u64) -> bool {
+        self.page_epoch.load(Ordering::SeqCst) == epoch
+    }
+
     /// A new main document has begun loading, whatever page is current or answers: the host's
     /// epoch moves, under the input lock, and nothing of the old page's that is still in
     /// order goes in (see [`PageInputState::cut`]). The first call of the new document finds
@@ -1848,6 +1878,7 @@ impl InputQueue {
         let mut events = Vec::new();
         {
             let mut page = self.state()?;
+            self.page_epoch.fetch_add(1, Ordering::SeqCst);
             page.cut(&mut events);
             page.epoch += 1;
         }
@@ -1914,9 +1945,28 @@ impl InputQueue {
         &self,
         key: PaneKey,
         body: Vec<u8>,
-        read_empty: Option<u64>,
+        at: Option<At>,
+        read_empty: Option<ReadEmpty>,
+        clear_first: Option<Vec<u8>>,
     ) -> Result<oneshot::Receiver<InputResponse>, InputError> {
-        self.submit(key, InputWork::Paste { body, read_empty })
+        self.submit(
+            key,
+            InputWork::Paste {
+                body,
+                at,
+                read_empty,
+                clear_first,
+            },
+        )
+    }
+
+    /// An Enter of a delivery, on the pane's worker, in order with its keys and pastes.
+    pub(crate) fn enter(
+        &self,
+        key: PaneKey,
+        at: At,
+    ) -> Result<oneshot::Receiver<InputResponse>, InputError> {
+        self.submit(key, InputWork::Enter(at))
     }
 
     /// Admit a native-channel send: the pane is current and its input works,
@@ -2164,12 +2214,27 @@ fn input_worker(
     key: PaneKey,
 ) {
     for job in jobs {
-        let result = match &job.work {
-            InputWork::Typed(bytes) => arbiter.write_typed(&panes, &key, bytes),
-            InputWork::Write(bytes) | InputWork::Reply(bytes) => arbiter.write(&panes, &key, bytes),
-            InputWork::Paste { body, read_empty } => {
-                arbiter.write_paste(&panes, &key, body, *read_empty)
+        let result = match job.work {
+            InputWork::Typed(bytes) => arbiter.write_typed(&panes, &key, &bytes),
+            InputWork::Write(bytes) | InputWork::Reply(bytes) => {
+                arbiter.write(&panes, &key, &bytes)
             }
+            InputWork::Paste {
+                body,
+                at,
+                read_empty,
+                clear_first,
+            } => arbiter.write_paste(
+                &panes,
+                &key,
+                Paste {
+                    body: &body,
+                    at,
+                    read_empty,
+                    clear_first: clear_first.as_deref(),
+                },
+            ),
+            InputWork::Enter(at) => arbiter.enter(&*panes, &key, at),
             InputWork::Claim => arbiter.claim(&key),
         }
         .map_err(InputError::from);

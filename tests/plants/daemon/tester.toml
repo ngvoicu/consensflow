@@ -197,17 +197,15 @@ find = "Verify finished work for the chief of a ConsensFlow project by running i
 replace = "Verify finished work for the chief of a ConsensFlow project and return results."
 
 [[plant]]
-name = "tester: the chief is not told a tester checks work by running it, where it is told reviews are asked for"
+name = "tester: the chief is not told when a tester is given work"
 meant = "teach_the_chief_only_the_board_s_commands"
 runs = ["engine-text-roles"]
 
 [[plant.edit]]
 file = "skill/core/chief.md"
-find = '''
-A tester checks work by running it, when the work can be run.
-
-## The staff'''
-replace = "## The staff"
+find = '''A change that can be run goes to a tester before you accept it only where the
+'''
+replace = ''
 
 [[plant]]
 name = "tester: the chief's commands have no line for a test"
@@ -273,9 +271,9 @@ prepare = [["node", "app/scripts/bundle-ui.mjs"]]
 [[plant.edit]]
 file = "app/ui/core/slots.js"
 find = '''  for (const role of roleIds()) {
-    const row = element('tr', 'slot-row')'''
+    const row = keyed(element('tr', 'slot-row'), 'slot', role)'''
 replace = '''  for (const role of roleIds().filter((role) => role !== 'tester')) {
-    const row = element('tr', 'slot-row')'''
+    const row = keyed(element('tr', 'slot-row'), 'slot', role)'''
 
 [[plant]]
 name = "tester page: Project settings has no word for the tester"

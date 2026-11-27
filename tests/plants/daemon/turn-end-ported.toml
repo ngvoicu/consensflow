@@ -355,5 +355,5 @@ runs = ["tep-turn-end-engine-final-answer"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/turn_end.rs"
-find = "            .filter(|answers| answers.last.is_some_and(|last| last.complete))"
-replace = ""
+find = "            .filter(|answers| answers.last.is_some_and(|last| last.complete))\n        else {\n            self.tell_lost("
+replace = "\n        else {\n            self.tell_lost("

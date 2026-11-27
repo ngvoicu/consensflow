@@ -868,7 +868,11 @@ fn the_unsent_question_answers_the_adapters_decision_of_a_snapshot() {
         answer(&ask(
             "unsent",
             json!({ "kind": kind, "snapshot": {
-                "ok": true, "unsent": true, "typed": 4, "bottom": bottom,
+                "ok": true, "unsent": true, "typed": 4, "bottom": bottom, "seen": "00000000000000aa",
+                "outputCaughtUp": true, "screenQuietMs": 60_000,
+                // The person erased what their box held with a key the count cannot follow.
+                "unsentAt": { "pressedOver": { "current": true,
+                    "bottom": [RULE, "❯ a word", RULE] } },
                 "typedQuietMs": quiet, "outputQuietMs": quiet / 2,
             }}),
         ))
@@ -877,7 +881,7 @@ fn the_unsent_question_answers_the_adapters_decision_of_a_snapshot() {
     const RULE: &str = "────────────────────────────────────────";
     assert_eq!(
         decide("claude-code", &[RULE, "❯", RULE], 2_000),
-        json!({ "readEmpty": 4 })
+        json!({ "readEmpty": { "typed": 4, "by": "erased" }, "at": "00000000000000aa" })
     );
     assert_eq!(
         decide("claude-code", &[RULE, "❯", RULE], 200),

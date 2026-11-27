@@ -194,6 +194,62 @@ fn a_brief_a_window_that_repaints_at_rest_never_began_is_pressed_enter_once() {
     assert_eq!(tiers.task(2).task.state, "working");
 }
 
+/// N17 (T-2150 note 3): a read in flight at the one look is no printing window. The once-only
+/// Enter looks once more before it is spent as "printing": the second look finds the screen
+/// current and the Enter goes.
+#[test]
+fn a_brief_whose_look_found_a_read_in_flight_looks_once_more_before_its_enter_is_spent() {
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus"]);
+    a_follow_up_whose_window_never_begins(&context, &tiers, true);
+    let in_flight = json!({ "outputQuietMs": 0, "screenQuietMs": 600_000, "outputRead": 9, "outputDrawn": 8, "tail": ["Ready for the next step.", "❯ "] });
+    let current = json!({ "outputQuietMs": 600_000, "screenQuietMs": 600_000, "outputRead": 9, "outputDrawn": 9, "tail": ["Ready for the next step.", "❯ "] });
+    context.host.set_snapshot(current.clone());
+    // The first look of every ask finds a read in flight, the second the screen current.
+    let answers = std::rc::Rc::new(std::cell::Cell::new(0));
+    let counted = std::rc::Rc::clone(&answers);
+    let host = std::rc::Rc::downgrade(&context.host);
+    *context.host.on_request.borrow_mut() =
+        Some(std::rc::Rc::new(move |op: &str, _body: &Value| {
+            if op == "pane.snapshot" {
+                counted.set(counted.get() + 1);
+                if let Some(host) = host.upgrade() {
+                    host.set_snapshot(if counted.get() % 2 == 1 {
+                        in_flight.clone()
+                    } else {
+                        current.clone()
+                    });
+                }
+            }
+        }));
+    let before = enters(&context);
+    context.advance(PAST_ARRIVAL);
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(enters(&context), before + 1, "its Enter, pressed once more");
+}
+
+/// N17: a window whose output stays read and not drawn at both looks is printing: no Enter.
+#[test]
+fn a_brief_whose_window_shows_less_than_it_printed_is_pressed_no_enter() {
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus"]);
+    a_follow_up_whose_window_never_begins(&context, &tiers, true);
+    context.host.set_snapshot(json!({
+        "outputQuietMs": 0, "screenQuietMs": 600_000, "outputRead": 9, "outputDrawn": 8,
+        "tail": ["Ready for the next step.", "❯ "]
+    }));
+    let before = enters(&context);
+    context.advance(PAST_ARRIVAL);
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(
+        enters(&context),
+        before,
+        "no Enter while output is not drawn"
+    );
+}
+
 /// The way on: `cf task resume` sends its words into the same window, not a new one, and
 /// a window that begins on them works the task again.
 #[test]

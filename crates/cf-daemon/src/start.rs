@@ -37,7 +37,7 @@ use cf_harness::seams::{
     Bundle, Entropy, LoopbackPorts, Probes, Services, SystemEntropy, SystemLoopback,
     SystemProcesses,
 };
-use cf_ledger::{open_ledger, LedgerError, Options as LedgerOptions};
+use cf_ledger::{LedgerError, Options as LedgerOptions};
 use cf_proto::page::HandleLine;
 use serde_json::json;
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -82,7 +82,7 @@ pub struct Options {
     /// What the bridge writes, nothing but frames: the standard output.
     pub output: Box<dyn AsyncWrite + Unpin>,
     /// The error output, for what Node said with `console.error`.
-    pub stderr: Box<dyn Write>,
+    pub stderr: Box<dyn Write + Send>,
     /// Says the handle line before anything else is written to the output:
     /// the app reads it as JSON, a person gets the address in words. A reader
     /// that has gone from it stops the daemon.
@@ -136,6 +136,45 @@ pub enum StartError {
     /// failures.
     #[error("{0}")]
     Ledger(#[from] LedgerError),
+    /// The ledger cannot be saved to, or a home that was used has none: said in the words
+    /// the person is shown ([`crate::broken::words`]), and the process ends with
+    /// [`crate::broken::EXIT`], which the app does not start again.
+    #[error("{0}")]
+    CannotSave(String),
+}
+
+impl StartError {
+    /// The status the process ends with.
+    pub fn exit_code(&self) -> i32 {
+        match self {
+            StartError::CannotSave(_) => crate::broken::EXIT,
+            _ => 1,
+        }
+    }
+}
+
+/// A failure of the ledger at the start, as it is told: the words of a ledger that cannot
+/// be saved to, or the ledger's own.
+fn at_start(file: &std::path::Path, failed: LedgerError) -> StartError {
+    if failed.cannot_save() {
+        StartError::CannotSave(crate::broken::words(file))
+    } else {
+        StartError::Ledger(failed)
+    }
+}
+
+/// [`at_start`] for the look at a ledger that is there: one that is no ledger of ConsensFlow's
+/// (`ledger-unreadable`), or that went and is not there any more, is a ledger lost, said as
+/// one, with how to start anew. A ledger that is there whole and can't be looked at or
+/// written (the folder's permission, a disk that is gone) is one that cannot be saved to, and
+/// is said so: moving the home away is not advice for it.
+fn at_start_of_used(file: &std::path::Path, failed: LedgerError) -> StartError {
+    let whole = crate::broken::ledger_file(file) == crate::broken::Ledgerfile::Held;
+    if failed.code() == Some("ledger-unreadable") || (failed.cannot_save() && !whole) {
+        StartError::CannotSave(crate::broken::lost_words(file))
+    } else {
+        at_start(file, failed)
+    }
 }
 
 /// A daemon that is running.
@@ -191,27 +230,87 @@ pub async fn start(env: Env, options: Options) -> Result<Daemon, StartError> {
     // goes to events.jsonl as it happens, and what is worth knowing afterwards
     // to daemon.log, the start first.
     let home = config_root(&env).ok_or(StartError::NoHome)?;
-    make_folder(&home, 0o777, Mkdir::Sync)
-        .map_err(|failed| StartError::System(failed.to_string()))?;
+    // The home is judged before anything is written in it: used (a witness is there), unused,
+    // or unknown (a look failed, and no witness was found). A used home whose ledger is
+    // missing, empty, a link to nothing or no file is not a first use: it is refused in the
+    // words of a ledger that cannot be saved to, with how to start anew on purpose, and never
+    // started as an empty board. An unused home makes its first ledger all or nothing, which
+    // writes nothing the next judging counts until the ledger is at its name.
+    let ledger_file = home.join(crate::broken::LEDGER);
+    match crate::broken::judge(&home) {
+        crate::broken::Home::Unknown(..) => {
+            return Err(StartError::CannotSave(cf_base::home::unread_home_words(
+                &home,
+            )));
+        }
+        crate::broken::Home::Used => {
+            make_folder(&home, 0o777, Mkdir::Sync)
+                .map_err(|failed| StartError::System(failed.to_string()))?;
+            if crate::broken::ledger_file(&ledger_file) != crate::broken::Ledgerfile::Held {
+                return Err(StartError::CannotSave(crate::broken::lost_words(
+                    &ledger_file,
+                )));
+            }
+        }
+        crate::broken::Home::Unused => {
+            let first_failed =
+                || StartError::CannotSave(cf_base::home::first_ledger_words(&ledger_file));
+            make_folder(&home, 0o777, Mkdir::Sync).map_err(|_| first_failed())?;
+            crate::broken::first_ledger(&home, &crate::broken::steps())
+                .map_err(|_| first_failed())?;
+        }
+    }
     let trace = Rc::new(Trace::new(&home));
     trace
         .started()
         .map_err(|failed| StartError::System(failed.to_string()))?;
     let log = Rc::new(Log::off_thread(&home));
     let errors = Rc::new(Errors::new(Rc::clone(&log), Rc::clone(&trace)));
-    log.info(&format!(
-        "start pid {} rust {VERSION} home {}",
-        std::process::id(),
-        home.display()
-    ));
-    let started = run(env, options, home, trace, Rc::clone(&log), errors).await;
-    if started.is_err() {
-        log.info("exit 1");
+    // The start's first line is said once the ledger is open and the home marked; a start that
+    // is refused before says it with its exit, within the bound of a write of a stop.
+    let announced = Rc::new(std::cell::Cell::new(false));
+    let announce: Rc<dyn Fn(bool)> = {
+        let (log, announced, home) = (Rc::clone(&log), Rc::clone(&announced), home.clone());
+        Rc::new(move |within| {
+            if !announced.replace(true) {
+                let line = format!(
+                    "start pid {} rust {VERSION} home {}",
+                    std::process::id(),
+                    home.display()
+                );
+                if within {
+                    log.info_within(&line, SETTLE);
+                } else {
+                    log.info(&line);
+                }
+            }
+        })
+    };
+    let started = run(
+        env,
+        options,
+        home,
+        trace,
+        Rc::clone(&log),
+        errors,
+        Opening {
+            announce: Rc::clone(&announce),
+        },
+    )
+    .await;
+    if let Err(failed) = &started {
+        announce(true);
+        log.info_within(&format!("exit {}", failed.exit_code()), SETTLE);
     }
     // What the start said is in the log before the start is over, if the file lets it in time:
     // a start that failed ends the process.
     let _ = log.written(SETTLE);
     started
+}
+
+/// What the start knows of the ledger it is about to open: how it says its first line.
+struct Opening {
+    announce: Rc<dyn Fn(bool)>,
 }
 
 /// The rest of the start, in Node's order, from the ledger on.
@@ -222,17 +321,42 @@ async fn run(
     trace: Rc<Trace>,
     log: Rc<Log>,
     errors: Rc<Errors>,
+    Opening { announce }: Opening,
 ) -> Result<Daemon, StartError> {
     // The ledger, whose lock refuses a second daemon: nothing of the running
     // one is touched before it is held.
     let told = Rc::clone(&trace);
-    let ledger = open_ledger(
-        &home.join("consensflow.db"),
-        LedgerOptions {
-            trace: Box::new(move |event| told.event(event)),
-            ..LedgerOptions::default()
-        },
-    )?;
+    let ledger_file = home.join("consensflow.db");
+    let ledger_options = LedgerOptions {
+        trace: Box::new(move |event| told.event(event)),
+        ..LedgerOptions::default()
+    };
+    // The ledger is held, known to be ConsensFlow's, with nothing of it written: a file that is
+    // not one is refused here (as lost, for the home is used), never migrated.
+    let held = cf_ledger::hold_ledger(&ledger_file)
+        .map_err(|failed| at_start_of_used(&ledger_file, failed))?;
+    // The home says it has a board from now on, before the first write to the ledger: a marker
+    // that cannot be written stops the start with nothing of the saved work changed, and a home
+    // that would not be known to have a board is one that could open empty at the next start.
+    if let Err(failed) = crate::broken::mark(&home) {
+        announce(true);
+        log.error_within(
+            "the home could not be marked as having a board",
+            Some(&failed.to_string()),
+            SETTLE,
+        );
+        return Err(StartError::CannotSave(cf_base::home::marker_words(
+            &home.join(crate::broken::MARKER),
+        )));
+    }
+    announce(false);
+    // The first writes to the ledger.
+    let ledger = held
+        .open(ledger_options)
+        .map_err(|failed| at_start(&ledger_file, failed))?;
+    // What an earlier first start that was cut left, by its name, is this one's to remove: it
+    // holds the ledger.
+    crate::broken::remove_leftovers(&home);
     let ledger = Rc::new(RefCell::new(ledger));
     // A wait the environment cut (a test's) is in the log: one left in a shell is seen there.
     let limits = Limits::of(&env);
@@ -248,10 +372,16 @@ async fn run(
             if swept == 1 { "" } else { "s" }
         ));
     }
-    ledger.borrow_mut().suspend_for_restart()?;
+    ledger
+        .borrow_mut()
+        .suspend_for_restart()
+        .map_err(|failed| at_start(&ledger_file, failed))?;
     // What a harness listed in an earlier life of this daemon is no record of what it lists
     // now: a submission is checked against a list read in this one (A4-28).
-    ledger.borrow_mut().forget_model_listings()?;
+    ledger
+        .borrow_mut()
+        .forget_model_listings()
+        .map_err(|failed| at_start(&ledger_file, failed))?;
     // What the app says, which a chief's launch reads afresh: a file that cannot be read
     // stops no start, and says nothing.
     let settings = Rc::new(SettingsFile::new(
@@ -265,27 +395,41 @@ async fn run(
     // The stop's latch, and the bridge as far as building it goes: it hears
     // and says nothing until it is polled, after the handle line.
     let latch = Latch::new();
+    // Every effect reads the one halt of the latch; the log has a thread of its own.
+    trace.ends_with(latch.halt());
     let console = Rc::new(Console::to(options.stderr, {
         let latch = Rc::clone(&latch);
         // The drain of `cf ui`: no reader, no point.
         move || latch.trip("asked to stop")
     }));
+    console.ends_with(latch.halt());
     let (bridge, connection) = daemon_bridge(&spawn)
         .on_fatal({
             let (log, latch) = (Rc::clone(&log), Rc::clone(&latch));
             move |cause| {
-                log.error("the bridge failed", Some(&cause.to_string()));
+                // The latch first: the log is then written off the runtime, and a log that
+                // is held cannot keep the stop from running.
                 latch.trip("the bridge failed");
+                log.error("the bridge failed", Some(&cause.to_string()));
             }
         })
         .connect(options.input, options.output);
+    // The ledger can break in any operation; what is done then is done in one place.
+    ledger.borrow_mut().on_broken(crate::broken::reaction(
+        &ledger_file,
+        &errors,
+        &bridge,
+        &latch,
+    ));
 
     // One throttle for both the engine's changes and the agents' API writes:
     // neither source may send an extra core event during the other's wait.
     let board_changed = {
-        let bridge = bridge.clone();
+        let (bridge, halt) = (bridge.clone(), latch.halt());
         throttle(STATE_EVENT, move || {
-            bridge.event("state.changed", json!({ "reason": "core" }));
+            if !halt.broke() {
+                bridge.event("state.changed", json!({ "reason": "core" }));
+            }
         })
     };
     // The tokens, and the HTTP front the agents' and the human's requests come
@@ -396,10 +540,13 @@ async fn run(
         time: Rc::clone(&time) as _,
         launch_ids: Rc::new(RandomLaunchIds::new()),
         credentials: Rc::clone(&credentials) as _,
-        pane_env: Rc::new(
+        pane_env: Rc::new(crate::member_guard::guard(
             WindowEnv::new(&env, api.url(), &options.bundle.bin.to_string_lossy())
                 .with_cf(&options.bundle.pane_cf, cfg!(windows)),
-        ),
+            &home,
+            &options.bundle.cf,
+            &log,
+        )),
         app_settings: Rc::clone(&settings) as _,
         roles: Rc::new(RoleTexts::new(env.clone(), options.bundle.pane_cf.clone())),
         trace: Rc::clone(&trace) as _,
@@ -427,6 +574,11 @@ async fn run(
         },
         ledger: Rc::clone(&ledger),
         exit: Rc::clone(&options.exit),
+        fence: {
+            let bridge = bridge.clone();
+            Rc::new(move || bridge.fence())
+        },
+        halt: latch.halt(),
     });
     arm(
         &latch,
@@ -468,9 +620,11 @@ async fn run(
     {
         // A window that wrote more changes only a view of what it did: the
         // page reads that again, not the board.
-        let bridge = bridge.clone();
+        let (bridge, halt) = (bridge.clone(), latch.halt());
         dispatcher.on_transcript(throttle(STATE_EVENT, move || {
-            bridge.event("state.changed", json!({ "reason": "transcript" }));
+            if !halt.broke() {
+                bridge.event("state.changed", json!({ "reason": "transcript" }));
+            }
         }));
     }
 
@@ -488,6 +642,7 @@ async fn run(
             grants_of: crate::computer_use::grants_of(&env),
         },
         models: Rc::new(ModelLists::new(adapters, env.clone())),
+        halt: latch.halt(),
     });
     page::register(&bridge, &page, &spawn);
     let exiting = Rc::clone(&dispatcher);

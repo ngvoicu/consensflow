@@ -385,6 +385,17 @@ const RULES: [&str; 4] = [
     "crates/cf-e2e/src/door/rule.rs",
 ];
 
+/// The member guard's own files: the guard refuses `pkill` and `killall` in a member's window, and
+/// its cases name them to be refused, as a start the guard stops. They end nothing, so only the
+/// rule that reads words for an app by its name leaves them be.
+const REFUSING_THE_NAMES: [&str; 5] = [
+    "crates/cf-daemon/src/member_guard/tests.rs",
+    "crates/cf-e2e/tests/rig/member_guard.rs",
+    "crates/cf/tests/member_guard.rs",
+    "crates/cf/tests/member_guard_shells.rs",
+    "tests/plants/daemon/member-guard.toml",
+];
+
 /// The starts held to `cf_base::bundle`, whose tests hand a stand-in the very words they
 /// refuse: what they say below their tests' start is the refusal's, and is not read.
 const REFUSING: [&str; 3] = [
@@ -637,7 +648,9 @@ fn no_test_or_tool_reaches_an_app_by_its_name_or_its_identity() {
     }
     let found: Vec<String> = files
         .iter()
-        .filter(|(path, _)| !RULES.contains(&path.as_str()))
+        .filter(|(path, _)| {
+            !RULES.contains(&path.as_str()) && !REFUSING_THE_NAMES.contains(&path.as_str())
+        })
         .flat_map(|(path, text)| {
             reaching_by_name(read_of(path, text))
                 .into_iter()

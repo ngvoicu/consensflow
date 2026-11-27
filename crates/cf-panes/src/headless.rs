@@ -51,15 +51,43 @@ pub const FAREWELL: Duration = Duration::from_secs(3);
 /// cut off, the host ends without it).
 const FLUSH: Duration = Duration::from_secs(2);
 
+/// What a test says to make threads refuse to start: the closes of the panes (`close_all`,
+/// [`reap_until_clean`]) must end the windows on the thread that asks all the same.
+#[cfg(feature = "test-support")]
+static REFUSE_THREADS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Makes the closes of the panes find no thread to run on, or lets them again (a test's).
+#[cfg(feature = "test-support")]
+pub fn refuse_threads(refuse: bool) {
+    REFUSE_THREADS.store(refuse, std::sync::atomic::Ordering::SeqCst);
+}
+
+/// A thread's builder, or why none can be made.
+fn new_thread(name: &str) -> std::io::Result<std::thread::Builder> {
+    #[cfg(feature = "test-support")]
+    if REFUSE_THREADS.load(std::sync::atomic::Ordering::SeqCst) {
+        return Err(std::io::Error::other("no thread (a test refuses them)"));
+    }
+    Ok(std::thread::Builder::new().name(name.to_string()))
+}
+
 /// Ends every pane the table still holds, all at once, each by `close`, and a window
 /// whose programs ignore the request does not make the others wait for it.
 fn close_all(panes: &PaneTable, close: fn(&PaneTable, &PaneKey) -> Result<(), PaneError>) {
     if let Ok(open) = panes.list() {
         std::thread::scope(|scope| {
             for pane in open {
-                scope.spawn(move || {
-                    let _ = close(panes, &PaneKey::new(pane.id, pane.generation));
+                let key = PaneKey::new(pane.id.clone(), pane.generation);
+                // A thread that cannot be made does not leave the pane open: it is closed
+                // here, on this thread, after the others it did start.
+                let started = new_thread("consensflow-close").and_then(|thread| {
+                    thread.spawn_scoped(scope, move || {
+                        let _ = close(panes, &key);
+                    })
                 });
+                if started.is_err() {
+                    let _ = close(panes, &PaneKey::new(pane.id, pane.generation));
+                }
             }
         });
     }
@@ -96,21 +124,25 @@ pub fn reap_until_clean(panes: &Arc<PaneTable>, within: Duration) -> Reaped {
     loop {
         let (done, reaped) = std::sync::mpsc::channel();
         let closing = Arc::clone(panes);
-        if std::thread::Builder::new()
-            .name("consensflow-reap".to_string())
-            .spawn(move || {
+        let started = new_thread("consensflow-reap").and_then(|thread| {
+            thread.spawn(move || {
                 reap_all(&closing);
                 let _ = done.send(());
             })
-            .is_err()
-        {
-            return Reaped::TooLate;
-        }
-        if reaped
-            .recv_timeout(deadline.saturating_duration_since(Instant::now()))
-            .is_err()
-        {
-            return Reaped::TooLate;
+        });
+        match started {
+            Ok(_) => {
+                if reaped
+                    .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+                    .is_err()
+                {
+                    return Reaped::TooLate;
+                }
+            }
+            // No thread can be made: the windows are closed on this one, however long a
+            // program takes (it is its grace and then its end), and what it proves is read
+            // as after any close. Nothing is left open for want of a thread.
+            Err(_) => reap_all(panes),
         }
         loop {
             let Ok(pending) = panes.pending() else {

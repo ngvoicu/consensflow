@@ -36,11 +36,11 @@
 //! first message goes behind `/bypass`, Devin's own command, which switches it
 //! before the message runs and changes nothing in a window in full permission
 //! already; and no window is ready for a delivery while its wire says it is in
-//! the normal mode: `/bypass` is pasted into it once it has drawn (Enter again
-//! before it is pasted again), and the window is ready when the wire says, after
-//! the look at its screen, that the mode changed. One that has not changed in
-//! [`BYPASS_WITHIN_MS`] is unfit for work, and its launch is given up, as one
-//! that did not come up.
+//! the normal mode: it is given `/bypass`, one look and at most one act at a time
+//! ([`DevinWindow::switch_to_bypass`]), and the window is ready when the wire says,
+//! after the look at its screen, that the mode changed. One whose
+//! [`BYPASS_WITHIN_MS`] have run with the wire still saying the normal mode is unfit
+//! for work, and its launch is given up, as one that did not come up.
 //!
 //! Kept from Node on purpose: a conversation of an empty id, which no
 //! ledger holds, is refused in a sentence of this module's own, where V8
@@ -52,11 +52,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use cf_base::env::Env;
-use cf_base::js;
 use cf_base::text::{console_text, window_text};
 use cf_proto::agents::Harness;
 use cf_proto::models::ModelListing;
-use cf_proto::panes::{HumanInput, SilentPaste, SCREEN_QUIET_MS};
+use cf_proto::panes::{HumanInput, SilentPaste};
 use cf_proto::specs::Variant;
 use serde_json::Value;
 
@@ -76,8 +75,12 @@ use crate::detect::executable;
 use crate::records::{Kind, Options, Reading, Role};
 use crate::seams::{Services, Time};
 use crate::shared::admission::admission;
-use crate::shared::input_box::{self, Unsent};
+use crate::shared::input_box;
 use crate::shared::left_open::LeftOpen;
+use crate::shared::look::{
+    licence_enter, licence_paste, BoxReading, BoxState, EnterFor, EnterLicence, Look, PasteLicence,
+    NO_LOOK,
+};
 use crate::shared::record_state::{dialog_waiting, observed_from, switched_to, unnamed};
 use crate::shared::role::write_role;
 use crate::shared::{pane, specmint, window_args};
@@ -121,9 +124,9 @@ const SWITCHING: &str =
 /// taken as drawn, as the engine takes it.
 const DRAWN_QUIET_MS: f64 = 1_500.0;
 
-/// How long after it was pasted `/bypass` is pasted again while the wire still
-/// says the normal mode, and how long a window has to leave that mode from the
-/// look that first found it there.
+/// How long after the last act on `/bypass` (a paste or an Enter) another is made while the
+/// wire still says the normal mode, and how long a window has to leave that mode: the time
+/// its looks find it the launch's own, not held for the person's typing nor without a look.
 const BYPASS_AGAIN_MS: i64 = 10_000;
 pub(crate) const BYPASS_WITHIN_MS: i64 = 30_000;
 
@@ -211,18 +214,59 @@ fn first_message(message: Option<&str>, resumed: bool) -> Option<String> {
     })
 }
 
-/// Where a window is in its switch to full permission: since when the wire has
-/// said it is in the normal mode, when `/bypass` was last pasted into it, and when
-/// Enter was pressed again for that paste.
+/// Where a window is in its switch to full permission: how long its time has run, since when
+/// it has been running (none where the last look held it, or there was none), and when the
+/// last act on `/bypass` was.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 struct Switch {
-    since: Option<i64>,
-    pasted: Option<i64>,
-    entered: Option<i64>,
+    ran: i64,
+    running: Option<i64>,
+    acted: Option<i64>,
 }
 
-/// The key that sends what the input box holds.
-const ENTER: u8 = 13;
+impl Switch {
+    /// Counts the time run up to `now` and stands still from here.
+    fn stands_still(&mut self, now: i64) {
+        if let Some(since) = self.running.take() {
+            self.ran += now - since;
+        }
+    }
+}
+
+/// What a look finds of a window that is given `/bypass`.
+enum Found {
+    /// Its box holds the command and nothing else, and no key of the person's is counted: it
+    /// is sent with an Enter on this look.
+    Command,
+    /// Its box reads empty and a paste is licensed: the command is pasted.
+    Empty(PasteLicence),
+    /// No box (a dialog): nothing is done.
+    NoBox,
+    /// The person's typing, or a hold of the paste's: nothing is done, and the time stands.
+    Held(Held),
+}
+
+/// What `look` finds of a window that is given `/bypass`.
+fn found(look: &Look) -> Found {
+    let reads = look.reads(Harness::Devin);
+    if look.unsent() && reads != BoxReading::Empty {
+        return Found::Held(Held::Unsent);
+    }
+    match reads {
+        BoxReading::Holds => {
+            if look.words(Harness::Devin).as_deref() == Some(BYPASS) {
+                Found::Command
+            } else {
+                Found::Held(Held::Unsent)
+            }
+        }
+        BoxReading::Empty => match licence_paste(look, Harness::Devin, BoxState::default(), &[]) {
+            PasteLicence::Wait(held) => Found::Held(held),
+            go => Found::Empty(go),
+        },
+        BoxReading::Unread => Found::NoBox,
+    }
+}
 
 /// How often the wire log is asked which conversation Devin opened, and the
 /// most it is waited on before it is given up on: a minute, or less where the
@@ -532,10 +576,6 @@ struct DevinWindow {
     /// How many history rows its conversation had at the engine's last look at the
     /// window (`observe`), which found it at rest or not.
     looked: Cell<Option<u64>>,
-    /// The human's keys left something unsent by the pane host's count, and the
-    /// latest readiness read the input box empty on the screen, at this count of
-    /// their keys: the delivery's paste says so ([`Unsent::ReadEmpty`]).
-    read_empty: Cell<Option<u64>>,
     /// What the pane host said of the human's input at the latest readiness, where it
     /// read a snapshot of the pane ([`Window::human_input`]).
     input: RefCell<Option<HumanInput>>,
@@ -591,7 +631,6 @@ impl DevinWindow {
             at_enter,
             history: History::default(),
             looked: Cell::default(),
-            read_empty: Cell::default(),
             input: RefCell::default(),
             left_open: RefCell::new(left_open),
             unannounced_since: Cell::default(),
@@ -634,43 +673,55 @@ impl DevinWindow {
             .then(|| self.history.look(&self.env, &session))
     }
 
-    /// A look at a window whose wire says it is in the normal mode, which is no
-    /// mode to work in: `/bypass` goes into it once its screen is drawn (`snapshot`,
-    /// the pane host's word on it), and the window waits for the wire to say it
-    /// changed. While the wire says the same, one more Enter goes in after
-    /// [`BYPASS_AGAIN_MS`], and only after as long again `/bypass` once more: an
-    /// Enter that came before the window had read the paste leaves the command in
-    /// the input box, where a second paste would make `/bypass/bypass` of it, as
-    /// the engine's Enter again for a delivery has it (`arrival`). One still in that
-    /// mode [`BYPASS_WITHIN_MS`] after the first look that found it so is unfit for
-    /// work. A paste the host refused (it wrote nothing) is tried again at the next
-    /// look, and so is an Enter it did not take.
-    async fn switch_to_bypass(
-        &self,
-        host: &dyn PaneHost,
-        pane: &Pane,
-        snapshot: &Value,
-    ) -> Readiness {
+    /// A look at a window whose wire says it is in the normal mode, which is no mode to work
+    /// in: one look, and at most one act, once its screen is drawn and still (`snapshot`, the
+    /// pane host's word on it). An act is due where none was made yet, or the last was
+    /// [`BYPASS_AGAIN_MS`] or more ago:
+    /// - the box holds `/bypass` and nothing else: Enter, on this look (an Enter that came
+    ///   before the window had read the paste leaves the command there, where a second paste
+    ///   would make `/bypass/bypass` of it);
+    /// - the box reads empty and a paste is licensed: the command is pasted (also where its
+    ///   Enter was swallowed, or the person cleared it);
+    /// - anything else: nothing. The person's typing holds the window ([`Held::Unsent`],
+    ///   [`Held::Unproven`]), and so does a hold of the paste's.
+    ///
+    /// Its [`BYPASS_WITHIN_MS`] run while the looks find the command, an empty box or no box;
+    /// they stand while the window is held and while there is no look. Once they have run with
+    /// the wire still saying the normal mode, the window is unfit for work. A paste or an
+    /// Enter the host refused (it wrote nothing) is no act.
+    async fn switch_to_bypass(&self, host: &dyn PaneHost, pane: &Pane, look: &Look) -> Readiness {
         let now = self.time.wall_ms();
         let mut switch = self.switch.get();
-        let since = *switch.since.get_or_insert(now);
-        if now - since >= BYPASS_WITHIN_MS {
-            self.switch.set(switch);
-            return Readiness::Unfit(stayed_in_normal());
+        switch.stands_still(now);
+        let found = found(look);
+        if !matches!(found, Found::Held(_)) {
+            switch.running = Some(now);
+            if switch.ran >= BYPASS_WITHIN_MS {
+                self.switch.set(switch);
+                return Readiness::Unfit(stayed_in_normal());
+            }
         }
-        let drawn = snapshot
-            .get(SCREEN_QUIET_MS)
-            .is_none_or(|quiet| quiet.as_f64().is_some_and(|ms| ms >= DRAWN_QUIET_MS));
+        // A window the host says has shown nothing yet has not drawn.
+        let drawn = look
+            .screen_quiet_ms()
+            .is_some_and(|ms| ms as f64 >= DRAWN_QUIET_MS);
         let due = switch
-            .entered
-            .or(switch.pasted)
+            .acted
             .is_none_or(|last| now - last >= BYPASS_AGAIN_MS);
-        if drawn && due {
-            if switch.pasted.is_some() && switch.entered.is_none() {
-                if pane::write_keys(host, pane, &[ENTER]).await.is_ok() {
-                    switch.entered = Some(now);
+        let mut held = None;
+        match found {
+            Found::Held(why) => held = Some(why),
+            Found::Command if drawn && due => {
+                // The Enter is the look's: the host checks it again where it writes.
+                if let EnterLicence::Go(at) =
+                    licence_enter(look, Harness::Devin, EnterFor::DevinBypass)
+                {
+                    if pane::enter(host, pane, &at).await.ok {
+                        switch.acted = Some(now);
+                    }
                 }
-            } else {
+            }
+            Found::Empty(licence) if drawn && due => {
                 let session = self.session.borrow().clone();
                 let sent = channel::send(
                     host,
@@ -679,17 +730,17 @@ impl DevinWindow {
                     session.as_deref(),
                     channel::Guard::Configured,
                     BYPASS,
-                    self.read_empty.get(),
+                    &licence,
                 )
                 .await;
                 if !sent.refused {
-                    switch.pasted = Some(now);
-                    switch.entered = None;
+                    switch.acted = Some(now);
                 }
             }
+            _ => {}
         }
         self.switch.set(switch);
-        Readiness::Held(Held::Because(SWITCHING.to_owned()))
+        Readiness::Held(held.unwrap_or_else(|| Held::Because(SWITCHING.to_owned())))
     }
 
     /// Which conversation the window shows, as its wire says `said`: the one place that
@@ -752,8 +803,8 @@ impl DevinWindow {
 impl Window for DevinWindow {
     fn opened(&self, _pid: Option<u32>) {}
 
-    fn box_read_empty(&self, snapshot: &serde_json::Value) -> bool {
-        input_box::read_empty(Harness::Devin, snapshot)
+    fn harness(&self) -> Harness {
+        Harness::Devin
     }
 
     /// The window is on `session` from now on: a switch to full permission begun for
@@ -799,10 +850,11 @@ impl Window for DevinWindow {
         self.input.borrow().clone()
     }
 
-    fn ready<'a>(
+    fn ready_on<'a>(
         &'a self,
         host: &'a dyn PaneHost,
         pane: &'a Pane,
+        look: Option<&'a Look>,
     ) -> Work<'a, Result<Readiness, String>> {
         Box::pin(async move {
             self.input.replace(None);
@@ -810,10 +862,14 @@ impl Window for DevinWindow {
             if let Some(held) = self.shows_another(&said) {
                 return Ok(Readiness::Held(held));
             }
-            let snapshot = pane::snapshot(host, pane)
-                .await
-                .map_err(|failed| failed.message)?;
-            let input = HumanInput::of(&snapshot);
+            let Some(look) = look else {
+                // No look: a switch to full permission stands still.
+                let mut switch = self.switch.get();
+                switch.stands_still(self.time.wall_ms());
+                self.switch.set(switch);
+                return Ok(Readiness::Held(Held::Because(NO_LOOK.to_owned())));
+            };
+            let input = look.human_input();
             // The host's count is of this window's launch, and outlives a daemon's restart.
             if input
                 .as_ref()
@@ -823,18 +879,8 @@ impl Window for DevinWindow {
                 self.typed_into.set(true);
             }
             self.input.replace(input);
-            if snapshot.get("ok") != Some(&Value::Bool(true))
-                || js::truthy(snapshot.get("pasteInFlight"))
-            {
+            if look.paste_in_flight() {
                 return Ok(Readiness::Held(Held::Unsaid));
-            }
-            self.read_empty.set(None);
-            // The count is the human's keys, a guess: the box on the screen says.
-            if js::truthy(snapshot.get("unsent")) {
-                match input_box::unsent(host, pane, Harness::Devin, &snapshot).await {
-                    Unsent::ReadEmpty(typed) => self.read_empty.set(Some(typed)),
-                    Unsent::Held => return Ok(Readiness::Held(Held::Unsent)),
-                }
             }
             // The window as it is once the host answered: the human may have chosen
             // a mode, opened another conversation or begun a turn meanwhile, and
@@ -855,18 +901,19 @@ impl Window for DevinWindow {
                 return Ok(Readiness::Held(Held::Unsaid));
             }
             if wants_bypass(now.mode.as_deref()) {
-                return Ok(self.switch_to_bypass(host, pane, &snapshot).await);
+                return Ok(self.switch_to_bypass(host, pane, look).await);
             }
             self.switch.set(Switch::default());
             Ok(Readiness::Ready)
         })
     }
 
-    fn deliver<'a>(
+    fn deliver_on<'a>(
         &'a self,
         host: &'a dyn PaneHost,
         pane: &'a Pane,
         text: &'a str,
+        licence: Option<&'a PasteLicence>,
     ) -> Work<'a, Result<Admission, String>> {
         Box::pin(async move {
             // Windows' console drops a paste's non-ASCII marks on their way to Devin.
@@ -894,7 +941,7 @@ impl Window for DevinWindow {
             // it (`took`): Devin keeps the command in the row (run 2).
             self.history.expect(&body, self.time.wall_ms());
             let session = self.session.borrow().clone();
-            let read_empty = self.read_empty.take();
+            let licence = licence.ok_or("a window that takes pastes was given no licence")?;
             let sent = channel::send(
                 host,
                 pane,
@@ -902,7 +949,7 @@ impl Window for DevinWindow {
                 session.as_deref(),
                 guard,
                 &body,
-                read_empty,
+                licence,
             )
             .await;
             Ok(admission(&sent, "Devin refused the paste", false))
@@ -922,14 +969,6 @@ impl Window for DevinWindow {
     /// contract's own false: `took` reaches the engine first, and holds the paste for good.
     fn took(&self) -> bool {
         self.history().is_some_and(|seen| seen.took)
-    }
-
-    fn input_box<'a>(
-        &'a self,
-        host: &'a dyn PaneHost,
-        pane: &'a Pane,
-    ) -> Work<'a, Option<input_box::InputBox>> {
-        Box::pin(input_box::on_screen(host, pane, Harness::Devin))
     }
 
     fn observe(&self) -> Work<'_, Result<Observed, String>> {

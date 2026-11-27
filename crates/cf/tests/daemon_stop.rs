@@ -507,7 +507,18 @@ fn a_window_s_cf_ui_is_the_board_and_never_the_daemon() {
         .output()
         .expect("cf runs");
     assert_eq!(ran.status.code(), Some(1), "the board has no such command");
-    assert!(ran.stdout.is_empty());
+    // Under `--json` a refusal of `cf ui` is the one line in the handle line's place (A1), the
+    // window's too, with the words and never the token.
+    let line: serde_json::Value =
+        serde_json::from_slice(&ran.stdout).expect("the refusal line of `cf ui --json`");
+    assert_eq!(line["refused"]["exit"], 1, "{line}");
+    assert!(
+        line["refused"]["words"]
+            .as_str()
+            .is_some_and(|words| words.contains("CONSENSFLOW_TOKEN is set")),
+        "{line}"
+    );
+    assert!(!line.to_string().contains("a-windows-token"));
     // Not "unknown command": it says the token is set, and what to do (T-868).
     let stderr = String::from_utf8_lossy(&ran.stderr);
     assert!(
@@ -540,7 +551,16 @@ fn a_daemon_that_cannot_start_says_why_in_cf_s_words_and_exits_1() {
             && stderr.contains("consensflow.db open"),
         "{stderr}"
     );
-    assert_eq!(String::from_utf8_lossy(&ran.stdout), "", "no handle line");
+    // No handle line: under `--json` the refusal is said in its place.
+    let line: Value = serde_json::from_slice(&ran.stdout).expect("one JSON line on the output");
+    assert_eq!(line["refused"]["exit"], 1, "{line}");
+    assert!(
+        line["refused"]["words"]
+            .as_str()
+            .is_some_and(|words| words.starts_with("another ConsensFlow has ")),
+        "{line}"
+    );
+    assert!(line.get("url").is_none(), "{line}");
     // The log of the home says how the second ended, as Node's exit logger did:
     // its start line, after the first's, and `exit 1` under it.
     let lines = said(&root.log());

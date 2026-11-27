@@ -136,8 +136,12 @@ runs = ["fm-engine-delivered"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/deliveries.rs"
-find = "                return self.hold(record, first.message, &reason, unsent).await;\n            }\n            Readiness::Unfit"
-replace = "                self.hold(record, first.message, &reason, unsent).await?;\n            }\n            Readiness::Unfit"
+find = """                return self.hold(record, first.message, &reason, Some(&held)).await;
+            }
+            Readiness::Unfit"""
+replace = """                self.hold(record, first.message, &reason, Some(&held)).await?;
+            }
+            Readiness::Unfit"""
 
 [[plant]]
 name = "first message: one its window refused is taken for handed over"
@@ -454,3 +458,37 @@ builds = true
 file = "crates/cf-harness/src/claude/record/replay.rs"
 find = """        self.items.push(id, Role::Custom, &hook.text, at, seq);"""
 replace = """        self.items.push(id, Role::User, &hook.text, at, seq);"""
+
+[[plant]]
+name = "first message: the first handoff takes no last look"
+meant = "a_reopened_workers_first_resume_words_wait_if_it_starts_a_turn_while_it_is_made_ready"
+runs = ["fm-engine-delivered"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = """        if let Some(why) = self.first_still_at_rest(record, frontier).await? {"""
+replace = """        if let Some(why) = self.first_still_at_rest(record, frontier).await?.filter(|_| false) {"""
+
+[[plant]]
+name = "first message: the first handoff's last look asks for a record a new window does not have"
+meant = "a_first_message_goes_to_a_window_whose_record_cannot_be_read_yet"
+runs = ["fm-engine-delivered"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/pacing.rs"
+find = """            Ok(fresh) if !fresh.settled || fresh.waiting.is_some() => {
+                Some("it began a turn as its first message was to go".to_owned())"""
+replace = """            Ok(fresh) if !read(&fresh) => Some(unreadable(&fresh)),
+            Ok(fresh) if !fresh.settled || fresh.waiting.is_some() => {
+                Some("it began a turn as its first message was to go".to_owned())"""
+
+[[plant]]
+name = "first message: a stale at-work word is never asked again for a first message"
+meant = "a_first_message_held_by_a_stale_at_work_word_is_given_once_the_word_is_asked_again"
+runs = ["fm-engine-delivered"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = """            self.recheck_if_due(record, &observed, !drawing).await;
+            // A launch's first message keeps"""
+replace = """            // A launch's first message keeps"""

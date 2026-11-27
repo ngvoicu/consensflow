@@ -1,0 +1,198 @@
+# A member held for its account says which, billing or login, and the status and the provider's
+# error type its refusal carried, from a closed form its `member.out` event keeps (T-2353,
+# which replaced the harness's words kept with the hold: no free text of a harness's is added
+# anywhere). Every value of the form is a literal of `cf_proto::hold`; the form belongs to the
+# member by its id; a hold whose event has no form says none, never an earlier hold's. Pi's
+# refusals are read for what they are: a limit that resets is never billing or login, and a
+# login Pi 1.6.1 could not refresh is a login.
+#
+# Every name holds `held words`, so `cargo xtask plants daemon "held words"` runs them all.
+
+[run]
+held-words-ledger = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "hold_words"]
+held-words-engine = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "unavailable_accounts::"]
+held-words-pi = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "pi::record::tests::steps"]
+held-words-quota = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "shared::quota::tests"]
+held-words-form = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "shared::quota::form"]
+held-words-proto = ["cargo", "test", "--offline", "-p", "cf-proto", "--lib", "hold::"]
+
+[[plant]]
+name = "held words: the hold keeps no form"
+meant = "the_board_says_the_form_an_account_hold_was_made_from_and_the_event_keeps_no_word"
+runs = ["held-words-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff/quota.rs"
+find = 'event["form"] = json!(form);'
+replace = 'let _ = form;'
+
+[[plant]]
+name = "held words: the engine marks an account's refusal out with no form"
+meant = "keeps_the_closed_form_of_an_account_s_refusal_with_the_hold_for_the_board_to_say"
+runs = ["held-words-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = "cf_harness::records::hold_form(because)"
+replace = "{ let _ = because; None }"
+
+[[plant]]
+name = "held words: the hold's event keeps a word of the refusal"
+meant = "the_board_says_the_form_an_account_hold_was_made_from_and_the_event_keeps_no_word"
+runs = ["held-words-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff/quota.rs"
+find = 'event["participant"] = json!(member.id);'
+replace = 'event["participant"] = json!(member.id); event["because"] = json!(reason);'
+
+[[plant]]
+name = "held words: a code is taken from the other kind's list too"
+meant = "a_value_that_is_in_no_list_writes_nothing"
+runs = ["held-words-proto"]
+
+[[plant.edit]]
+file = "crates/cf-proto/src/hold.rs"
+find = "let codes: &[&'static str] = if *kind == \"login\" {"
+replace = "let codes: &[&'static str] = if true {"
+
+[[plant]]
+name = "held words: a status the lists do not name is written"
+meant = "a_value_that_is_in_no_list_writes_nothing"
+runs = ["held-words-proto"]
+
+[[plant.edit]]
+file = "crates/cf-proto/src/hold.rs"
+find = ".and_then(|status| STATUSES.iter().copied().find(|s| u64::from(*s) == status)),"
+replace = ".and_then(|status| u16::try_from(status).ok()),"
+
+[[plant]]
+name = "held words: mark_back leaves the hold's form"
+meant = "the_form_lives_in_the_hold_s_own_state_and_every_statement_that_clears_or_replaces_the_hold_clears_it"
+runs = ["held-words-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff/quota.rs"
+find = "out_kind = NULL, out_form = NULL WHERE id = ?"
+replace = "out_kind = NULL WHERE id = ?"
+
+[[plant]]
+name = "held words: a hold of another kind keeps the form it replaced"
+meant = "the_form_lives_in_the_hold_s_own_state_and_every_statement_that_clears_or_replaces_the_hold_clears_it"
+runs = ["held-words-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff/quota.rs"
+find = "out_since = ?, out_kind = ?, out_form = ? WHERE id = ?"
+replace = "out_since = ?, out_kind = ?, out_form = coalesce(?, out_form) WHERE id = ?"
+
+[[plant]]
+name = "held words: the chief's switch leaves the hold's form"
+meant = "the_form_lives_in_the_hold_s_own_state_and_every_statement_that_clears_or_replaces_the_hold_clears_it"
+runs = ["held-words-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/conversations/chief.rs"
+find = "needs_edit = 0, out_form = NULL,"
+replace = "needs_edit = 0,"
+
+[[plant]]
+name = "held words: a stored form with a value outside the lists reads as a form"
+meant = "a_form_outside_the_lists_or_not_a_form_reads_as_no_form_and_the_board_loads"
+runs = ["held-words-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff/quota.rs"
+find = "(status.is_none() == form.status().is_none() && code.is_none() == form.code().is_none())"
+replace = "(status.is_none() == status.is_none())"
+
+[[plant]]
+name = "held words: invalid_grant makes a login refusal over a refusal for a moment"
+meant = "every_text_of_the_repository_s_fixtures_reads_as_the_base_read_it_but_for_two_sure_additions"
+runs = ["held-words-quota"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/quota.rs"
+find = "            && !busy_refusal(text, status) =>"
+replace = "            && true =>"
+
+[[plant]]
+name = "held words: invalid_grant is matched inside a longer word"
+meant = "every_text_of_the_repository_s_fixtures_reads_as_the_base_read_it_but_for_two_sure_additions"
+runs = ["held-words-quota"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/quota/patterns.rs"
+find = 'compile(r"(?i-u:(?-u:\b)invalid_grant(?-u:\b))")'
+replace = 'compile(r"(?i-u:invalid_grant)")'
+
+[[plant]]
+name = "held words: the form names a code inside a longer word"
+meant = "tells_which_was_refused_its_status_and_its_provider_s_error_type"
+runs = ["held-words-form"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/quota/form.rs"
+find = '("invalid_grant", r"(?i-u:(?-u:\b)invalid_grant(?-u:\b))"),'
+replace = '("invalid_grant", r"(?i-u:invalid_grant)"),'
+
+[[plant]]
+name = "held words: a reader cuts an account's refusal short of the base's 300 characters"
+meant = "every_text_of_the_repository_s_fixtures_reads_as_the_base_read_it_but_for_two_sure_additions"
+runs = ["held-words-quota"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/quota.rs"
+find = 'let said: String = said.trim().chars().take(300).collect();'
+replace = 'let said: String = said.trim().chars().take(299).collect();'
+
+[[plant]]
+name = "held words: Pi reads a limit that resets as billing because its words name a billing page"
+meant = "pi_reads_each_providers_refusal_for_what_it_is"
+runs = ["held-words-pi"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/quota/patterns.rs"
+find = "r\"(?i-u:billing_error|requires more credits|credit balance is too low|insufficient_quota)\""
+replace = "r\"(?i-u:billing|requires more credits|credit balance is too low|insufficient_quota)\""
+
+[[plant]]
+name = "held words: Pi reads an account's spent quota as a limit that resets"
+meant = "pi_reads_each_providers_refusal_for_what_it_is"
+runs = ["held-words-pi"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/record.rs"
+find = "let refusal = account_refusal(&failure, None);"
+replace = "let refusal = account_refusal(&failure, None).filter(|_| !refused_for_quota(&failure));"
+
+[[plant]]
+name = "held words: Pi reads a refresh refused with invalid_grant as nothing"
+meant = "pi_reads_each_providers_refusal_for_what_it_is"
+runs = ["held-words-pi", "held-words-quota"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/quota/patterns.rs"
+find = 'compile(r"(?i-u:(?-u:\b)invalid_grant(?-u:\b))")'
+replace = 'compile(r"(?i-u:never_matches_zz)")'
+
+[[plant]]
+name = "held words: Pi's Meta session that needs a new login is read as nothing"
+meant = "an_expired_token_is_a_refused_login_and_so_are_a_refused_refresh_and_pis_meta_session"
+runs = ["held-words-quota"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/quota/patterns.rs"
+find = 'compile(r"(?i-u:session expired \(status 40[13]\))")'
+replace = 'compile(r"(?i-u:never_matches_zz)")'
+
+[[plant]]
+name = "held words: Pi reads a refresh refused for a moment as a login refused"
+meant = "every_text_of_the_repository_s_fixtures_reads_as_the_base_read_it_but_for_two_sure_additions"
+runs = ["held-words-quota"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/quota.rs"
+find = "                && !REFRESH_MOMENT.is_match(text)))"
+replace = "                && true))"
+

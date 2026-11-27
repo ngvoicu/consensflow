@@ -155,6 +155,36 @@ fn tells_a_provider_s_quota_refusal_a_429_or_spent_credit_from_its_other_errors(
 }
 
 #[test]
+fn an_expired_token_is_a_refused_login_and_so_are_a_refused_refresh_and_pis_meta_session() {
+    // No rule reads the words of an expiry (T-2353): a 401 that says the token expired is a
+    // login refusal, as it is on main, and the card says it in the harness's own words.
+    for text in [
+        r#"401 {"type":"error","error":{"type":"authentication_error","message":"OAuth token has expired. Please obtain a new token or refresh your existing token."},"request_id":"req_1"}"#,
+        r#"401 {"error":{"message":"Your authentication token has expired. Please try signing in again.","type":"invalid_request_error","code":"token_expired"}}"#,
+        "401 OAuth token has expired.",
+        // Anthropic's refresh refused (Pi 1.6.1), whatever status the details name.
+        "OAuth refresh failed for anthropic: Anthropic token refresh request failed. details=Error: HTTP request failed. status=400; body={\"error\":\"invalid_grant\"}",
+        // Pi's published Meta errors (pi-ai 1.6.1, auth/oauth/meta.js), in Pi's wrapper and bare.
+        "OAuth refresh failed for meta: Meta session expired (status 401). Run `/login meta` to sign in again.",
+        "Meta session expired (status 403). Run `/login meta` to sign in again.",
+    ] {
+        assert_eq!(
+            account_refusal(text, None),
+            Some(Refusal::Credentials),
+            "{text}"
+        );
+    }
+    // A refresh refused for a moment is none.
+    assert_eq!(
+        account_refusal(
+            "Anthropic token refresh request failed. details=Error: HTTP request failed. status=503; body=Service Unavailable",
+            None
+        ),
+        None
+    );
+}
+
+#[test]
 fn tells_a_refusal_no_wait_cures_from_a_limit_that_resets() {
     // The words real refusals carried: OpenRouter's spent credit through Pi (2026-09),
     // Muse's billing refusal (T-705, 2026-10-26), Anthropic's API credit, an OpenAI

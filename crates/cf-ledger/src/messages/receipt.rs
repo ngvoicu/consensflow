@@ -235,11 +235,22 @@ pub(crate) fn outstanding(store: &Store, task: i64, window: i64) -> Result<bool,
     )?.exists(params![task, window])? {
         return Ok(true);
     }
+    Ok(!open_questions(store, task, window)?.is_empty())
+}
+
+/// The ids of the questions `window` asked on `task` that have no answer on their way or
+/// received (see [`outstanding`]), oldest first.
+pub(crate) fn open_questions(
+    store: &Store,
+    task: i64,
+    window: i64,
+) -> Result<Vec<i64>, LedgerError> {
     Ok(store
         .db
         .prepare(&format!(
-            "SELECT 1 FROM message q
+            "SELECT q.id FROM message q
              WHERE {} = ?1 AND q.kind = 'question' AND q.sender_id = ?2 AND q.urgent = 0
+               AND q.reason IS NOT ('T-' || (SELECT number FROM task WHERE id = ?1) || ' gave its result with it unanswered')
                AND (NOT EXISTS (SELECT 1 FROM question_binding b WHERE b.question_id = q.id)
                  OR (q.reason IS NOT ?3 AND q.reason IS NOT ?4 AND q.reason IS NOT ?5
                    AND q.reason IS NOT ('T-' || (SELECT number FROM task WHERE id = ?1) || ' was finished')))
@@ -248,9 +259,80 @@ pub(crate) fn outstanding(store: &Store, task: i64, window: i64) -> Result<bool,
                AND (q.state != 'cancelled'
                     OR EXISTS (SELECT 1 FROM message a WHERE a.reply_to = q.id
                                AND a.kind = 'answer'))
-             LIMIT 1", crate::holding::task_for_question_sql("q"),
+             ORDER BY q.id", crate::holding::task_for_question_sql("q"),
         ))?
-        .exists(params![task, window, super::MOVED_QUESTION, super::RESTARTED_QUESTION, super::CLOSED_PROJECT_QUESTION])?)
+        .query_map(
+            params![task, window, super::MOVED_QUESTION, super::RESTARTED_QUESTION, super::CLOSED_PROJECT_QUESTION],
+            |row| row.get::<_, i64>(0),
+        )?
+        .collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
+/// The words ConsensFlow's note of a turn that ended with a question open says (the engine
+/// writes them; the ledger does not read them: a note is known by `report` in its event).
+pub const TURN_ON_OPEN_QUESTION: &str = "turn ended on these words with its question";
+
+/// The questions `window` has open on `task` that the ended turn `turn` (the identity of its
+/// last complete item) is to be reported on (T-2197): a message of the task was pasted into the
+/// window after the newest of them was asked, the window's `delivery.begun` after the question's
+/// `message.sent`, and no note reporting this turn was sent. Empty otherwise. Read from the
+/// ledger alone: the note's own `message.sent` event carries `report: turn`. A turn is told once
+/// even if its note's delivery failed (nothing would stop a failing delivery from being told
+/// again every look); the next turn has another identity and is told.
+pub(crate) fn questions_to_report(
+    store: &Store,
+    task: i64,
+    window: i64,
+    turn: &str,
+) -> Result<Vec<i64>, LedgerError> {
+    let open = open_questions(store, task, window)?;
+    let Some(newest) = open.last() else {
+        return Ok(Vec::new());
+    };
+    let project: i64 = store.db.query_row(
+        "SELECT project_id FROM message WHERE id = ?",
+        [newest],
+        |row| row.get(0),
+    )?;
+    let event_of = |kind: &str, message: &str| -> String {
+        format!(
+            "SELECT max(e.id) FROM event e WHERE e.project_id = ?1 AND e.kind = '{kind}'
+               AND json_extract(e.data, '$.message') IN ({message})"
+        )
+    };
+    let asked: Option<i64> = store.db.query_row(
+        &event_of("message.sent", "?2"),
+        params![project, newest],
+        |row| row.get(0),
+    )?;
+    let pasted: Option<i64> = store.db.query_row(
+        &event_of(
+            "delivery.begun",
+            "SELECT id FROM message WHERE task_id = ?2 AND recipient_id = ?3 AND state IN ('delivered', 'read')",
+        ),
+        params![project, task, window],
+        |row| row.get(0),
+    )?;
+    let (Some(asked), Some(pasted)) = (asked, pasted) else {
+        return Ok(Vec::new());
+    };
+    if pasted < asked {
+        return Ok(Vec::new());
+    }
+    let reported = store
+        .db
+        .prepare(
+            "SELECT 1 FROM event e JOIN message m ON m.id = json_extract(e.data, '$.message')
+              WHERE e.project_id = ?1 AND e.kind = 'message.sent'
+                AND json_extract(e.data, '$.report') = ?4
+                AND m.task_id = ?2 AND m.sender_id = ?3
+              LIMIT 1",
+        )?
+        .exists(params![project, task, window, turn])?;
+    if reported {
+        return Ok(Vec::new());
+    }
+    Ok(open)
 }
 
 /// The one place a task moves between `queued`, `working` and `waiting`:

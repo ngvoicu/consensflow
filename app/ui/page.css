@@ -29,7 +29,6 @@
   /* Members take turns in shade, odd and even, so one is told from the next at a glance: the
      even ones a touch lighter, on the board's night and on a dialog's panel (T-1855). */
   --shade-lane: rgba(255, 255, 255, .05);
-  --shade-staff: rgba(255, 255, 255, .045);
   --shadow: rgba(0, 0, 0, .55);
   --ui: "Geist", -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", sans-serif;
   --mono: "Geist Mono", ui-monospace, "SFMono-Regular", Menlo, Monaco, Consolas, monospace;
@@ -89,8 +88,8 @@ button, input, select, textarea { font: inherit; color: inherit; }
   height: 100dvh;
   display: grid;
   grid-template-columns: var(--projects-width) minmax(0, 1fr);
-  grid-template-rows: 52px auto minmax(0, 1fr);
-  grid-template-areas: "bar bar" "down down" "side main";
+  grid-template-rows: 52px auto minmax(min-content, auto) minmax(0, 1fr);
+  grid-template-areas: "bar bar" "down down" "notices notices" "side main";
 }
 /* Either side panel folds to a rail with its icon; the board takes the room. */
 .panel-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
@@ -889,45 +888,13 @@ tr[data-session] .row-name { font-weight: 500; }
 .staff td { padding: 10px 10px; border-top: 1px solid var(--line-soft); vertical-align: middle; font-size: 14px; }
 .staff .member-name { font: 600 13px var(--mono); }
 .staff .member-meta { color: var(--muted); font: 11px/1.6 var(--mono); }
-.staff .member-out { color: var(--danger); font-size: 12px; margin-right: 8px; }
-.staff .try-again { margin-top: 2px; }
-/* A member and its backup are one group, as the board draws them one team (the owner,
-   2026-11-19): the member's rows, one a role with that role's Remove, its name and its own tools
-   once beside them, and under them its backup's slot, set off by the rule a team has on the board.
-   Only a group's first row has the table's rule above it. */
-.staff .staff-group-more > td { border-top: 0; padding-top: 0; }
-.staff .staff-group > td:not([rowspan]):not(.staff-tools) { padding-bottom: 6px; }
-.staff .staff-group-more:not(.backup-slot) > td { padding-bottom: 6px; }
-.staff .backup-slot > td { padding-top: 4px; padding-bottom: 12px; }
-.staff .staff-role-remove { width: 1%; padding-left: 0; }
-.staff .staff-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
-.staff .backup-part { padding: 2px 0 2px 10px; border-left: 3px solid var(--line); }
-.staff .backup-part .team-kind { margin-right: 8px; vertical-align: 1px; }
-.staff .backup-part .member-name { overflow-wrap: anywhere; }
-/* No backup yet: the same slot, its mark quiet, so a member without one is seen at a glance. */
-.staff .backup-none { border-left-color: var(--line-soft); }
-.staff .backup-none .team-kind { border-color: var(--line); color: var(--muted); }
-/* Members take turns in shade, odd and even, as the board's lanes do (T-1855): a member's rows
-   and its backup's slot in one, the next member's in the other. Its lines (the backup's rule,
-   and the quieter one of a slot with none, a button's edge) lift as the ground does, to read as
-   on the panel. */
-.staff tr[data-shade="even"] { --line: #46464d; --line-soft: #303034; }
-.staff tr[data-shade="even"] > td { background: var(--shade-staff); }
-/* A row's buttons on one line where the dialog has the room (T-1855: a backup's three wrapped at
-   the default width): the member's cell gives way, its words wrapping instead. A refusal said
-   beside them still takes a line of its own; a narrow window wraps them all as before. */
-@media (min-width: 820px) {
-  .staff .staff-actions { flex-wrap: nowrap; }
-  .staff .staff-actions > button { flex: none; white-space: nowrap; }
-  .staff .staff-actions:has(.staff-hint) { flex-wrap: wrap; }
-}
 /* The slots (D8): a row a role, a column a tier, the image designer's one slot across them all.
    A held slot is a raised card of its holder, an empty one a dashed well with its Add; a slot
    several hold is edged in amber, its words under its row; the slot the form is open for is lit
    violet. Only the slots a role has are drawn: the rest of its row is the panel. */
-.slots { width: 100%; table-layout: fixed; border-collapse: separate; border-spacing: 0 6px; margin: -6px 0 0; }
+.slots { --role-column: 136px; width: 100%; table-layout: fixed; border-collapse: separate; border-spacing: 0 6px; margin: -6px 0 0; }
 .slots thead th { text-align: left; font: 700 10px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--muted); padding: 4px 4px 2px; }
-.slots .slot-role-head { width: 136px; }
+.slots .slot-role-head { width: var(--role-column); }
 .slots .slot-role { text-align: left; font-size: 13px; font-weight: 500; color: var(--text); padding: 8px 10px 8px 2px; vertical-align: top; overflow-wrap: anywhere; }
 .slots td { padding: 0 3px; vertical-align: top; }
 .slot-empty, .slot-holder { min-height: 52px; border-radius: 8px; padding: 7px 9px; }
@@ -942,12 +909,24 @@ tr[data-session] .row-name { font-weight: 500; }
 .slots .slot-give-pick:hover { border-color: var(--line); color: var(--text); }
 .slots .slot-give-pick:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .slots .slot-give-pick option { background: var(--panel-raised); color: var(--text); }
-.slot-holder { display: grid; align-content: start; gap: 2px; border: 1px solid var(--line); background: var(--panel-raised); }
+/* A held slot's card is its member's: the card opens the member's own part (T-2341), under the
+   slot's row, and its cross takes this one role. Its chevron says it opens, and turns once it is
+   open. A card with nothing to open (a draft's image designer) is words alone. */
+.slot-holder { position: relative; display: grid; align-content: start; border: 1px solid var(--line); background: var(--panel-raised); padding: 0; }
 .slot-holder + .slot-holder { margin-top: 4px; }
-.slot-holder-top { display: flex; align-items: start; justify-content: space-between; gap: 6px; }
+.slot-open, .slot-about { display: grid; align-content: start; justify-items: start; gap: 2px; min-width: 0; min-height: 50px; padding: 7px 25px 7px 9px; }
+.slot-open { position: relative; width: 100%; border: 0; border-radius: 7px; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.slot-open:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.slot-open > .icon { position: absolute; right: 8px; bottom: 6px; width: 13px; height: 13px; color: var(--muted); }
+.slot-holder:has(> .slot-open:hover) { border-color: #52525b; background: #27272c; }
+.slot-open:hover > .icon { color: var(--text); }
 .slot-holder .member-name { font: 600 12px/1.45 var(--mono); overflow-wrap: anywhere; min-width: 0; }
 .slot-holder .member-meta { color: var(--muted); font: 11px/1.45 var(--mono); overflow-wrap: anywhere; }
-.slot-holder .slot-remove { flex: none; width: 22px; height: 22px; margin: -3px -5px 0 0; border-color: transparent; border-radius: 5px; }
+/* Its backup, said in every slot the member holds: the team's mark, then its name. */
+.slot-backup { margin-top: 2px; color: var(--muted); font: 11px/1.45 var(--mono); overflow-wrap: anywhere; }
+.slot-backup-kind { margin-right: 1px; padding: 0 5px; border: 1px solid rgba(167, 139, 250, .4); border-radius: 999px; color: var(--violet); font: 600 8.5px/1.5 var(--mono); letter-spacing: .12em; text-transform: uppercase; vertical-align: 1px; }
+/* Above the tooltip's own placing of an icon button: the cross keeps the card's corner. */
+.slots .slot-holder .slot-remove[data-tip] { position: absolute; top: 4px; right: 4px; width: 22px; height: 22px; border-color: transparent; border-radius: 5px; }
 .slot-holder .slot-remove .icon { width: 13px; height: 13px; }
 .slot-holder .slot-remove:hover, .slot-holder .slot-remove:focus-visible { color: var(--danger); border-color: rgba(248, 113, 113, .5); background: rgba(248, 113, 113, .08); }
 .slot-holder .slot-remove[data-tip]:is(:hover, :focus-visible)::after { left: auto; right: 0; }
@@ -966,15 +945,61 @@ tr[data-session] .row-name { font-weight: 500; }
 .slots .slot-words p + p { margin-top: 4px; }
 /* What the daemon refused of a slot the person changed, under its role's row, in the dialog. */
 .slots .slot-refusal td { padding: 7px 10px; border-left: 3px solid var(--danger); border-radius: 0 6px 6px 0; background: rgba(248, 113, 113, .08); color: var(--danger); font-size: 12px; line-height: 1.45; overflow-wrap: anywhere; }
-.slots td[data-picking="true"] > :is(.slot-empty, .slot-holder) { border: 1px solid var(--violet); background: rgba(124, 58, 237, .12); box-shadow: 0 0 0 3px rgba(139, 92, 246, .18); }
+.slots td[data-picking="true"] > :is(.slot-empty, .slot-holder),
+.slots td[data-slot] .slot-holder[data-lit="open"] { border: 1px solid var(--violet); background: rgba(124, 58, 237, .12); box-shadow: 0 0 0 3px rgba(139, 92, 246, .18); }
 .slots td[data-picking="true"] .slot-empty-mark { color: var(--violet); }
+.slot-holder[data-lit="open"] .slot-open > .icon { color: var(--violet); transform: rotate(180deg); }
+/* The member's other slots, lit with it: one member, whichever of its slots its part was opened from. */
+.slots td[data-slot] .slot-holder[data-lit="same"] { border: 1px dashed rgba(167, 139, 250, .7); background: rgba(124, 58, 237, .06); }
 @media (prefers-reduced-motion: no-preference) {
   .slot-empty, .slot-holder { transition: border-color .16s ease, background-color .16s ease, box-shadow .16s ease; }
+  .slot-open > .icon { transition: transform .16s ease, color .16s ease; }
+  .slot-open-row .slot-part, .slot-open-row > td > .slot-form-place:only-child { animation: slot-opens .16s ease-out; }
 }
-/* The members, each once, under the slots: its slots in one quiet line beside it. */
-.staff .member-slots-cell { color: var(--text); font-size: 13px; }
-.staff .member-slots { overflow-wrap: anywhere; }
-/* The member form opens under the slots, for a slot's Add, an Edit or a backup. */
+@keyframes slot-opens { from { opacity: 0; transform: translateY(-4px); } }
+/* What a slot opened, in a row of its own right under the slot's row, as wide as the slots: the
+   member's own part, or an empty slot's form. Its caret points up at the slot it came from. */
+.slots .slot-open-row > td { position: relative; padding: 4px 3px 6px; }
+.slots .slot-open-row > td::before { content: ""; position: absolute; top: -1px; left: calc(var(--role-column) + (100% - var(--role-column)) * (var(--column) + .5) / var(--columns) - 7px); width: 14px; height: 6px; background: var(--violet); clip-path: polygon(50% 0, 100% 100%, 0 100%); }
+.slots .slot-open-row > td[data-column="all"]::before { left: calc(var(--role-column) + 22px); }
+/* The members no slot holds (T-2341, round 2): a row of their own under the roles, amber as a
+   slot that needs the person is, its words first and then its cards side by side. */
+.slots .slot-row-apart .slot-role { color: var(--amber); }
+.slots .slot-apart { padding-top: 2px; }
+.slot-apart-words { margin: 0 0 6px; color: var(--amber); font-size: 12px; line-height: 1.45; }
+.slot-apart-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 6px; }
+.slot-apart-cards .slot-holder + .slot-holder { margin-top: 0; }
+.slots .slot-apart .slot-holder { border-color: rgba(252, 211, 77, .45); }
+/* A form shut under the person, because what it was for went or changed: the line in its place. */
+.slots .slot-form-gone td { padding: 7px 10px; border-left: 3px solid var(--sky); border-radius: 0 6px 6px 0; background: rgba(147, 197, 253, .08); color: var(--text); font-size: 12px; line-height: 1.45; overflow-wrap: anywhere; }
+.slots .slot-form-gone td:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.slot-part { display: grid; gap: 10px; min-width: 0; padding: 10px 12px 12px 14px; border: 1px solid rgba(167, 139, 250, .55); border-radius: 10px; background: linear-gradient(rgba(124, 58, 237, .07), rgba(124, 58, 237, .07)), var(--panel); }
+.slot-part-head { display: flex; align-items: start; justify-content: space-between; gap: 10px; margin-bottom: -6px; }
+.slot-part-head .member-name { font: 600 14px/1.4 var(--mono); overflow-wrap: anywhere; min-width: 0; }
+.slot-part-close { flex: none; width: 26px; height: 26px; margin: -3px -5px 0 0; border-color: transparent; }
+.slot-part-close .icon { width: 14px; height: 14px; }
+.slot-part-close[data-tip]:is(:hover, :focus-visible)::after { left: auto; right: 0; }
+/* A member in several slots says so first: what is changed here is changed in each. */
+.slot-part-slots { margin: 0; color: var(--violet); font-size: 12px; line-height: 1.45; }
+.slot-part-about { display: grid; justify-items: start; gap: 3px; min-width: 0; }
+.slot-part .member-meta { color: var(--muted); font: 11px/1.5 var(--mono); overflow-wrap: anywhere; }
+.slot-part .member-gone { color: var(--danger); font-size: 11px; line-height: 1.45; }
+.slot-part .model-gone { background: none; color: var(--danger); text-decoration: line-through; }
+.member-out-line { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+.member-out { color: var(--danger); font-size: 12px; }
+.slot-part-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
+.slot-part-acts > button { max-width: 100%; white-space: normal; }
+/* Its backup, set off by the rule a team has on the board: who it is, then its own acts. */
+.slot-part .backup-part { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; padding: 2px 0 2px 10px; border-left: 3px solid var(--line); }
+.slot-part .backup-who { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; min-width: 0; }
+.slot-part .backup-who .member-name { font: 600 12px/1.45 var(--mono); overflow-wrap: anywhere; }
+.slot-part .backup-who .slot-part-about { flex-basis: 100%; }
+.slot-part .backup-part .team-kind { vertical-align: 1px; }
+/* No backup yet: the same place, its mark quiet, so a member without one is seen at a glance. */
+.slot-part .backup-none { border-left-color: var(--line-soft); }
+.slot-part .backup-none .team-kind { border-color: var(--line); color: var(--muted); }
+/* The member form, where a slot opened it: under the part it belongs to, or alone under an empty slot. */
+.slot-part > .slot-form-place:empty { display: none; }
 .staff-add[hidden] { display: none; }
 /* Words for a screen reader only: what a mark says to the eye by where it is. */
 .visually-hidden { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
@@ -1193,36 +1218,35 @@ details.drawer-section > summary:focus-visible { outline: 2px solid var(--accent
   color: var(--text, #eee);
   font-size: 12px;
 }
-/* One row for each window whose typing may not have arrived: shown apart, never one line over another. */
+/* Typing that may not have arrived: a line of its own under the command bar, as the daemon's
+   is, one row for each window, its name first. It lies over no terminal: the room it takes is
+   the dock's and the board's, and every window fits under it (T-2359: fixed at the page's
+   corner, the rows lay over the last rows of the rightmost terminal until dismissed, and stacked
+   upward over more). In reach whatever is folded; past three rows and a half it scrolls. */
 .input-notices {
+  grid-area: notices;
   list-style: none;
   margin: 0;
-  padding: 4px;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  /* Over the page, in reach of the pointer, whatever is folded or drawn in the dock. */
-  position: fixed;
-  right: 12px;
-  bottom: 12px;
-  z-index: 40;
-  max-width: min(520px, calc(100vw - 24px));
-  max-height: 40vh;
+  padding: 0;
+  max-height: 122px;
   overflow-y: auto;
+  border-bottom: 1px solid rgba(252, 211, 77, .35);
+  border-left: 4px solid var(--amber);
+  background: rgba(252, 211, 77, .08);
 }
-.input-notices[hidden] { display: none; }
 .input-notice {
   display: flex;
-  gap: 8px;
-  align-items: baseline;
-  justify-content: space-between;
-  padding: 4px 8px;
-  border-radius: 4px;
-  background: var(--surface-2, #3a3a3a);
-  font-size: 12px;
+  gap: 12px;
+  align-items: center;
+  min-height: 34px;
+  padding: 3px 12px;
+  font-size: 13px;
 }
+.input-notice + .input-notice { border-top: 1px solid rgba(252, 211, 77, .16); }
+.input-notice-text { flex: 1; min-width: 0; }
+.input-notice-window { color: var(--amber); font-weight: 650; }
 .input-notice[data-state="closed"] { font-style: italic; }
-.input-notice-dismiss { flex: 0 0 auto; }
+.input-notice-dismiss { flex: none; padding: 3px 10px; }
 @media (min-width: 761px) {
   .stage > .terminal-card { flex: 0 0 max(min(100%, 320px), calc((100% - 8px) * 2 / 3)); }
   .stage > .terminal-card[data-role="chief"] { flex-basis: 100%; }
@@ -1304,7 +1328,36 @@ details.drawer-section > summary:focus-visible { outline: 2px solid var(--accent
 .terminal-about { flex: 1 0 100%; display: flex; flex-wrap: wrap; gap: 2px 10px; min-width: 0; padding-left: 18px; }
 .terminal-about .terminal-meta { flex: 0 1 auto; }
 .terminal-status { font-weight: 600; color: var(--muted); }
-.terminal-host { min-height: 0; padding: 4px 2px 2px 6px; }
+/* The terminal's room is the host's content box: xterm's fit reads its parent's `height` and
+   `width`, which under border-box take in the padding, and so did the rows (T-2229's finding 6:
+   the last row went under the card's edge, the live prompt with it). */
+.terminal-host { position: relative; min-height: 0; padding: 4px 2px 2px 6px; box-sizing: content-box; }
+/* A window whose history begins after its start says so in a band across the top of its well,
+   in the host's padding: the terminal's rows start under the band's dashed edge, which is where
+   the history the person can scroll to begins, and no row is under the band. Nothing to dismiss:
+   the pointer goes through it to the host, as through the padding. */
+.terminal-host[data-truncated="true"] { padding-top: 22px; }
+.terminal-truncated {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px 0 6px;
+  overflow: hidden;
+  border-bottom: 1px dashed var(--line);
+  background: var(--panel);
+  color: var(--muted);
+  font: 11px/1 var(--mono);
+  white-space: nowrap;
+  pointer-events: none;
+}
+.terminal-truncated .icon { width: 12px; height: 12px; stroke-width: 2; }
+.terminal-truncated-what { flex: none; color: var(--text); }
+.terminal-truncated-where { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 /* Scrollbars that stay, not the overlay that hides between scrolls: a
    terminal's scrollback, and a board too narrow for its columns, which
    would otherwise hide the last of them with no sign they are there. */
@@ -1684,7 +1737,9 @@ dialog.history-viewer[open] { grid-template-rows: auto minmax(0, 1fr); }
 .history-refusal { color: var(--history-refusal); }
 
 @media (max-width: 760px) {
-  .main, .main[data-board="hidden"] { grid-template-columns: 1fr; grid-template-rows: minmax(0, 1fr) 42vh; }
+  /* The dock is 42% of the window; the board keeps at least its own padding, which it would
+     otherwise draw over the dock's top. */
+  .main, .main[data-board="hidden"] { grid-template-columns: 1fr; grid-template-rows: minmax(60px, 1fr) 42vh; }
   .main[data-dock="hidden"] { grid-template-rows: minmax(0, 1fr) auto; grid-template-columns: 1fr; }
   .divider { display: none; }
   .main > .board, .main > .dock { grid-column: 1; }
@@ -1693,11 +1748,18 @@ dialog.history-viewer[open] { grid-template-rows: auto minmax(0, 1fr); }
   .dock { border-left: 0; border-top: 1px solid var(--line-soft); }
   .shell {
     grid-template-columns: 1fr;
-    grid-template-rows: auto auto auto minmax(0, 1fr);
-    grid-template-areas: "bar" "down" "side" "main";
+    /* Where the window is short, the projects' list gives way to the notices before the dock and
+       the board do, and scrolls (T-2359; at 560 by 480 three notices left the chief's terminal no
+       row). The notices keep their rows, up to their own height's limit. */
+    grid-template-rows: auto auto minmax(min-content, auto) minmax(0, auto) minmax(calc(42vh + 60px), 1fr);
+    grid-template-areas: "bar" "down" "notices" "side" "main";
   }
   .command-bar { flex-wrap: wrap; padding: 8px 12px; gap: 8px; }
-  .sidebar { border-right: 0; border-bottom: 1px solid var(--line); max-height: 30vh; }
+  /* Its padding above and below is its content's, so that it can give way whole. */
+  .sidebar { border-right: 0; border-bottom: 1px solid var(--line); max-height: 30vh; padding-block: 0; }
+  .shell:not([data-projects="hidden"]) .sidebar > .panel-head { padding-top: 14px; }
+  .shell:not([data-projects="hidden"]) .sidebar > #projects { padding-bottom: 14px; }
+  .shell:has(> .main[data-dock="hidden"]) { grid-template-rows: auto auto minmax(min-content, auto) minmax(0, auto) minmax(0, 1fr); }
   .board { padding: 12px 12px 48px; }
 }
 @media (prefers-reduced-motion: reduce) {

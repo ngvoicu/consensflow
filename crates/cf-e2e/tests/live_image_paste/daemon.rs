@@ -83,10 +83,8 @@ fn result_of(members: &Members) -> Result<Option<Value>> {
 
 /// How many events of `kind` the daemon wrote of the message `id`.
 fn events_of(events: &[Value], kind: &str, id: i64) -> usize {
-    events
-        .iter()
-        .filter(|event| event["kind"] == kind && event["data"]["message"] == id)
-        .count()
+    // A hand-over refused before anything was written is no paste (`cf_e2e::handed`).
+    cf_e2e::handed::of_message(events, kind, id).len()
 }
 
 /// The native session of the conversation `handle` has newest, as the daemon's `events` say it

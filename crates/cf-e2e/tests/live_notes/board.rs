@@ -105,6 +105,7 @@ pub fn retried(events: &[Value], notes: &[Note]) -> Vec<String> {
     events
         .iter()
         .filter(|event| event["kind"] == "delivery.retried")
+        .filter(|event| !cf_e2e::handed::refused_before_written(event))
         .filter_map(|event| {
             let id = event["data"]["message"].as_i64()?;
             notes.iter().any(|note| note.id == id).then(|| {

@@ -25,7 +25,7 @@
 use std::time::Duration;
 
 use cf_base::js;
-use cf_ledger::{Claim, MessageView, TaskView, MOVED_QUESTION};
+use cf_ledger::{gave_result_reason, Claim, MessageView, TaskView, MOVED_QUESTION};
 use serde_json::{json, Value};
 use tokio::time::{sleep, Instant};
 
@@ -146,9 +146,13 @@ fn shut(asked: &MessageView, task: Option<&TaskView>, former_window: bool) -> Fa
     let id = asked.id;
     let state = task.map(|task| task.state.as_str());
     let moved = former_window || asked.reason.as_deref() == Some(MOVED_QUESTION);
-    let finished = asked
-        .task_number
-        .is_some_and(|number| asked.reason.as_deref() == Some(&format!("T-{number} was finished")));
+    // A question the task's result closed (the task was finished at a word of its window's,
+    // with the question open: only a Finish at a word does that, never the worker's own
+    // `cf task done`) is as finished as one a plain finish withdrew.
+    let finished = asked.task_number.is_some_and(|number| {
+        asked.reason.as_deref() == Some(&format!("T-{number} was finished"))
+            || asked.reason.as_deref() == Some(&gave_result_reason(number))
+    });
     let words = match (asked.task_number, state) {
         (Some(task), Some("accepted")) => format!(
             "T-{task} is accepted, so nothing waits on m-{id}: it is not answered here and no answer will come. Do not ask it again; end your turn now."

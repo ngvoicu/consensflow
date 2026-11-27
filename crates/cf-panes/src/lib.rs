@@ -29,7 +29,10 @@ pub mod input_queue;
 #[cfg(windows)]
 mod job_object;
 pub mod journal;
+#[cfg(test)]
+mod model;
 pub mod output_hub;
+pub mod page;
 pub mod pane_handlers;
 pub mod privacy;
 #[cfg(target_os = "macos")]
@@ -38,6 +41,7 @@ mod process_tree;
 pub use process_tree::{read_identity, UniqueIdentity};
 pub mod pty;
 pub mod screen;
+mod sync;
 #[cfg(any(target_os = "macos", test))]
 mod tcc;
 #[cfg(all(test, unix))]

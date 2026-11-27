@@ -71,14 +71,36 @@ export function redraw(parent, nodes) {
 
 function patch(parent, nodes) {
   for (const [at, node] of nodes.entries()) {
-    const shown = parent.children[at]
+    let shown = parent.children[at]
+    // Keyed elements (`data-key`) that came are put in before the next one that stays, and ones
+    // that went are taken out: those that stay are never taken out and put back, so a part the
+    // page keeps in one of them (`data-keep`) keeps the keyboard while rows come and go around it.
+    while (keyed(shown, node) && shown.dataset.key !== node.dataset.key) {
+      if (nodes.slice(at + 1).some((later) => later.dataset?.key === shown.dataset.key)) break
+      shown.remove()
+      shown = parent.children[at]
+    }
+    if (keyed(shown, node) && shown.dataset.key !== node.dataset.key) {
+      parent.insertBefore(node, shown)
+      continue
+    }
     if (shown === undefined) parent.append(node)
-    else if (shown.isEqualNode(node)) continue
+    else if (shown.isEqualNode(node) || kept(shown, node)) continue
     else if (opens(shown, node)) patch(shown, [...node.children])
     else shown.replaceWith(node)
   }
   while (parent.children.length > nodes.length) parent.lastElementChild.remove()
 }
+
+/** Whether both elements say what they are by a key of their own. */
+const keyed = (shown, node) => shown?.dataset?.key !== undefined && node.dataset?.key !== undefined
+
+/**
+ * A place the page fills itself (`data-keep`), such as the member form a dialog moves into a
+ * slot's row: drawn again with the same mark, it is left as it is, whatever it holds by then.
+ */
+const kept = (shown, node) =>
+  shown.dataset?.keep !== undefined && shown.dataset.keep === node.dataset?.keep
 
 const opens = (shown, node) =>
   shown.tagName === node.tagName &&

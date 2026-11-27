@@ -1246,5 +1246,9 @@ fn t1827_legacy_question_is_withdrawn_by_finish_as_before() {
         .record_finished(w.project, 1, "Finished", (0, 0))
         .unwrap();
     assert_eq!(w.message(2).state, "cancelled");
-    assert_eq!(w.message(2).reason.as_deref(), Some("T-1 was finished"));
+    // The result closes a question it leaves open with the result's own reason (T-2287).
+    assert_eq!(
+        w.message(2).reason.as_deref(),
+        Some("T-1 gave its result with it unanswered")
+    );
 }

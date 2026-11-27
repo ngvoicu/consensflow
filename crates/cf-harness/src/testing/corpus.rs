@@ -1034,3 +1034,139 @@ mod tests {
         }
     }
 }
+
+// ─── As drawn ──────────────────────────────────────────────────────────────────────────────────
+
+/// A screen of the corpus as drawn, rows whole with their rules and empty rows: what the pane
+/// host keeps at one of the person's keys (N17), the last forty of them from the last with
+/// anything on it.
+#[derive(Debug, Clone)]
+pub struct Drawn {
+    pub name: String,
+    pub harness: Harness,
+    pub state: State,
+    pub source: Source,
+    pub rows: Vec<String>,
+}
+
+fn kept_rows(rows: &[String]) -> Vec<String> {
+    let mut rows: Vec<String> = rows.iter().map(|row| row.trim_end().to_owned()).collect();
+    let last = rows
+        .iter()
+        .rposition(|row| !row.is_empty())
+        .map_or(0, |last| last + 1);
+    rows.truncate(last);
+    rows.drain(..rows.len().saturating_sub(40));
+    rows
+}
+
+/// The screens of Claude Code, Devin and Muse Code that are as drawn: the recorded ones, the
+/// dialogs of [`super::screens`] (as the harness's pane host sent them), and each harness's box
+/// at rest under each body (idle).
+pub fn drawn_screens() -> Vec<Drawn> {
+    let mut all = Vec::new();
+    let read = [Harness::Claude, Harness::Devin, Harness::Muse];
+    for (title, screen) in sections(RECORDED) {
+        let mut words = title.split_whitespace();
+        let (Some(harness), Some(_), Some(state)) = (words.next(), words.next(), words.next())
+        else {
+            panic!("a recorded screen's header is `<harness> <file> <state>`: {title}");
+        };
+        let Some(harness) = harness_named(harness).filter(|harness| read.contains(harness)) else {
+            continue;
+        };
+        all.push(Drawn {
+            name: format!("recorded: {title}"),
+            harness,
+            state: if state == "dialog" {
+                State::Dialog
+            } else {
+                State::Idle
+            },
+            source: Source::Recorded,
+            rows: kept_rows(&screen),
+        });
+    }
+    for (name, harness, screen) in [
+        (
+            "claude's offer to install an LSP plugin",
+            Harness::Claude,
+            fixtures::CLAUDE_LSP,
+        ),
+        (
+            "claude's offer at work",
+            Harness::Claude,
+            fixtures::CLAUDE_LSP_AT_WORK,
+        ),
+        (
+            "claude's offer, turn ended",
+            Harness::Claude,
+            fixtures::CLAUDE_LSP_TURN_ENDED,
+        ),
+        (
+            "claude's computer use prompt",
+            Harness::Claude,
+            fixtures::CLAUDE_COMPUTER_USE_PROMPT,
+        ),
+        (
+            "claude's rm prompt",
+            Harness::Claude,
+            fixtures::CLAUDE_RM_PROMPT_LIVE,
+        ),
+        (
+            "claude's ask of a hook",
+            Harness::Claude,
+            fixtures::CLAUDE_HOOK_ASK,
+        ),
+        (
+            "devin's dialog of a call",
+            Harness::Devin,
+            fixtures::DEVIN_CALL,
+        ),
+        (
+            "devin's offer to switch its theme",
+            Harness::Devin,
+            fixtures::DEVIN_THEME,
+        ),
+        (
+            "muse's card of its quota, framed",
+            Harness::Muse,
+            fixtures::MUSE_QUOTA,
+        ),
+        (
+            "muse's card of its quota, unframed",
+            Harness::Muse,
+            fixtures::MUSE_QUOTA_UNFRAMED,
+        ),
+    ] {
+        all.push(Drawn {
+            name: format!("fixture: {name}"),
+            harness,
+            state: State::Dialog,
+            source: Source::Fixture,
+            rows: kept_rows(&fixtures::lines(screen)),
+        });
+    }
+    let bodies = bodies();
+    for harness in read {
+        for body in &bodies {
+            let (said, source) = drawn(harness, body);
+            for (bottom, bottom_rows) in bottoms(harness) {
+                let mut rows = said.clone();
+                rows.extend(bottom_rows);
+                all.push(Drawn {
+                    name: format!(
+                        "{}: {} over its prompt, {bottom}",
+                        name_of(harness),
+                        body.id
+                    ),
+                    harness,
+                    state: State::Idle,
+                    source,
+                    rows: kept_rows(&rows),
+                });
+            }
+        }
+    }
+    all
+}

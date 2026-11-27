@@ -18,6 +18,7 @@ use crate::board::StaffMark;
 use crate::conversations::{transcript, TRANSCRIPT_ITEM_MAX};
 use crate::model::{cut, title_of, LedgerError, FINISHED_TASK_STATES};
 use crate::projects::project;
+use crate::staff;
 use crate::store::Store;
 use crate::tasks::task;
 use crate::views::{message_view, task_view, MESSAGE_SELECT, TASK_SELECT};
@@ -260,10 +261,21 @@ pub(crate) fn board(store: &Store, project_id: i64) -> Result<Board, LedgerError
                     backup_of: row.get("backup_of")?,
                     vacation_since: row.get("vacation_since")?,
                     out_kind: HoldKind::read(kind.as_deref()),
+                    out_form: None,
                 },
             ))
         })?
-        .collect::<rusqlite::Result<HashMap<_, _>>>()?;
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    let marks = marks
+        .into_iter()
+        .map(|(id, mut mark)| {
+            // Only an account's refusal made a hold with a form to say.
+            if mark.out_kind == Some(HoldKind::Account) {
+                mark.out_form = staff::hold_form(store, id)?;
+            }
+            Ok((id, mark))
+        })
+        .collect::<Result<HashMap<i64, StaffMark>, LedgerError>>()?;
     Ok(Board {
         // Every task no lane has; one given by name waits in its own lane.
         open: cards

@@ -8,8 +8,9 @@
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::mpsc::{sync_channel, SyncSender, TrySendError};
+use std::sync::mpsc::{self, sync_channel, SyncSender, TrySendError};
 use std::sync::{Arc, Mutex, PoisonError};
+use std::thread;
 use std::time::{Duration, Instant};
 
 use cf_base::file::append_rotating;
@@ -173,12 +174,19 @@ impl Log {
     /// room for is written once it has written what it holds ([`Log::written`]), after the
     /// count of the lines dropped, and every such line after it follows it there.
     pub fn keep(&self, message: &str) {
+        if self.writer.is_none() {
+            return self.info(message);
+        }
+        let text = self.text("info", message, None);
+        self.keep_text(text);
+    }
+
+    /// `line` (whole lines, ended) kept as [`Log::keep`] says.
+    fn keep_text(&self, line: String) {
         let Some(writer) = &self.writer else {
-            self.info(message);
             return;
         };
         let at = iso(self.clock.borrow_mut().now_ms());
-        let line = format!("{at} info {message}\n");
         let mut kept = writer.kept.lock().unwrap_or_else(PoisonError::into_inner);
         if kept.is_empty() {
             let dropped = writer.dropped.swap(0, Ordering::SeqCst);
@@ -206,13 +214,34 @@ impl Log {
         self.write("error", message, cause);
     }
 
-    fn write(&self, level: &str, message: &str, cause: Option<&str>) {
+    /// [`Log::info`] that gives up after `wait` if the log is held (another process
+    /// holds its lock, a disk that does not answer): what the stop says, which must
+    /// never keep the stop from ending.
+    pub fn info_within(&self, message: &str, wait: Duration) {
+        self.say_within("info", message, None, wait);
+    }
+
+    /// [`Log::warn`] that gives up after `wait`, as [`Log::info_within`].
+    pub fn warn_within(&self, message: &str, wait: Duration) {
+        self.say_within("warn", message, None, wait);
+    }
+
+    /// [`Log::error`] that gives up after `wait`, as [`Log::info_within`].
+    pub fn error_within(&self, message: &str, cause: Option<&str>, wait: Duration) {
+        self.say_within("error", message, cause, wait);
+    }
+
+    fn text(&self, level: &str, message: &str, cause: Option<&str>) -> String {
         let at = iso(self.clock.borrow_mut().now_ms());
         let mut lines = vec![format!("{at} {level} {message}")];
         if let Some(text) = cause {
             lines.extend(text.split('\n').map(|line| format!("    {line}")));
         }
-        let text = format!("{}\n", lines.join("\n"));
+        format!("{}\n", lines.join("\n"))
+    }
+
+    fn write(&self, level: &str, message: &str, cause: Option<&str>) {
+        let text = self.text(level, message, cause);
         let Some(writer) = &self.writer else {
             // The home may be read-only or gone mid-run.
             let _ = append_rotating(&self.file, &text, self.limit);
@@ -222,10 +251,34 @@ impl Log {
         let text = if dropped == 0 {
             text
         } else {
-            format!("{}{text}", dropped_line(&at, dropped))
+            format!(
+                "{}{text}",
+                dropped_line(&iso(self.clock.borrow_mut().now_ms()), dropped)
+            )
         };
         if writer.lines.try_send(Job::Line(text)).is_err() {
             writer.dropped.fetch_add(dropped + 1, Ordering::SeqCst);
+        }
+    }
+
+    /// A line of a stop or a refusal, which is never dropped: through the writer when there is
+    /// one ([`Log::keep`]); else appended on a thread of its own and waited for `wait` at most,
+    /// one that is still held then left to finish, or not, by itself.
+    fn say_within(&self, level: &str, message: &str, cause: Option<&str>, wait: Duration) {
+        let text = self.text(level, message, cause);
+        if self.writer.is_some() {
+            return self.keep_text(text);
+        }
+        let (file, limit) = (self.file.clone(), self.limit);
+        let (done, heard) = mpsc::channel();
+        let started = thread::Builder::new()
+            .name("consensflow-log".to_owned())
+            .spawn(move || {
+                let _ = append_rotating(&file, &text, limit);
+                let _ = done.send(());
+            });
+        if started.is_ok() {
+            let _ = heard.recv_timeout(wait);
         }
     }
 }

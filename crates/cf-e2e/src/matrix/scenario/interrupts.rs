@@ -376,6 +376,7 @@ mod finish_fixture_tests {
         let reached = scenario.steps[0].reached;
         let bindings = Bindings {
             found: BTreeMap::from([("W", vec![1]), ("Q", vec![2]), ("P", vec![3])]),
+            ..Bindings::default()
         };
         let mut snapshot = Snapshot {
             tasks: vec![

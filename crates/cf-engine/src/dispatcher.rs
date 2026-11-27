@@ -42,7 +42,7 @@ use crate::background::leaving;
 use crate::chief_model::held_for_no_default;
 use crate::chief_switch::SwitchTo;
 use crate::computer_use::ComputerUseState;
-use crate::pacing;
+use crate::pacing::{self, Frontier};
 use crate::privacy::PrivacyState;
 use crate::record::Record;
 use crate::resume::{Closing, Closings, Coming, ResumeState};
@@ -193,6 +193,15 @@ impl Dispatcher {
                 .borrow()
                 .next_delivery(participant)?
                 .is_some())
+    }
+
+    /// Whether that wait is for keys of theirs that nothing shows are gone
+    /// ([`Held::Unproven`]): the board says to press Ctrl+U.
+    pub fn holding_unproven(&self, participant: i64) -> Result<bool, EngineError> {
+        Ok(self
+            .record(participant)
+            .is_some_and(|record| record.delivery.borrow().unproven)
+            && self.holding(participant)?)
     }
 
     /// Whether the human hid this window and it has not closed yet: Show
@@ -350,13 +359,6 @@ impl Dispatcher {
         because: Option<&str>,
     ) -> Result<Vec<String>, EngineError> {
         let _burst = self.stalls.begin_burst();
-        // A box the engine emptied counts as empty no more: what the human types into
-        // a window the close could not close goes unseen until the Resume, and an
-        // interrupt of ours may put a prompt back there. The human's Close and the
-        // chief's own exit alike (Calliope's reviews of 2026-10-21, rounds 13 and 14).
-        for participant in participants {
-            self.record_of(participant.id).delivery.borrow_mut().emptied = None;
-        }
         let parts: Vec<Closing> = participants
             .iter()
             .map(|_| self.closings.begin(project))
@@ -1943,14 +1945,20 @@ impl Dispatcher {
             .as_ref()
             .is_some_and(|delivering| delivering.owed.is_some());
         if owed {
+            // A stale "at work" word of the harness's is asked again for a first message too.
+            self.recheck_if_due(record, &observed, !drawing).await;
             // A launch's first message keeps `settled`: a window opened again on a record that
             // ends in the old process's interrupt has a new Claude whose busy status says
             // nothing of its prompt (T-1985).
             if !drawing && observed.settled && observed.waiting.is_none() && project.state == "open"
             {
                 let (this, held) = (Rc::clone(self), Rc::clone(record));
-                self.act(record, async move { this.hand_first(&held).await })
-                    .await;
+                let frontier = Frontier::of(&observed);
+                self.act(
+                    record,
+                    async move { this.hand_first(&held, &frontier).await },
+                )
+                .await;
             }
             return Ok(());
         }
@@ -2005,6 +2013,8 @@ impl Dispatcher {
                     part.held = None;
                     part.for_human = None;
                     part.unsent = false;
+                    part.unproven = false;
+                    part.settling_since = None;
                 }
             }
             if let Some(next) = next {
@@ -2187,12 +2197,23 @@ impl Dispatcher {
             Some(Unwell::Busy(_)) => HoldKind::Busy,
             None => HoldKind::Quota,
         };
-        let marked = self.seams.ledger.borrow_mut().mark_out_with_kind(
-            owner.id,
-            &reset,
-            unwell.map_or("out of quota", Unwell::hold),
-            kind,
-        )?;
+        let hold = unwell.map_or("out of quota", Unwell::hold);
+        // An account's refusal keeps the closed form of what it was with the hold (which, its
+        // status and its provider's error type, each a literal of the lists); no word of the
+        // harness's is kept anywhere new (T-2353).
+        let marked = match unwell {
+            Some(Unwell::Account(because)) => self.seams.ledger.borrow_mut().mark_out_with_form(
+                owner.id,
+                &reset,
+                hold,
+                cf_harness::records::hold_form(because),
+            )?,
+            _ => self
+                .seams
+                .ledger
+                .borrow_mut()
+                .mark_out_with_kind(owner.id, &reset, hold, kind)?,
+        };
         let until = marked.out_until.clone().unwrap_or_default();
         self.set_activity(
             record,

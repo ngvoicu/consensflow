@@ -191,10 +191,10 @@ runs = ["panes-conpty"]
 file = "crates/cf-panes/src/pty.rs"
 find = """
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
-    master: Box<dyn MasterPty + Send>,
+    master: Arc<PaneMaster>,
 """
 replace = """
-    master: Box<dyn MasterPty + Send>,
+    master: Arc<PaneMaster>,
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
 """
 

@@ -6,10 +6,11 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use cf_bridge::{BridgeBuilder, BridgeError};
+use cf_proto::page::{Refused, RefusedLine};
 use serde::Deserialize;
 use serde_json::Value;
 
-use super::{DaemonFailure, StartedDaemon, DAEMON_STOP_GRACE};
+use super::{DaemonFailure, StartedDaemon, DAEMON_STOP_GRACE, LEDGER_EXIT};
 
 /// Starts a daemon and connects to it: its output carries the handle line,
 /// then the bridge's frames; its input carries the app's. A daemon that has
@@ -19,6 +20,9 @@ pub(crate) fn connect_daemon(
     builder: BridgeBuilder,
     within: Duration,
 ) -> Result<StartedDaemon, DaemonFailure> {
+    // The ledger this child will have, as its own environment names it: said now, at its
+    // launch, and kept with it.
+    let ledger = crate::daemon_command::launch_ledger(&command);
     let mut child = command
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -35,9 +39,28 @@ pub(crate) fn connect_daemon(
     let writer = child.stdin.take().ok_or_else(|| {
         DaemonFailure::transient("the daemon process gave no input pipe".to_string())
     })?;
-    let failed = |child: &mut Child, cause: String| {
-        let _ = child.kill();
-        let _ = child.wait();
+    // A daemon that is still running is ended (killed) before it is waited for; one that
+    // closed its stream, or said it was refused, is waited for as it is, killed by nothing,
+    // for its status is the answer: `ended` is that case.
+    let failed = |child: &mut Child, cause: String, ended: bool, said: Option<Refused>| {
+        if !ended {
+            let _ = child.kill();
+        }
+        let pid = child.id();
+        let ended = child.wait();
+        // A daemon that ended for a ledger it cannot save to says so by its status: not a
+        // start to try again, whatever else it failed to say. Its words are the ones it said
+        // in its handle line's place, where it said them; the app judges no ledger itself.
+        if ended.is_ok_and(|status| status.code() == Some(LEDGER_EXIT)) {
+            return DaemonFailure {
+                cause: said.filter(|refused| refused.pid == pid).map_or_else(
+                    || cf_base::home::unsaid_words(&ledger),
+                    |refused| refused.words,
+                ),
+                retry: false,
+                ledger: true,
+            };
+        }
         DaemonFailure::transient(cause)
     };
     // The handle line is read on a thread of its own, since the read has no
@@ -52,6 +75,8 @@ pub(crate) fn connect_daemon(
         return Err(failed(
             &mut child,
             format!("could not read the bundled ConsensFlow's handle: {error}"),
+            false,
+            None,
         ));
     }
     let connected = match handle.recv_timeout(within) {
@@ -60,34 +85,57 @@ pub(crate) fn connect_daemon(
             return Err(failed(
                 &mut child,
                 "ConsensFlow's daemon stopped before it was ready".to_string(),
+                true,
+                None,
             ));
         }
         Ok(Err(error)) => {
             return Err(failed(
                 &mut child,
                 format!("could not connect to the bundled ConsensFlow: {error}"),
+                false,
+                None,
             ));
         }
         Err(mpsc::RecvTimeoutError::Timeout) => {
             return Err(failed(
                 &mut child,
                 format!("ConsensFlow's daemon did not say it was ready within {within:?}"),
+                false,
+                None,
             ));
         }
         Err(mpsc::RecvTimeoutError::Disconnected) => {
             return Err(failed(
                 &mut child,
                 "could not read the bundled ConsensFlow's handle".to_string(),
+                false,
+                None,
             ));
         }
     };
+    // A first line that says the start was refused is no handle: the daemon is ending by
+    // itself, so its input is closed and it is waited for, killed by nothing.
+    if connected.handle.get("refused").is_some() {
+        let said = serde_json::from_value::<RefusedLine>(connected.handle)
+            .ok()
+            .map(|line| line.refused);
+        connected.bridge.close_input();
+        return Err(failed(
+            &mut child,
+            "ConsensFlow's daemon stopped before it was ready".to_string(),
+            true,
+            said,
+        ));
+    }
     match RosterHandle::from_value(connected.handle) {
         Ok(roster) => Ok(StartedDaemon {
             daemon: child,
             bridge: connected.bridge,
             roster,
+            ledger,
         }),
-        Err(cause) => Err(failed(&mut child, cause)),
+        Err(cause) => Err(failed(&mut child, cause, false, None)),
     }
 }
 
