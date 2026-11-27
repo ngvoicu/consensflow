@@ -281,7 +281,7 @@ replace = "        return Session::nothing(&if false {\n"
 
 [[plant]]
 name = "pi turn state: a rest whose end's leaf the file lacks is over"
-meant = "a_rest_whose_leaf_the_file_lacks_is_paid_and_takes_nothing_until_it_has_it"
+meant = "a_refusal_is_published_only_at_rest_with_its_failure_and_never_inside_a_run"
 runs = ["pts-reader"]
 
 [[plant.edit]]
