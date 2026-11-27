@@ -315,6 +315,9 @@ export class SuggestedStaff {
   #lists
   #changed
   #fill
+  #isOpen
+  /** Which opening of its dialog it is: a fill belongs to the one it began in. */
+  #opening = 0
   /** Each harness the suggestion runs on, by kind: as the dialog's read of it says, this opening. */
   #reads = new Map()
   /** Which ask of each harness's list is the last: an answer to an earlier one acts no more. */
@@ -330,7 +333,8 @@ export class SuggestedStaff {
   /** The plan the panel shows, which its Fill takes. */
   #plan = null
 
-  constructor(root, { id, lists, changed, fill }) {
+  constructor(root, { id, lists, changed, fill, open = () => true }) {
+    this.#isOpen = open
     this.#root = root
     this.#id = id
     this.#lists = lists
@@ -364,6 +368,7 @@ export class SuggestedStaff {
     this.#taken = 0
     this.#refused = []
     this.#busy = false
+    this.#opening += 1
     this.#lists.release()
     this.#plan = null
     for (const kind of kindsOf(entriesOf(suggestion))) {
@@ -417,13 +422,26 @@ export class SuggestedStaff {
     this.#busy = true
     this.#refused = []
     // Refresh and Fill never run together: no Refresh while it fills.
-    this.#lists.hold('Filling the suggested staff')
+    this.#lists.hold('Filling the suggested staff', this.#opening)
+    return this.#opening
+  }
+
+  /** The opening of its dialog now. */
+  get opening() {
+    return this.#opening
+  }
+
+  /** Whether `opening`, the one a fill began in, is still the dialog's open one. */
+  owns(opening) {
+    return opening === this.#opening && this.#isOpen()
   }
 
   /** A fill is done: `count` slots filled, and each make refused, `{ slots, words }` in the daemon's words. */
-  filled(count, refused = []) {
+  filled(opening, count, refused = []) {
+    this.#lists.release(opening)
+    // Only the opening it began in is told: a later one has its own state, and its own hold.
+    if (opening !== this.#opening) return
     this.#busy = false
-    this.#lists.release()
     this.#taken += count
     this.#refused = refused
   }

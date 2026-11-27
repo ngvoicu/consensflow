@@ -25086,3 +25086,71 @@ test('T-2405 a write whose offering read is no longer the dialog’s current one
   // The first (a Claude Code member) was made; none on Codex's read after it moved.
   expect(writes.map(([, body]) => body.harness)).toEqual(['claude-code', 'claude-code'])
 })
+
+// T-2405 round 4: a Fill is its opening's.
+
+test('T-2405 a Fill whose dialog was closed and another opened writes nothing more, whatever the new dialog reads', async ({
+  page,
+}) => {
+  const data = suggesting(staffOf(model()))
+  data.addJoins = true
+  const settings = await settingsOn(page, data)
+  await hold(page, 'member.add')
+  await suggestion(settings)
+    .getByRole('button', { name: 'Fill 8 empty slots with the suggested staff' })
+    .click()
+  await expect.poll(async () => (await staffWrites(page)).length).toBe(1)
+  // The person closes Project settings and opens New project, whose Codex list lacks the model.
+  await page.evaluate(() => {
+    window.__model.models.codex.listing.models = window.__model.models.codex.listing.models.filter(
+      (one) => one.id !== 'gpt-6-2-astra',
+    )
+  })
+  await settings.getByRole('button', { name: 'Close', exact: true }).click()
+  await page.getByRole('button', { name: 'New project' }).click()
+  const fresh = page.getByRole('dialog', { name: 'New project' })
+  await expect(fresh.locator('table.slots')).toBeVisible()
+  await letGo(page, 'member.add')
+  await page.waitForTimeout(500)
+  // The write on its way landed; nothing else was written, and New project shows none of it.
+  expect(await staffWrites(page)).toHaveLength(1)
+  await expect(page.locator('#status')).not.toContainText('from the suggested staff')
+  await expect(suggestion(fresh).locator('.suggest-done')).toHaveCount(0)
+})
+
+test('T-2405 an older Fill ending does not release the hold of the Fill of a newer opening', async ({
+  page,
+}) => {
+  const data = suggesting(staffOf(model()))
+  data.addJoins = true
+  let settings = await settingsOn(page, data)
+  await settings.getByRole('button', { name: 'Add a standard worker', exact: true }).click()
+  await hold(page, 'member.add')
+  await page.evaluate(() => {
+    window.__first = window.__release['member.add']
+  })
+  await suggestion(settings)
+    .getByRole('button', { name: /^Fill \d+ empty slots with the suggested staff$/ })
+    .click()
+  await expect.poll(async () => (await staffWrites(page)).length).toBe(1)
+  await settings.getByRole('button', { name: 'Close', exact: true }).click()
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  settings = page.getByRole('dialog', { name: 'Project settings' })
+  await settings.getByRole('button', { name: 'Add a standard worker', exact: true }).click()
+  await hold(page, 'member.add')
+  const refresh = settings.getByRole('button', { name: 'Refresh models for the member' })
+  await suggestion(settings)
+    .getByRole('button', { name: /^Fill \d+ empty slots with the suggested staff$/ })
+    .click()
+  await expect.poll(async () => (await staffWrites(page)).length).toBe(2)
+  await expect(refresh).toBeDisabled()
+  // The older Fill's write lands and it ends: the newer one still holds its Refresh off, and the
+  // older one wrote nothing more.
+  await page.evaluate(() => window.__first())
+  await page.waitForTimeout(500)
+  expect(await staffWrites(page)).toHaveLength(2)
+  await expect(refresh).toBeDisabled()
+  await letGo(page, 'member.add')
+  await expect(page.locator('#status')).toContainText('from the suggested staff')
+  await expect(refresh).toBeEnabled()
+})

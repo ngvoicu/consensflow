@@ -304,6 +304,8 @@ export class ModelLists {
   #troubles = new Set()
   /** Why no Refresh may be asked now (a fill of the suggested staff is under way), else none. */
   #held = null
+  /** The opening of the dialog whose fill holds it. */
+  #heldBy = null
   #holders = new Set()
 
   constructor(daemon) {
@@ -353,13 +355,16 @@ export class ModelLists {
    * the lists it was offered, so none is read again under it. `listener(why)` is told at once and
    * at each change, `why` null where none holds.
    */
-  hold(why) {
+  hold(why, owner = null) {
+    this.#heldBy = why === null ? null : owner
     if (why === this.#held) return
     this.#held = why
     for (const listener of this.#holders) listener(why)
   }
 
-  release() {
+  /** Lets go of the hold of `owner`'s opening: one that another opening holds is not its to release. */
+  release(owner = null) {
+    if (owner !== null && owner !== this.#heldBy) return
     this.hold(null)
   }
 
@@ -1300,6 +1305,7 @@ export class NewProjectDialog {
         if (dialog.open) this.#draw()
       },
       fill: (plan) => this.#fillSuggested(plan),
+      open: () => dialog.open,
     })
     // Computer use is shown for the harnesses the chief and the staff run on, as they are picked.
     this.#form.elements.chiefHarness.addEventListener('change', () => this.#drawComputerUse())
@@ -1595,7 +1601,7 @@ export class NewProjectDialog {
         designer,
       })
     }
-    this.#suggest.filled(plan.fills)
+    this.#suggest.filled(this.#suggest.opening, plan.fills)
     // A refusal of the start goes with the change; a crowded slot's words follow the slot (`#draw`).
     if (!this.#crowdSaid) this.#say('')
     this.#draw()
@@ -2100,6 +2106,7 @@ export class ProjectSettingsDialog {
         if (dialog.open) this.#draw()
       },
       fill: (plan) => this.#fillSuggested(plan),
+      open: () => dialog.open,
     })
     this.#form.elements.memberCancel.addEventListener('click', () => {
       this.#member.reset(this.#missing)
@@ -2466,12 +2473,14 @@ export class ProjectSettingsDialog {
   async #fillSuggested(plan) {
     const project = this.#project
     const page = this.#page
-    this.#suggest.filling()
+    // A Fill is its opening's: it writes only while that opening is the one open.
+    const opening = this.#suggest.filling()
     this.#draw()
     await page.act(async () => {
       let filled = 0
       const refused = []
       for (const [at, make] of plan.makes.entries()) {
+        if (!this.#suggest.owns(opening)) break
         // Each write stands on the read that offered it: where the dialog's read of that harness
         // is no longer it, nothing more is written, and the slots left are said.
         if (!stillOffered(make, (kind) => this.#lists.readOf(harnessOf(kind)))) {
@@ -2501,7 +2510,9 @@ export class ProjectSettingsDialog {
           })
         }
       }
-      this.#suggest.filled(filled, refused)
+      this.#suggest.filled(opening, filled, refused)
+      // A dialog closed or opened again since says nothing of this fill: it shows what it reads.
+      if (!this.#suggest.owns(opening)) return
       page.note(
         refused.length === 0
           ? `Filled ${filled} ${filled === 1 ? 'slot' : 'slots'} from the suggested staff.`
