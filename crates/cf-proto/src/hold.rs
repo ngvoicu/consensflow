@@ -49,6 +49,15 @@ pub const BILLING_CODES: [&str; 4] = [
     "requires_more_credits",
 ];
 
+/// How a note says an account hold: the form's own words ([`HoldForm::words`]), and where the
+/// reason is no account's refusal (no form), "its account is unavailable". Made of literals only.
+pub fn account_words(form: Option<HoldForm>) -> String {
+    form.map_or_else(
+        || "its account is unavailable".to_owned(),
+        |form| form.words(),
+    )
+}
+
 /// An account hold's kind, status and code: each a literal of this file. **The fields are
 /// private and there is no other constructor than [`HoldForm::checked`]**: nothing outside this
 /// file can make a form whose value is not a literal of the lists (T-2353).

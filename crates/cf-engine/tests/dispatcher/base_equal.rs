@@ -46,13 +46,23 @@ fn quota_of(kind: &str, words: &str, at: String) -> Quota {
 
 const MASKED: &str = "<the note of an account hold>";
 
-/// The three notes of an account hold of `kind` with `words`, in the words they have when `said`
-/// is what the refusal was (the base's: the reader's whole reason; this build's: the closed form).
-fn account_notes(said: &str) -> [String; 3] {
+/// The three notes of an account hold as the base wrote them: the reader's whole reason, `said`,
+/// in the parenthesis of "its account is unavailable".
+fn base_account_notes(said: &str) -> [String; 3] {
     [
         format!("T-1 waits with @zeus-amber-pine: its account is unavailable ({said}), and nothing resets that; it goes on when the human says the account works again."),
         format!("@zeus-amber-pine's account is unavailable: {said}. Nothing is sent to it until you say it works again: press Try again now on @zeus once it does."),
         format!("waits with @zeus-amber-pine: its account is unavailable ({said}) until the human says it works"),
+    ]
+}
+
+/// The same three notes as this build writes them: the closed form's words, `said`, in place of
+/// "its account is unavailable" in the notes of the task, and after the colon in the person's.
+fn account_notes(said: &str) -> [String; 3] {
+    [
+        format!("T-1 waits with @zeus-amber-pine: {said}, and nothing resets that; it goes on when the human says the account works again."),
+        format!("@zeus-amber-pine's account is unavailable: {said}. Nothing is sent to it until you say it works again: press Try again now on @zeus once it does."),
+        format!("waits with @zeus-amber-pine: {said} until the human says it works"),
     ]
 }
 
@@ -157,7 +167,7 @@ fn a_hold_keeps_shows_and_tells_of_a_harness_s_words_what_the_base_did() {
         if kind == "login" || kind == "billing" {
             let reason = format!("its {kind} was refused: {}", words.trim());
             let form = cf_harness::records::hold_form(&reason).expect("an account's reason");
-            theirs = masked(&theirs, &account_notes(&reason));
+            theirs = masked(&theirs, &base_account_notes(&reason));
             mine = mine.map(|seen| masked(&seen, &account_notes(&form.words())));
         }
         if mine.as_ref() != Some(&theirs) {

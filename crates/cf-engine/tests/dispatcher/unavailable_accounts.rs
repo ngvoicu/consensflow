@@ -79,7 +79,7 @@ fn holds_the_task_with_its_window_for_no_reset_and_tells_the_requester_and_the_h
         .is_some_and(|until| until.starts_with("9999-")));
     assert_match(
         tiers.notes("chief").last().unwrap(),
-        r"^T-1 waits with @zeus-amber-pine: its account is unavailable \(its billing was refused\), and nothing resets that; it goes on when the human says the account works again\.$",
+        r"^T-1 waits with @zeus-amber-pine: its billing was refused, and nothing resets that; it goes on when the human says the account works again\.$",
     );
     // The first note of a hold is typed (RS-25), and T-1's line says the hold as well.
     assert_eq!(
@@ -89,7 +89,10 @@ fn holds_the_task_with_its_window_for_no_reset_and_tells_the_requester_and_the_h
     );
     assert_eq!(
         tiers.task(1).task.aside,
-        Some("waits with @zeus-amber-pine: its account is unavailable (its billing was refused) until the human says it works".to_owned())
+        Some(
+            "waits with @zeus-amber-pine: its billing was refused until the human says it works"
+                .to_owned()
+        )
     );
     let told = human_notes(&tiers);
     assert_eq!(told.len(), 1, "{told:?}");

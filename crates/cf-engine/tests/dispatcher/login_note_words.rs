@@ -126,22 +126,22 @@ fn a_task_held_from_its_retry_with_its_member_is_told_in_the_hold_s_own_words() 
         leaked.is_empty(),
         "the provider's words reached: {leaked:?}"
     );
-    for n in 1..=2 {
+    for (n, window) in [(1, &windows[0]), (2, &windows[1])] {
         let told: Vec<String> = t
             .notes("chief")
             .into_iter()
             .filter(|note| note.starts_with(&format!("T-{n} waits with @")))
             .collect();
         assert_eq!(told.len(), 1, "T-{n} is told once: {told:?}");
-        assert!(
-            told[0].contains(": its account is unavailable (its login was refused (401)), and nothing resets that; it goes on when the human says the account works again."),
-            "T-{n} is told in the hold's closed words: {}",
-            told[0]
+        assert_eq!(
+            told[0],
+            format!("T-{n} waits with @{window}: its login was refused (401), and nothing resets that; it goes on when the human says the account works again."),
+            "T-{n} is told in the hold's closed words, naming its own window"
         );
     }
     let aside = t.task(2).task.aside.unwrap();
     assert!(
-        aside.contains("its account is unavailable (its login was refused (401))"),
+        aside.contains("its login was refused (401)") && !aside.contains("unavailable"),
         "{aside}"
     );
 }

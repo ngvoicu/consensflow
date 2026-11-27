@@ -402,9 +402,9 @@ fn a_task_in_its_retry_hold_when_its_member_is_held_says_it_waits_for_the_login(
             task.held_until
         );
         assert!(
-            task.aside
-                .as_deref()
-                .is_some_and(|aside| aside.contains("its account is unavailable")),
+            task.aside.as_deref().is_some_and(
+                |aside| aside.contains("its login was refused (401, authentication_error)")
+            ),
             "T-{number}: {:?}",
             task.aside
         );

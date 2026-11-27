@@ -87,7 +87,7 @@ fn said_of(hold: Hold, session: &str) -> String {
     match hold {
         Hold::Quota => format!("waits with @{session}: out of quota until {UNTIL}"),
         Hold::Unavailable => format!(
-            "waits with @{session}: its account is unavailable (its login was refused (401, authentication_error)) until the human says it works"
+            "waits with @{session}: its login was refused (401, authentication_error) until the human says it works"
         ),
         Hold::Moved => format!(
             "waits with @{session}: its harness moved it from Opus to Sonnet, until the human says it may go on"
@@ -1772,42 +1772,47 @@ fn a_shown_note_read_in_the_inbox_is_no_role_read() {
     );
 }
 
-/// The note of an account hold as a build before T-2367's third round wrote it: the reader's whole
-/// reason in the parenthesis.
-fn old_form_note(task: i64, session: &str) -> String {
-    format!(
-        "T-{task} waits with @{session}: its account is unavailable (its login was refused: 401 authentication_error: token expired), and nothing resets that; it goes on when the human says the account works again."
-    )
+/// The notes of an account hold as the builds before wrote them: the reader's whole reason in
+/// the parenthesis of "its account is unavailable" (main's), and the closed form inside it (a
+/// branch's, never a release's).
+fn old_form_notes(task: i64, session: &str) -> [String; 2] {
+    [
+        format!("T-{task} waits with @{session}: its account is unavailable (its login was refused: 401 authentication_error: token expired), and nothing resets that; it goes on when the human says the account works again."),
+        format!("T-{task} waits with @{session}: its account is unavailable (its login was refused (401, authentication_error)), and nothing resets that; it goes on when the human says the account works again."),
+    ]
 }
 
 #[test]
 fn a_hold_note_an_older_build_wrote_is_still_told_to_go_on_and_is_the_same_hold_as_the_new_words() {
-    let mut w = world();
-    let (task, session) = with_zeus(&mut w);
-    w.hold(task);
-    let old = w
-        .ledger
-        .note(
-            w.project,
-            &NewNote {
-                from: None,
-                to: "chief".into(),
-                body: old_form_note(task, &session),
-                task: Some(task),
-            },
-        )
-        .expect("the older note, kept as it was");
-    assert_eq!(w.message(old.id).body, old_form_note(task, &session));
-    w.deliver(old.id);
-    // The same hold said again in this build's words is the same hold: shown, not typed again.
-    let again = note_of(&mut w, Hold::Unavailable, task, &session, UNTIL);
-    assert_eq!(again.state, "read", "{:?}", again.body);
-    // And the task going on corrects the older note's words as it does the new.
-    w.daemon_resumes(task);
-    w.went_on(task);
-    assert_eq!(
-        aside(&w, task).as_deref(),
-        Some("goes on: its account has quota again."),
-        "an older hold note is a hold note"
-    );
+    for older in 0..2 {
+        let mut w = world();
+        let (task, session) = with_zeus(&mut w);
+        w.hold(task);
+        let body = old_form_notes(task, &session)[older].clone();
+        let old = w
+            .ledger
+            .note(
+                w.project,
+                &NewNote {
+                    from: None,
+                    to: "chief".into(),
+                    body: body.clone(),
+                    task: Some(task),
+                },
+            )
+            .expect("the older note, kept as it was");
+        assert_eq!(w.message(old.id).body, body);
+        w.deliver(old.id);
+        // The same hold said again in this build's words is the same hold: shown, not typed again.
+        let again = note_of(&mut w, Hold::Unavailable, task, &session, UNTIL);
+        assert_eq!(again.state, "read", "form {older}: {:?}", again.body);
+        // And the task going on corrects the older note's words as it does the new.
+        w.daemon_resumes(task);
+        w.went_on(task);
+        assert_eq!(
+            aside(&w, task).as_deref(),
+            Some("goes on: its account has quota again."),
+            "form {older}: an older hold note is a hold note"
+        );
+    }
 }

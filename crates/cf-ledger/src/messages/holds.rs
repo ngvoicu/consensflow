@@ -24,7 +24,7 @@ use crate::model::LedgerError;
 use crate::queue::{send, Sent};
 use crate::store::Store;
 use crate::views::TaskRow;
-use cf_proto::hold::HoldForm;
+use cf_proto::hold::{account_words, HoldForm};
 
 /// How a hold note ends: the time before it is an expected reset, not a promise.
 const TAIL: &str = ", or sooner if its account has quota again; it goes on by itself.";
@@ -51,8 +51,10 @@ fn render_moved(number: i64, handle: &str, because: &str) -> String {
 /// for there is none. What it was is said from the hold's closed form alone, the form's own
 /// literals, never a word of the harness's: a note is typed into a window.
 pub(crate) fn render_unavailable(number: i64, handle: &str, form: Option<HoldForm>) -> String {
-    let what = form.map_or_else(String::new, |form| format!(" ({})", form.words()));
-    format!("T-{number} waits with @{handle}: its account is unavailable{what}{TAIL_UNAVAILABLE}")
+    format!(
+        "T-{number} waits with @{handle}: {}{TAIL_UNAVAILABLE}",
+        account_words(form)
+    )
 }
 
 /// The words of a hold note: T-`number` waits with `handle`, who is out of
@@ -428,20 +430,17 @@ mod tests {
         let login = HoldForm::checked("login", Some(401), Some("authentication_error"));
         let billing = HoldForm::checked("billing", Some(402), Some("credit_balance_too_low"));
         let bare = HoldForm::checked("login", None, None);
-        let at = "T-3 waits with @zeus: its account is unavailable";
+        let at = "T-3 waits with @zeus: ";
         let tail =
             ", and nothing resets that; it goes on when the human says the account works again.";
         for (form, said) in [
-            (
-                login,
-                " (its login was refused (401, authentication_error))",
-            ),
+            (login, "its login was refused (401, authentication_error)"),
             (
                 billing,
-                " (its billing was refused (402, credit_balance_too_low))",
+                "its billing was refused (402, credit_balance_too_low)",
             ),
-            (bare, " (its login was refused)"),
-            (None, ""),
+            (bare, "its login was refused"),
+            (None, "its account is unavailable"),
         ] {
             assert_eq!(
                 render_unavailable(3, "zeus", form),
@@ -451,10 +450,15 @@ mod tests {
     }
 
     #[test]
-    fn an_account_hold_note_of_an_older_build_is_known_for_what_it_is_whatever_its_parenthesis_says(
-    ) {
-        let older = "T-3 waits with @zeus: its account is unavailable (its login was refused: 401 {\"error\":\"x\"}), and nothing resets that; it goes on when the human says the account works again.";
-        for body in [older, &render_unavailable(3, "zeus", None)] {
+    fn an_account_hold_note_of_an_older_build_is_known_for_what_it_is_whatever_its_words_say() {
+        let tail =
+            ", and nothing resets that; it goes on when the human says the account works again.";
+        let raw = format!("T-3 waits with @zeus: its account is unavailable (its login was refused: 401 {{\"error\":\"x\"}}){tail}");
+        let nested = format!(
+            "T-3 waits with @zeus: its account is unavailable (its login was refused (401)){tail}"
+        );
+        let now = render_unavailable(3, "zeus", None);
+        for body in [&raw, &nested, &now] {
             assert!(is_hold_note(3, body), "{body}");
             assert!(
                 matches!(
@@ -470,6 +474,6 @@ mod tests {
                 .unwrap()
                 .ends_with("until the human says it works"));
         }
-        assert!(hold_of(3, older) == hold_of(3, &render_unavailable(3, "zeus", None)));
+        assert!(hold_of(3, &raw) == hold_of(3, &now) && hold_of(3, &nested) == hold_of(3, &now));
     }
 }

@@ -186,3 +186,13 @@ runs = ["login-ledger"]
 file = "crates/cf-ledger/src/messages/holds.rs"
 find = "    } else if rest.ends_with(TAIL_UNAVAILABLE) {"
 replace = "    } else if rest.ends_with(TAIL_UNAVAILABLE) && !rest.contains(\"its login was refused:\") {"
+
+[[plant]]
+name = "login retry: an older branch's nested hold note is another hold"
+meant = "a_hold_note_an_older_build_wrote_is_still_told_to_go_on_and_is_the_same_hold_as_the_new_words"
+runs = ["login-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/holds.rs"
+find = "    } else if rest.ends_with(TAIL_UNAVAILABLE) {"
+replace = "    } else if rest.ends_with(TAIL_UNAVAILABLE) && !rest.contains(\"its login was refused (\") {"
