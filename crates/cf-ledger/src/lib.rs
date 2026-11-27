@@ -70,8 +70,8 @@ pub use ledger::{
 };
 pub use meeting::{CHIEF_CUT, HANDOFF_TITLE, LEAD_HANDOFF_TITLE, SWITCH_ASKED};
 pub use messages::{
-    continuation, continuation_in, continuation_tasks, cut_turn, cut_turn_unquoted, is_busy_note,
-    is_told, sent_at_work, told_at_work, waiting_for_the_reopen, GivenUp, HandOver, NewNote,
+    continuation, continuation_in, continuation_tasks, cut_turn, cut_turn_unquoted,
+    gave_result_reason, is_busy_note, is_told, sent_at_work, told_at_work, waiting_for_the_reopen, GivenUp, HandOver, NewNote,
     NewQuestion, Read, MAY_STILL_RUN, MOVED_QUESTION, NOT_PROVEN_GONE, TURN_ON_OPEN_QUESTION,
     WITHDRAWN_AFTER_HANDED,
 };

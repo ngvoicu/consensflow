@@ -63,6 +63,11 @@ pub(crate) const DAEMON_READY_TIMEOUT: Duration = Duration::from_secs(120);
 
 mod connect;
 mod status;
+// The cargo a test starts is named in one file, which the crates that start one include by its
+// path (`tools/xtask/tests/cargo_in_tests.rs`).
+#[cfg(test)]
+#[path = "../../../crates/cf-process/src/nested_cargo.rs"]
+mod nested_cargo;
 
 #[cfg(all(test, windows))]
 use connect::daemon_stderr;
@@ -1685,7 +1690,8 @@ mod tests {
 
     /// The `cf` of this checkout, built here: the app's tests link no binary of the daemon's.
     fn real_cf() -> PathBuf {
-        let mut build = crate::testing::command(env!("CARGO"));
+        let mut build = super::nested_cargo::cargo();
+        cf_process::hold_only_the_streams(&mut build);
         build
             .args([
                 "build",

@@ -560,7 +560,8 @@ async fn the_humans_resume_opens_the_chiefs_window_with_the_environment_the_app_
             assert_eq!(
                 env["PATH"],
                 format!(
-                    "{}{delimiter}{}",
+                    "{}{delimiter}{}{delimiter}{}",
+                    crate::member_guard::folder(&root.path().join("consensflow")).display(),
                     bin.display(),
                     root.path().join("bin").display()
                 )

@@ -624,7 +624,7 @@ fn finished_task_takes_no_answer(
 }
 
 /// Why a question that its task's result closed was withdrawn (T-2197).
-pub(crate) fn gave_result_reason(number: i64) -> String {
+pub fn gave_result_reason(number: i64) -> String {
     format!("T-{number} gave its result with it unanswered")
 }
 

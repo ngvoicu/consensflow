@@ -541,11 +541,11 @@ type Answers = Box<dyn Fn(&str) -> Result<Value, crate::contract::HostError>>;
 /// A window in the normal mode, its host answering `says` to each look, and the clock `fakes`
 /// settled `ms` after the epoch before the readiness: what it was.
 struct Switching {
-    _dir: tempfile::TempDir,
     fakes: Fakes,
     window: Rc<DevinWindow>,
     says: Rc<RefCell<Value>>,
     host: AnsweringHost<Answers>,
+    _dir: tempfile::TempDir,
 }
 
 impl Switching {
@@ -564,11 +564,11 @@ impl Switching {
             })
         });
         Self {
-            _dir: dir,
             fakes,
             window,
             says,
             host: AnsweringHost::new(host),
+            _dir: dir,
         }
     }
 
