@@ -57,7 +57,7 @@ pub(super) enum Projected {
     /// What a command typed at Claude's prompt printed, written as the system's
     /// record (a `/clear`'s, a `/compact` that found nothing to compact), a
     /// child of the record with this uuid.
-    Output(Arc<str>),
+    Output(Box<Printed>),
     /// A boundary record that ends the turn of the answer before it.
     Boundary(Boundary),
     /// Claude Code's record that it compacted the conversation (`compact_boundary`), and the
@@ -192,6 +192,12 @@ pub(super) struct User {
     /// conversation: Claude Code's own words, which end the command's turn
     /// where they follow it.
     pub(super) output_of: Option<Arc<str>>,
+    /// The uuid of the record this one is a child of, where it is, of the main
+    /// conversation, what Claude Code holds for the model's next turn of a command it
+    /// answered by itself (`isMeta` true, `rowSource` `local`): `/context`'s report in
+    /// 2.1.332. It is a report only as a child of the system's `local_command` record
+    /// of that command (replay tells); it asks the model nothing, and begins no turn.
+    pub(super) report_of: Option<Arc<str>>,
     /// Where it is, of the main conversation, the bare `/compact` as it was
     /// typed or the words Claude Code writes before a command (a meta record):
     /// which, and the uuid of the record it is a child of. A compaction
@@ -611,6 +617,9 @@ fn user(record: &Value, session: &str) -> Projected {
         queued: record.get("promptSource").and_then(Value::as_str) == Some("queued"),
         summary: record.get("isCompactSummary") == Some(&Value::Bool(true)),
         output_of,
+        report_of: of_main_conversation(record, session)
+            .then(|| local_report_of(record))
+            .flatten(),
         compacting,
         notification: is_notification(record),
         transcript_only: record.get("queueTranscriptOnly") == Some(&Value::Bool(true)),
@@ -772,9 +781,12 @@ fn stopped(record: &Value, content: Option<&Value>) -> Option<(Option<Value>, Ar
 /// boundary record that says a turn that answered is over.
 fn system(record: &Value, session: &str) -> Projected {
     match record.get("subtype").and_then(Value::as_str) {
-        Some("local_command") => {
-            output(record, session).map_or(Projected::Other, Projected::Output)
-        }
+        Some("local_command") => Projected::Output(Box::new(Printed {
+            uuid: of_main_conversation(record, session)
+                .then(|| text_id(record.get("uuid")))
+                .flatten(),
+            ends: output(record, session),
+        })),
         // 2.1.263/265/266's root query finalizer emits a `turn_duration` only
         // after query completion, after stop hooks, and when not aborted;
         // candidate/tool/queue/hook guards establish readiness. The exact
@@ -809,6 +821,27 @@ fn boundary(record: &Value, agents: Option<usize>) -> Projected {
         uuid: text_id(record.get("uuid")),
         agents,
     })
+}
+
+/// A system record of a command typed at the prompt (`local_command`): its uuid, of the main
+/// conversation, so that the record held for the model's next turn can be tied to the
+/// command that wrote it, and the record it is the output of where it has that shape.
+#[derive(Debug, PartialEq)]
+pub(super) struct Printed {
+    pub(super) uuid: Option<Arc<str>>,
+    pub(super) ends: Option<Arc<str>>,
+}
+
+/// The parent of a user's record that Claude Code holds for the model's next turn of a command
+/// it answered by itself (`isMeta` true and `rowSource` `local`, 2.1.332): the report `/context`
+/// writes after its output. The same two marks are on the image-source companion of a prompt,
+/// whose parent is the user's own record, which the caller's check of the parent leaves out.
+/// Older Claude Code writes no `rowSource`: its records are read as before.
+fn local_report_of(record: &Value) -> Option<Arc<str>> {
+    (record.get("isMeta") == Some(&Value::Bool(true))
+        && record.get("rowSource").and_then(Value::as_str) == Some("local"))
+    .then(|| text_id(record.get("parentUuid")))
+    .flatten()
 }
 
 /// The uuid of the parent of a `local_command` record that has the shape of
