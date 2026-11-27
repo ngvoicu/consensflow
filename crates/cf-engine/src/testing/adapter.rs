@@ -169,6 +169,10 @@ pub struct FakeAgent {
     /// The commands its harness says it keeps running (`Window::kept_commands`): none
     /// unless a test says, and none where it says the harness could not tell.
     pub kept_commands: Option<Vec<String>>,
+    /// Its record says nothing of whether the turn is over (Codex's end with no proven
+    /// answer: `Settlement::Unknown`): otherwise a window not at rest reads in flight and one at
+    /// rest reads settled.
+    pub settlement_unknown: bool,
 }
 
 /// What a test makes `ready` answer, where it gives the adapter one.
@@ -278,6 +282,9 @@ pub struct FakeAdapter {
     /// Launches the test holds (`hold(adapter, 'prepare', ...)`): one let go
     /// fails with the reason, where the test gave one.
     pub prepare_holds: Holds<String>,
+    /// Whether a launch held and let go fails as production's steps do where the launch was
+    /// called off while it waited: by what [`cf_harness::launch_wanted`] says then.
+    pub honors_call_off: Cell<bool>,
     /// Looks the test holds: one let go fails with the reason, where the test
     /// gave one.
     pub observe_holds: Holds<String>,
@@ -448,6 +455,7 @@ impl FakeAdapter {
             one_login: Cell::new(false),
             ready_while_drawing: Cell::new(false),
             prepare_holds: Holds::default(),
+            honors_call_off: Cell::new(false),
             observe_holds: Holds::default(),
             start_holds: Holds::default(),
             ready_holds: Holds::default(),
@@ -548,6 +556,20 @@ impl FakeAdapter {
             })
             .unwrap_or_else(|| panic!("no window of {handle}"));
         change(&mut agents[at])
+    }
+
+    /// The latest window of `handle` (or of a session of its name), where it has had one.
+    pub fn try_agent(&self, handle: &str) -> Option<FakeAgent> {
+        let agents = self.agents.borrow();
+        agents
+            .iter()
+            .rfind(|agent| agent.handle == handle)
+            .or_else(|| {
+                agents
+                    .iter()
+                    .rfind(|agent| agent.handle.starts_with(&format!("{handle}-")))
+            })
+            .cloned()
     }
 
     /// The latest window of `handle`, as it is now.
@@ -1327,6 +1349,7 @@ impl Asked {
             used: None,
             unreadable: None,
             kept_commands: Some(Vec::new()),
+            settlement_unknown: false,
         };
         if let Some(message) = launch
             .message
@@ -1437,6 +1460,9 @@ impl Adapter for Asked {
         Box::pin(async move {
             if let Some(reason) = wrapped.before().await {
                 return Err(reason);
+            }
+            if self.fake.honors_call_off.get() && !cf_harness::launch_wanted() {
+                return Err(cf_harness::CALLED_OFF.to_owned());
             }
             let prepared = self.made(launch, asked, at).await;
             wrapped.after().await;

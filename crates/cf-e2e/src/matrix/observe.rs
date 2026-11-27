@@ -173,14 +173,19 @@ impl Snapshot {
 
     /// [`Snapshot::turns`], by seat: each participant's counted for the seat of its agent,
     /// the chief's for the chief's.
-    pub fn turns_by_seat(&self, seating: &Seating, asks: u32) -> BTreeMap<&'static str, u32> {
+    pub fn turns_by_seat(
+        &self,
+        seating: &Seating,
+        asks: u32,
+        joined: &dyn Fn(&str) -> Option<String>,
+    ) -> BTreeMap<&'static str, u32> {
         let mut by_seat: BTreeMap<&'static str, u32> = BTreeMap::new();
         for (handle, count) in self.turns(asks) {
             let role = if handle == "chief" {
                 Some(Role::Chief)
             } else {
                 self.agent_of(&handle)
-                    .and_then(|agent| seating.of_agent(&agent))
+                    .and_then(|member| seating.of_member(&member, joined))
                     .map(|seat| seat.role)
             };
             let name = role.map_or("unseated", Role::name);
@@ -521,7 +526,7 @@ mod tests {
         assert_eq!(snapshot.turns(0)["chief"], 2);
         assert_eq!(snapshot.total_turns(1), 6);
         assert_eq!(
-            snapshot.turns_by_seat(&Seating::stand_ins(), 1),
+            snapshot.turns_by_seat(&Seating::stand_ins(), 1, &|_| None),
             BTreeMap::from([("chief", 3), ("worker", 2), ("unseated", 1)])
         );
     }

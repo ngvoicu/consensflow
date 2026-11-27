@@ -176,6 +176,8 @@ mod standin_homes;
 mod start_suspended;
 #[path = "rig/stranger.rs"]
 mod stranger;
+#[path = "rig/turn_retries.rs"]
+mod turn_retries;
 #[path = "rig/waiting_notes.rs"]
 mod waiting_notes;
 #[path = "rig/wake_ups.rs"]

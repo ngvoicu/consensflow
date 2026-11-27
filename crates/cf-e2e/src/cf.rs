@@ -39,7 +39,9 @@ use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
-use crate::process::{own_var, Run};
+use crate::process::own_var;
+#[cfg(test)]
+use crate::process::Run;
 use crate::{checkout, files, Error, Result};
 
 /// The variable that names the folder `cf` and the pane host were built in for
@@ -124,6 +126,15 @@ pub fn engine_ask() -> Result<&'static Path> {
     )
 }
 
+/// The cargo a build is made with: the door's ([`crate::door::cargo::build`]), or a fake one a
+/// test of the builds starts in its place.
+enum Cargo {
+    Door,
+    #[cfg(test)]
+    #[cfg_attr(windows, allow(dead_code))] // Only the Unix tests start a fake cargo.
+    Fake(Box<Run>),
+}
+
 /// The folder the run built `cf` and the pane host in before it, where it says one.
 fn given() -> Option<(&'static str, PathBuf)> {
     given_in(BUILT)
@@ -153,7 +164,7 @@ fn built(
 ) -> Result<&'static Path> {
     built_by(
         cell,
-        Run::cargo(),
+        Cargo::Door,
         &checkout::root(),
         (package, bin, more),
         (before, builds_nothing()),
@@ -166,7 +177,7 @@ fn built(
 /// error, and `cargo` is never started.
 fn built_by(
     cell: &'static Built,
-    cargo: Run,
+    cargo: Cargo,
     root: &Path,
     (package, bin, more): (&str, &str, &[&str]),
     (before, builds_nothing): (Option<(&'static str, PathBuf)>, bool),
@@ -205,7 +216,7 @@ fn taken(variable: &str, folder: &Path, bin: &str) -> std::result::Result<PathBu
 /// machine take turns on a lock in the build folder, so a process that arrives
 /// while another builds waits for it, and finds the program made.
 fn made(
-    cargo: Run,
+    cargo: Cargo,
     root: &Path,
     package: &str,
     bin: &str,
@@ -222,7 +233,8 @@ fn made(
     if !made {
         build(cargo, root, package, bin, more)?;
         if let Some(run) = run {
-            files::write(&built_for, run).map_err(|cause| cause.to_string())?;
+            // The stamp of the build, in the folder the builds share: no folder of a run's.
+            std::fs::write(&built_for, run).map_err(|cause| cause.to_string())?;
         }
     }
     drop(lock);
@@ -232,7 +244,7 @@ fn made(
 /// The lock the builds in the folder `folder` (the one for `BUILDS`) take turns on, taken once
 /// no build is under way and held until the file it answers is dropped.
 fn taking_turns(folder: &Path) -> std::result::Result<File, String> {
-    files::make_dir(folder).map_err(|cause| cause.to_string())?;
+    std::fs::create_dir_all(folder).map_err(|cause| cause.to_string())?;
     let lock = folder.join("build.lock");
     File::options()
         .read(true)
@@ -265,28 +277,25 @@ fn exe(bin: &str) -> String {
 /// with `cargo` (the program that builds, given its first words if it has any),
 /// and the cargo words `more`, and answers where it is.
 fn build(
-    cargo: Run,
+    cargo: Cargo,
     root: &Path,
     package: &str,
     bin: &str,
     more: &[&str],
 ) -> std::result::Result<PathBuf, String> {
-    let ran = cargo
-        .args([
-            "build",
-            "--release",
-            "--locked",
-            "-p",
-            package,
-            "--bin",
-            bin,
-        ])
-        .args(more)
-        .cwd(root)
-        .inheriting_env()
-        .unlimited()
-        .run()
-        .map_err(|cause| cause.to_string())?;
+    let mut words = vec!["--release", "--locked", "-p", package, "--bin", bin];
+    words.extend(more);
+    let ran = match cargo {
+        Cargo::Door => crate::door::cargo::build(root, &words),
+        #[cfg(test)]
+        Cargo::Fake(fake) => (*fake)
+            .arg("build")
+            .args(&words)
+            .cwd(root)
+            .unlimited()
+            .run(),
+    }
+    .map_err(|cause| cause.to_string())?;
     if ran.code != Some(0) {
         return Err(format!("building {bin} did not succeed: {ran}"));
     }
@@ -309,8 +318,8 @@ mod tests {
     use crate::files;
 
     /// A shell script, in a folder of its own.
-    fn script(text: &str) -> (tempfile::TempDir, PathBuf) {
-        let folder = tempfile::tempdir().unwrap();
+    fn script(text: &str) -> (crate::door::Made, PathBuf) {
+        let folder = crate::door::made("cf-build-test-").unwrap();
         let file = folder.path().join("cargo.sh");
         files::write(&file, text).unwrap();
         (folder, file)
@@ -319,14 +328,14 @@ mod tests {
     /// A `cargo` that is a shell script: run by the shell, since a script that
     /// has just been written and is started while another thread starts a
     /// program of its own may be refused as a file still open for writing.
-    fn cargo(text: &str) -> (tempfile::TempDir, Run) {
+    fn cargo(text: &str) -> (crate::door::Made, Cargo) {
         let (folder, file) = script(text);
-        (folder, Run::new("/bin/sh").arg(file))
+        (folder, Cargo::Fake(Box::new(Run::new("/bin/sh").arg(file))))
     }
 
     #[test]
     fn the_build_is_asked_for_in_the_checkout_and_the_cf_it_leaves_is_the_answer() {
-        let root = tempfile::tempdir().unwrap();
+        let root = crate::door::made("cf-build-test-").unwrap();
         let (_folder, cargo) = cargo(
             "pwd > asked-in; echo \"$@\" > asked; \
              mkdir -p app/src-tauri/target/release && : > app/src-tauri/target/release/cf",
@@ -353,7 +362,7 @@ mod tests {
 
     #[test]
     fn the_pane_host_is_asked_for_as_a_binary_of_its_own_package() {
-        let root = tempfile::tempdir().unwrap();
+        let root = crate::door::made("cf-build-test-").unwrap();
         let (_folder, cargo) = cargo(
             "echo \"$@\" > asked; \
              mkdir -p app/src-tauri/target/release && : > app/src-tauri/target/release/consensflow-bridge",
@@ -376,7 +385,7 @@ mod tests {
 
     #[test]
     fn a_build_that_fails_says_what_cargo_said() {
-        let root = tempfile::tempdir().unwrap();
+        let root = crate::door::made("cf-build-test-").unwrap();
         let (_folder, cargo) = cargo("echo 'error: no such package' >&2; exit 101");
         let failed = build(cargo, root.path(), "cf", "cf", &[]).unwrap_err();
         assert!(
@@ -388,7 +397,7 @@ mod tests {
 
     #[test]
     fn a_build_that_leaves_no_binary_where_it_should_says_where() {
-        let root = tempfile::tempdir().unwrap();
+        let root = crate::door::made("cf-build-test-").unwrap();
         let (_folder, cargo) = cargo("exit 0");
         let failed = build(cargo, root.path(), "cf", "cf", &[]).unwrap_err();
         assert!(
@@ -400,9 +409,9 @@ mod tests {
 
     #[test]
     fn a_cargo_that_cannot_be_started_is_a_failed_build() {
-        let root = tempfile::tempdir().unwrap();
+        let root = crate::door::made("cf-build-test-").unwrap();
         let failed = build(
-            Run::new(root.path().join("no-cargo")),
+            Cargo::Fake(Box::new(Run::new(root.path().join("no-cargo")))),
             root.path(),
             "cf",
             "cf",
@@ -423,7 +432,7 @@ mod tests {
 
     #[test]
     fn the_programs_built_before_the_run_are_those_under_test_and_none_is_built() {
-        let folder = tempfile::tempdir().unwrap();
+        let folder = crate::door::made("cf-build-test-").unwrap();
         let named = |bin: &str| {
             folder
                 .path()
@@ -482,8 +491,8 @@ mod tests {
             OnceLock::new(),
             OnceLock::new(),
         ];
-        let root = tempfile::tempdir().unwrap();
-        let folder = tempfile::tempdir().unwrap();
+        let root = crate::door::made("cf-build-test-").unwrap();
+        let folder = crate::door::made("cf-build-test-").unwrap();
         for (_, bin, _) in LIVE_PROGRAMS {
             files::write(&folder.path().join(exe(bin)), "").unwrap();
         }
@@ -520,7 +529,7 @@ mod tests {
             OnceLock::new(),
             OnceLock::new(),
         ];
-        let root = tempfile::tempdir().unwrap();
+        let root = crate::door::made("cf-build-test-").unwrap();
         for (cell, (package, bin, more)) in CELLS.iter().zip(LIVE_PROGRAMS) {
             let (_own, cargo) = cargo(CARGO_THAT_MUST_NOT_RUN);
             let failed = built_by(cell, cargo, root.path(), (package, bin, more), (None, true))
@@ -556,7 +565,7 @@ mod tests {
 
     #[test]
     fn a_process_of_a_live_run_takes_every_program_from_the_folders_named_and_builds_none() {
-        let folder = tempfile::tempdir().unwrap();
+        let folder = crate::door::made("cf-build-test-").unwrap();
         for (_, bin, _) in LIVE_PROGRAMS {
             files::write(&folder.path().join(exe(bin)), "").unwrap();
         }
@@ -586,7 +595,7 @@ mod tests {
 
     #[test]
     fn a_process_of_a_live_run_without_the_folders_is_refused_a_build_by_name() {
-        let folder = tempfile::tempdir().unwrap();
+        let folder = crate::door::made("cf-build-test-").unwrap();
         let ran = crate::process::case_of(
             std::env::current_exe().unwrap(),
             "cf::tests::helper_says_every_program_of_a_live_case",
@@ -614,7 +623,7 @@ mod tests {
 
     #[test]
     fn a_program_the_run_says_it_built_and_did_not_is_an_error_and_is_not_built() {
-        let folder = tempfile::tempdir().unwrap();
+        let folder = crate::door::made("cf-build-test-").unwrap();
         let failed = taken(BUILT, folder.path(), "cf").unwrap_err();
         assert_eq!(
             failed,
@@ -644,7 +653,7 @@ mod tests {
 
     #[test]
     fn the_test_binary_the_live_tests_ask_is_built_with_the_feature_that_makes_it() {
-        let root = tempfile::tempdir().unwrap();
+        let root = crate::door::made("cf-build-test-").unwrap();
         let (_folder, cargo) = cargo(
             "echo \"$@\" > asked; \
              mkdir -p app/src-tauri/target/release && : > app/src-tauri/target/release/harness-ask",
@@ -703,7 +712,7 @@ mod tests {
     fn helper_asks_for_the_cf_of_a_run() {
         static CELL: Built = OnceLock::new();
         let root = PathBuf::from(own_var(ROOT).unwrap());
-        let cargo = Run::new("/bin/sh").arg(own_var(CARGO).unwrap());
+        let cargo = Cargo::Fake(Box::new(Run::new("/bin/sh").arg(own_var(CARGO).unwrap())));
         match built_by(&CELL, cargo, &root, ("cf", "cf", &[]), (None, false)) {
             Ok(path) => {
                 let there: std::result::Result<bool, String> = if own_var(RUN).is_some() {
@@ -777,7 +786,7 @@ mod tests {
     /// "could not start …/release/cf: No such file or directory" (2 of 12 runs).
     #[test]
     fn the_processes_of_a_run_build_a_program_once_and_none_has_it_taken_from_under_it() {
-        let root = tempfile::tempdir().unwrap();
+        let root = crate::door::made("cf-build-test-").unwrap();
         let (_folder, cargo) = script(&replacing("0.2"));
         let said = ask_for_the_cf(root.path(), &cargo, Some("run-a"), 8);
         let there = release(root.path()).join(exe("cf"));
@@ -793,7 +802,7 @@ mod tests {
 
     #[test]
     fn a_program_built_for_another_run_is_built_again_and_one_built_for_this_one_is_not() {
-        let root = tempfile::tempdir().unwrap();
+        let root = crate::door::made("cf-build-test-").unwrap();
         let (_folder, cargo) = script(&replacing("0.2"));
         ask_for_the_cf(root.path(), &cargo, Some("run-a"), 2);
         assert_eq!(calls(root.path()), 1);
@@ -805,7 +814,7 @@ mod tests {
 
     #[test]
     fn a_program_the_run_built_and_that_is_gone_is_built_again() {
-        let root = tempfile::tempdir().unwrap();
+        let root = crate::door::made("cf-build-test-").unwrap();
         let (_folder, cargo) = script(&replacing("0.2"));
         ask_for_the_cf(root.path(), &cargo, Some("run-a"), 1);
         std::fs::remove_file(release(root.path()).join(exe("cf"))).unwrap();
@@ -815,7 +824,7 @@ mod tests {
 
     #[test]
     fn processes_that_belong_to_no_run_each_build_their_own_and_write_down_nothing() {
-        let root = tempfile::tempdir().unwrap();
+        let root = crate::door::made("cf-build-test-").unwrap();
         // The program is gone for longer than the half second a process of a run waits
         // before it looks, so that a look made beside the builds of the others finds it
         // gone here on any machine, and a look that waits is not what makes this pass.
@@ -830,7 +839,7 @@ mod tests {
 
     #[test]
     fn a_build_that_did_not_succeed_is_not_written_down_as_made_for_the_run() {
-        let root = tempfile::tempdir().unwrap();
+        let root = crate::door::made("cf-build-test-").unwrap();
         let (_folder, failing) = script("echo built >> cargo-calls; exit 101");
         let said = ask_for_the_cf(root.path(), &failing, Some("run-a"), 1);
         assert!(

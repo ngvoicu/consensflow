@@ -170,12 +170,12 @@ pub fn smoke_copy(bundle: &Bundle, into: &Path) -> Result<Bundle> {
         .map_err(|source| Error::Build(format!("could not read {}: {source}", plist.display())))?;
     let smoke = cf_base::bundle::with_identity(&text, cf_base::bundle::SMOKE)
         .ok_or_else(|| Error::Build(format!("{} names no identity to replace", plist.display())))?;
-    std::fs::write(&plist, smoke)
+    cf_e2e::door::write(&plist, smoke)
         .map_err(|source| Error::Build(format!("could not write {}: {source}", plist.display())))?;
     // It goes by the smoke's name, and shows no icon of the product's.
     if let Some(icon) = cf_base::bundle::icon_of(&copy, &text) {
         if icon.exists() {
-            std::fs::remove_file(&icon).map_err(|source| {
+            cf_e2e::door::remove(&icon).map_err(|source| {
                 Error::Build(format!("could not take out {}: {source}", icon.display()))
             })?;
         }
@@ -277,8 +277,8 @@ mod tests {
     }
 
     /// A bundle with everything it needs to be run, its program named `app`.
-    fn bundle() -> (tempfile::TempDir, PathBuf) {
-        let root = tempfile::tempdir().unwrap();
+    fn bundle() -> (cf_e2e::door::Made, PathBuf) {
+        let root = cf_e2e::door::made("t-").unwrap();
         let app = root.path().join("ConsensFlow Candidate.app");
         files::write(&app.join("Contents").join("Info.plist"), plist("app")).unwrap();
         files::write(&app.join("Contents").join("MacOS").join("app"), "").unwrap();
@@ -319,7 +319,7 @@ mod tests {
 
     #[test]
     fn a_bundle_that_is_not_there_or_cannot_be_run_says_what_is_missing_and_what_builds_it() {
-        let root = tempfile::tempdir().unwrap();
+        let root = cf_e2e::door::made("t-").unwrap();
         let missing = root.path().join("ConsensFlow.app");
         let said = locate(&missing).unwrap_err().to_string();
         assert_eq!(
@@ -331,7 +331,7 @@ mod tests {
         );
 
         let (_root, app) = bundle();
-        std::fs::remove_file(cf_of(&app)).unwrap();
+        cf_e2e::door::remove(cf_of(&app)).unwrap();
         let said = locate(&app).unwrap_err().to_string();
         assert!(said.contains("has no cf for a window to run"), "{said}");
         assert!(said.contains(&cf_of(&app).display().to_string()), "{said}");
@@ -341,7 +341,7 @@ mod tests {
         );
 
         let (_root, app) = bundle();
-        std::fs::remove_file(app.join("Contents").join("Info.plist")).unwrap();
+        cf_e2e::door::remove(app.join("Contents").join("Info.plist")).unwrap();
         let said = locate(&app).unwrap_err().to_string();
         assert!(said.contains("has no readable Info.plist"), "{said}");
     }
@@ -411,13 +411,13 @@ mod tests {
     /// the copy is whole, sealed, and the bundle is left as it was.
     #[test]
     fn the_smoke_starts_a_sealed_copy_of_its_own_identity_and_leaves_the_bundle_as_it_was() {
-        let root = tempfile::tempdir().unwrap();
+        let root = cf_e2e::door::made("t-").unwrap();
         let app = root.path().join("built").join("ConsensFlow.app");
         let program = app.join("Contents").join("MacOS").join("app");
-        std::fs::create_dir_all(program.parent().unwrap()).unwrap();
-        std::fs::copy("/bin/echo", &program).unwrap();
-        std::fs::create_dir_all(cf_of(&app).parent().unwrap()).unwrap();
-        std::fs::copy("/bin/echo", cf_of(&app)).unwrap();
+        cf_e2e::door::make_dir(program.parent().unwrap()).unwrap();
+        cf_e2e::door::copy_keeping_mode("/bin/echo", &program).unwrap();
+        cf_e2e::door::make_dir(cf_of(&app).parent().unwrap()).unwrap();
+        cf_e2e::door::copy_keeping_mode("/bin/echo", cf_of(&app)).unwrap();
         let release = format!(
             "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<plist version=\"1.0\"><dict>\
              <key>CFBundleExecutable</key><string>app</string>\
@@ -449,7 +449,7 @@ mod tests {
         assert!(cf_base::bundle::startable_by_a_test(&app).is_err());
 
         let into = root.path().join("machine");
-        std::fs::create_dir_all(&into).unwrap();
+        cf_e2e::door::make_dir(&into).unwrap();
         let copy = smoke_copy(&built, &into).unwrap();
         // At the path with no link in it: Tauri finds no resources of an app started through one
         // (macOS's temporary folder is under /var, a link to /private/var).

@@ -53,6 +53,20 @@ async fn two_workers_with_a_look_each(rig: &mut Rig) -> i64 {
     project.id
 }
 
+/// Lets the host go on, a turn of real time between the rounds, until hera's delivery is
+/// confirmed: a look's end is made on a thread of its own, so a slow machine has it a few
+/// rounds after the pass ended (hosted Windows: `queued` was read where `working` was asserted).
+/// Never more than ten seconds.
+async fn until_hera_works(rig: &mut Rig, project: i64) {
+    for _ in 0..400 {
+        if rig.task_state(project, 2) == "working" {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(25));
+        rig.quiet().await;
+    }
+}
+
 /// What the engine's two looks end in, in the order the kit ran them apart.
 fn assert_ran_apart(rig: &Rig, project: i64) {
     assert_eq!(
@@ -102,6 +116,7 @@ async fn two_looks_whose_timers_elapse_together_are_two_callbacks_in_the_order_t
         tokio::time::advance(Duration::from_millis(20)).await;
         rig.serve_until(|| passing.ended()).await;
         rig.quiet().await;
+        until_hera_works(&mut rig, project).await;
         assert_ran_apart(&rig, project);
     })
     .await;
@@ -148,6 +163,7 @@ async fn two_looks_the_records_answer_together_are_two_callbacks_in_the_order_th
         standing.answer(2);
         rig.serve_until(|| passing.ended()).await;
         rig.quiet().await;
+        until_hera_works(&mut rig, project).await;
         assert_ran_apart(&rig, project);
     })
     .await;
@@ -178,6 +194,7 @@ async fn two_looks_answered_before_the_executors_first_poll_of_the_pass_are_two_
         rig.pieces.spawn.drain();
         rig.serve_until(|| passing.ended()).await;
         rig.quiet().await;
+        until_hera_works(&mut rig, project).await;
         assert_ran_apart(&rig, project);
     })
     .await;

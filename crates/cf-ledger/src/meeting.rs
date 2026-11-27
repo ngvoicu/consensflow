@@ -94,6 +94,25 @@ pub(crate) fn held_by_meeting(alias: &str) -> String {
     )
 }
 
+/// Whether message `id` is kept from its recipient's `cf` now by a hold the daemon
+/// tells it of (`Waits`): the project's meeting holds it (the condition of
+/// [`held_by_meeting`]), or the project is closed and its hand-over has not begun at
+/// the window (still queued, or begun in the ledger and not let go by the transport):
+/// the one decision transport makes ([`crate::messages::handed_over_condition`]).
+pub(crate) fn is_held(store: &Store, id: i64) -> Result<bool, LedgerError> {
+    Ok(store
+        .db
+        .prepare(&format!(
+            "SELECT 1 FROM message m WHERE m.id = ?1 AND ({}
+               OR (m.state IN ('queued', 'delivering') AND NOT {}
+                   AND EXISTS (SELECT 1 FROM project closed
+                       WHERE closed.id = m.project_id AND closed.state != 'open')))",
+            held_by_meeting("m"),
+            crate::messages::handed_over_condition("m")
+        ))?
+        .exists([id])?)
+}
+
 /// The messages the project's meeting holds, in the order they will go: a
 /// member's question first, then the oldest. None where no meeting is on.
 pub(crate) fn held(store: &Store, project_id: i64) -> Result<Vec<MessageView>, LedgerError> {

@@ -59,7 +59,7 @@ fn log_screen(log: &Log, label: &str, lines: &[String], added: &Path) {
 }
 
 fn pane(rig: &Rig, id: &str, cwd: &Path, argv: &[String]) -> Result<()> {
-    let answer = rig.host("pane.open", json!({"id": id, "generation": 1, "cwd": cwd, "argv": argv, "env": {}, "size": {"rows": 40, "cols": 120}}))?;
+    let answer = rig.open_pane(json!({"id": id, "generation": 1, "cwd": cwd, "argv": argv, "env": {}, "size": {"rows": 40, "cols": 120}}))?;
     if answer["ok"] == true {
         Ok(())
     } else {

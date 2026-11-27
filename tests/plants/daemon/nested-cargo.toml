@@ -77,9 +77,9 @@ meant = "the_cargo_a_test_starts_is_without_what_cargo_gave_the_test_and_with_th
 runs = ["nested-cargo-rig"]
 
 [[plant.edit]]
-file = "crates/cf-e2e/src/process.rs"
-find = "                run = run.without(name);"
-replace = "                drop(name);"
+file = "crates/cf-e2e/src/door/cargo.rs"
+find = '''                crate::process::is_machine_variable(name) || is_toolchain_variable(name)'''
+replace = '''                crate::process::is_machine_variable(name) || is_toolchain_variable(name) || name.starts_with("CARGO_")'''
 
 [[plant]]
 name = "nested cargo: a program told to do without a variable is given it"
@@ -88,16 +88,12 @@ runs = ["nested-cargo-rig"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/process.rs"
-find = '''
-        for name in &self.removed {
-            command.env_remove(name);
-        }
-'''
-replace = '''
-        for name in &self.removed {
+find = '''        for name in &self.removed {
+            env.retain(|(held, _)| !same_name(held, name, windows));
+        }'''
+replace = '''        for name in &self.removed {
             let _ = name;
-        }
-'''
+        }'''
 
 [[plant]]
 name = "nested cargo: the environment of the release tool's probes keeps the variables cargo gave the test"

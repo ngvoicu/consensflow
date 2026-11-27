@@ -28,7 +28,6 @@ mod path;
 mod tests;
 mod wrapper;
 
-use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -38,14 +37,16 @@ use super::isolation::{lasting, Isolation};
 use super::launcher::Guard;
 use super::login::Login;
 use super::PLANNED;
+use crate::door::source::{Account, Purpose, Source as Owned};
 use crate::process::{own_var, Run};
 use crate::rig::{ClaudeConfig, Config, HarnessHome};
-use crate::{checkout, files, Error, Result};
+use crate::{checkout, Error, Result};
 
 pub(crate) use path::find_muse_install;
 pub use path::{command, working_command};
 pub use wrapper::{
-    isolated_claude, shimmed_claude, shimmed_claude_with_servers, windows_wrapper, ISOLATION,
+    isolated_claude, shimmed_claude, shimmed_claude_for, shimmed_claude_with_servers,
+    windows_wrapper, ISOLATION,
 };
 
 /// What the `.cmd` of a command a window opens on says on Windows, which opens a
@@ -105,15 +106,22 @@ impl Harness {
     /// there says the machine has been set up for it. Codex's home is its own
     /// folder, which is all there is to look for. Devin's are the places of the
     /// XDG layout; on Windows it keeps its login elsewhere ([`login_places`]).
-    const fn login_marks(self) -> &'static [&'static str] {
+    fn login_marks(self) -> Vec<String> {
         match self {
-            Self::Claude => &[".claude.json", ".claude"],
-            Self::Pi => &[".pi"],
-            Self::Devin => &[".config/devin", ".local/share/devin"],
-            Self::Codex => &[""],
-            // Muse keeps its login's metadata in its config folder and the secret in the
-            // system's keychain, which the run's windows reach by the user's name.
-            Self::Muse => &[".config/muse"],
+            Self::Codex => vec![String::new()],
+            harness => super::stores::login_marks(harness.store()),
+        }
+    }
+
+    /// Whose its stores are, in the table of every store ([`super::stores`]).
+    pub const fn store(self) -> super::stores::Whose {
+        use super::stores::Whose;
+        match self {
+            Self::Claude => Whose::Claude,
+            Self::Pi => Whose::Pi,
+            Self::Devin => Whose::Devin,
+            Self::Codex => Whose::Codex,
+            Self::Muse => Whose::Muse,
         }
     }
 
@@ -127,6 +135,51 @@ impl Harness {
             Self::Muse => "log in with `muse login`",
         }
     }
+}
+
+/// What a version read of an installed CLI is given: the machine's search path and system
+/// variables as `lookup` has them, and the kit's own folders (`scratch`) for every variable that
+/// says where a home, a login or a setting is, `CLAUDE_CONFIG_DIR` being `config` where a run has
+/// one of its own. Never the machine's `HOME`, `APPDATA`, a harness's home or the XDG folders.
+fn probe_vars(
+    lookup: &dyn Fn(&str) -> Option<String>,
+    scratch: &Path,
+    config: Option<&Path>,
+) -> Vec<(String, String)> {
+    let mut vars: Vec<(String, String)> = [
+        "PATH",
+        "PATHEXT",
+        "SystemRoot",
+        "WINDIR",
+        "ComSpec",
+        "SYSTEMDRIVE",
+        "LANG",
+        "USER",
+        "LOGNAME",
+        "USERNAME",
+        "TEMP",
+        "TMP",
+        "TMPDIR",
+    ]
+    .into_iter()
+    .filter_map(|name| Some((name.to_owned(), lookup(name)?)))
+    .collect();
+    let home = scratch.join("home");
+    let text = |path: &Path| path.to_string_lossy().into_owned();
+    // Every variable a program finds a home by, below the kit's: the same list a stand-in test
+    // process and the Admin daemon are given, so that no variable of it is the machine's
+    // (`CFFIXED_USER_HOME` and the Windows profile's two halves included).
+    for (name, value) in crate::standin_process::home_vars(&home) {
+        if name != "CLAUDE_CONFIG_DIR" {
+            vars.push((name.to_owned(), text(&value)));
+        }
+    }
+    vars.push(("XDG_RUNTIME_DIR".to_owned(), text(&home.join(".run"))));
+    vars.push((
+        "CLAUDE_CONFIG_DIR".to_owned(),
+        text(&config.map_or_else(|| home.join(".claude"), Path::to_path_buf)),
+    ));
+    vars
 }
 
 /// A harness installed on this machine, as its windows run it: its command,
@@ -202,7 +255,7 @@ impl Installed {
     /// `folder` spells it ([`Isolation::made_in`]), for a run that takes `planned`.
     pub fn with_homes_in(mut self, folder: &Path, planned: Duration) -> Result<Self> {
         if self.isolation.is_some() {
-            self.isolation = Isolation::of_machine_lasting(self.harness, &self.home, planned)?
+            self.isolation = Isolation::of_machine_lasting(self.harness, self.owner(), planned)?
                 .map(|isolation| Arc::new(isolation.made_in(folder)));
         }
         Ok(self)
@@ -216,7 +269,16 @@ impl Installed {
     /// program that home itself.
     pub fn home_outside_a_rig(&self) -> Result<Vec<(String, String)>> {
         match &self.isolation {
-            Some(isolation) => isolation.vars(),
+            Some(isolation) => {
+                let vars = isolation.standalone_vars()?;
+                if vars.is_empty() {
+                    return Err(Error::Daemon(format!(
+                        "{}'s isolation names no variable of the run's own: a program of it outside a rig would run on the caller's home",
+                        self.harness.name()
+                    )));
+                }
+                Ok(vars)
+            }
             None => Err(Error::Daemon(format!(
                 "{} has no home of the run's own to start a program of it on outside a rig",
                 self.harness.name()
@@ -237,7 +299,15 @@ impl Installed {
             ));
         }
         if let Some(isolation) = &self.isolation {
-            vars.extend(isolation.vars()?);
+            vars.extend(isolation.standalone_vars()?);
+        }
+        // An empty list reads as "nothing to set", and a program started on it runs on the
+        // person's own home: refused, for every harness and both platforms.
+        if vars.is_empty() {
+            return Err(Error::Daemon(format!(
+                "{} has no variables that isolate it (its isolation is the rig's own launcher, or none): a read of its own program outside a rig would run on the person's own home; use the kit's rig or a copied home",
+                self.harness.name()
+            )));
         }
         Ok(vars)
     }
@@ -275,9 +345,15 @@ impl Installed {
         &self.command
     }
 
-    /// The home its login is read from.
+    /// The home its login is read from, as a name: what is read of it is read as a source.
     pub fn home(&self) -> &Path {
         &self.home
+    }
+
+    /// The home its login is read from, as the owner's files are read: a source, for the
+    /// copies and the guards the run makes of it.
+    pub fn owner(&self) -> Owned {
+        Account::this().named(&self.home, Purpose::Guard)
     }
 
     /// The version it says it is, as its first line says it; `unknown` when it
@@ -292,21 +368,42 @@ impl Installed {
     }
 
     fn version_with_config(&self, config: Option<&Path>) -> String {
+        // Muse's version is the file beside its launcher, as the product reads it: no Muse is
+        // started for it, for a start outside its file sandbox reaches the owner's stores
+        // (T-1997 finding 4).
+        if self.harness == Harness::Muse {
+            return Account::this()
+                .program(&self.command, Purpose::Guard)
+                .parent()
+                .and_then(|folder| folder.join(".muse-version").read_to_string().ok())
+                .map(|said| said.trim().to_owned())
+                .filter(|said| !said.is_empty())
+                .unwrap_or_else(|| "unknown".to_owned());
+        }
         let word = if self.harness == Harness::Devin {
             "version"
         } else {
             "--version"
         };
-        // Keep the ordinary probe's environment, but give Claude parity its own config.
-        // Launchers that update themselves (Muse's, hourly) are told not to.
-        let mut probe = Run::new(&self.command).arg(word).inheriting_env().vars(
-            super::launcher::updates_off_of(self.harness)
-                .iter()
-                .copied(),
-        );
-        if let Some(config) = config {
-            probe = probe.var("CLAUDE_CONFIG_DIR", config);
-        }
+        // The program is asked on the kit's own folders, never the machine's: a version read of
+        // an installed CLI may read or write its settings and its home (T-1957). The machine's
+        // search path and system variables are all it is given of the machine.
+        let scratch = crate::door::made("consensflow-live-version-").ok();
+        let Some(scratch) = scratch else {
+            return "unknown".to_owned();
+        };
+        let mut probe = Run::harness(self.harness.name(), &self.command)
+            .arg(word)
+            .vars(
+                probe_vars(&own_var, scratch.path(), config)
+                    .into_iter()
+                    .chain(
+                        super::launcher::updates_off_of(self.harness)
+                            .iter()
+                            .map(|(name, value)| ((*name).to_owned(), (*value).to_owned())),
+                    ),
+            );
+        let _ = &mut probe;
         let ran = probe.run().ok().filter(|ran| ran.code == Some(0));
         let line = ran
             .as_ref()
@@ -332,49 +429,18 @@ impl Installed {
         folders
     }
 
-    /// The variables that make its windows read the machine's login, where the
-    /// rig would have them read its own home's: `machine` says what a variable
-    /// is on this machine.
-    fn login(&self, machine: &dyn Fn(&str) -> Option<String>) -> Vec<(String, String)> {
-        let home = self.home.to_string_lossy().into_owned();
-        // A harness on a home of the run's own finds its login and config by the variables of
-        // that home, which the rig sets last ([`Installed::isolation`]): the person's home is
-        // given it all the same, as the place its project folders are (`~/.consensflow-candidate/
-        // live/…`), and for nothing it reads its login by. (Not a home of the rig's: Devin's
-        // window, opened in a folder below one, which macOS spells through the `/var` link of its
-        // temporary folder, shows no answer, 2026-10-27.)
-        // The person's home is the isolation's, not the folder the login is read from: Codex's
-        // is `~/.codex`, and a Codex window given that for its HOME had its project folders made
-        // in the owner's Codex folder (`~/.codex/.consensflow-candidate/live/…`, T-972).
-        if let Some(isolation) = &self.isolation {
-            let person = isolation.owner_home().to_string_lossy().into_owned();
-            let mut vars = vec![("HOME".to_owned(), person.clone())];
-            if cfg!(windows) {
-                vars.push(("USERPROFILE".to_owned(), person));
-            }
-            return vars;
+    /// The person's home, where the project folders of a window of this harness are made below:
+    /// a field of the rig ([`crate::rig::Config::project_home`]) and in no environment. The
+    /// window's own `HOME`, `USERPROFILE`, XDG folders and harness folder are the run's (the
+    /// rig's private home, and the isolation the rig sets last, [`Installed::isolation`]): a
+    /// home-relative lookup of a harness, or of a program it starts, never reaches the person's
+    /// `.claude.json`, `.codex`, `.config`, Keychain files or login (K3 review T-1978, 2; T-2000
+    /// finding 1: `CF_KIT_PROJECT_HOME` was in every window's environment).
+    fn project_home(&self) -> PathBuf {
+        match &self.isolation {
+            Some(isolation) => PathBuf::from(isolation.owner_home().to_argument()),
+            None => self.home.clone(),
         }
-        if self.harness == Harness::Codex {
-            return vec![("CODEX_HOME".to_owned(), home)];
-        }
-        let mut vars = vec![("HOME".to_owned(), home.clone())];
-        if cfg!(windows) {
-            vars.push(("USERPROFILE".to_owned(), home.clone()));
-        }
-        // The rig puts the config folder below its own home: where the machine
-        // keeps it, or where the XDG layout does, is where these read theirs.
-        let config = machine("XDG_CONFIG_HOME")
-            .filter(|folder| !folder.is_empty())
-            .unwrap_or_else(|| self.home.join(".config").to_string_lossy().into_owned());
-        vars.push(("XDG_CONFIG_HOME".to_owned(), config));
-        // The others default below the home, which is the machine's now; one
-        // the machine names is its own.
-        for name in ["XDG_DATA_HOME", "XDG_STATE_HOME", "XDG_CACHE_HOME"] {
-            if let Some(folder) = machine(name).filter(|folder| !folder.is_empty()) {
-                vars.push((name.to_owned(), folder));
-            }
-        }
-        vars
     }
 
     /// A rig whose windows run the stand-in `stand_in` for Claude and find this
@@ -389,9 +455,7 @@ impl Installed {
 /// the command interpreter, which the rig and `process` pass): the folders the
 /// user's settings and the programs are in, and what Node describes the machine
 /// by. Devin keeps its settings and sessions under `APPDATA`.
-const WINDOWS: [&str; 9] = [
-    "APPDATA",
-    "LOCALAPPDATA",
+const WINDOWS: [&str; 7] = [
     "ProgramData",
     "ProgramFiles",
     "ProgramFiles(x86)",
@@ -461,21 +525,24 @@ pub fn live_root(home: &Path) -> PathBuf {
 /// It writes only in a folder this run made, and never through a link at the file: the owner's
 /// own config, a folder another run made and one a person made are refused, and so is a
 /// `.claude.json` that is a link.
-pub fn seed_claude_trust(config: &Path, home: &Path) -> Result {
-    seed_claude_trust_checked(config, home, true)
+pub fn seed_claude_trust(config: &Path, home: impl Into<Owned>) -> Result {
+    seed_claude_trust_checked(config, &home.into(), true)
 }
 
 /// Seed a login-only parity config without looking up the owner's Claude folder.
-pub(super) fn seed_claude_trust_login_only(config: &Path, home: &Path) -> Result {
-    seed_claude_trust_checked(config, home, false)
+pub(super) fn seed_claude_trust_login_only(config: &Path, home: impl Into<Owned>) -> Result {
+    seed_claude_trust_checked(config, &home.into(), false)
 }
 
-fn seed_claude_trust_checked(config: &Path, home: &Path, check_owner: bool) -> Result {
-    let real = |path: &Path| fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+fn seed_claude_trust_checked(config: &Path, home: &Owned, check_owner: bool) -> Result {
+    let real =
+        |path: &Path| crate::door::reads::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
     let config = real(config);
     if check_owner {
-        let owners = real(&home.join(".claude"));
-        if config == real(home) || config.starts_with(&owners) {
+        let owners = home.join(".claude");
+        let owners = owners.real().unwrap_or(owners);
+        let home_real = home.real().unwrap_or_else(|_| home.clone());
+        if home_real.is_path(&config) || owners.holds(&config) {
             return Err(Error::Daemon(format!(
                 "{} is the owner's own Claude config, which a run never writes",
                 config.display()
@@ -489,13 +556,13 @@ fn seed_claude_trust_checked(config: &Path, home: &Path, check_owner: bool) -> R
         )));
     }
     let file = config.join(".claude.json");
-    if fs::symlink_metadata(&file).is_ok_and(|found| found.file_type().is_symlink()) {
+    if crate::door::reads::is_symlink(&file) {
         return Err(Error::Daemon(format!(
             "{} is a link, which a write would go through",
             file.display()
         )));
     }
-    let mut held: serde_json::Value = files::read_string(&file)
+    let mut held: serde_json::Value = crate::door::reads::read_to_string(&file)
         .ok()
         .and_then(|text| serde_json::from_str(&text).ok())
         .filter(serde_json::Value::is_object)
@@ -503,7 +570,7 @@ fn seed_claude_trust_checked(config: &Path, home: &Path, check_owner: bool) -> R
     if !held["projects"].is_object() {
         held["projects"] = serde_json::json!({});
     }
-    let root = claude_project_key(&live_root(home).to_string_lossy());
+    let root = claude_project_key(&live_root(Path::new(&home.to_argument())).to_string_lossy());
     held["projects"][&root]["hasTrustDialogAccepted"] = serde_json::Value::Bool(true);
     crate::door::write(&file, held.to_string())
 }
@@ -569,15 +636,13 @@ fn rig_keeping_claude_in(
                 config = config.also_on_path(folder);
             }
         }
-        for (name, value) in install.login(&machine) {
-            config = config.var(&name, value);
-        }
+        config = config.project_home(install.project_home());
         if let Some(isolation) = install.isolation() {
             config = config.isolated(Arc::clone(isolation) as Arc<dyn HarnessHome>);
         }
         // The owner's launcher of every harness the rig seats is looked at when the rig starts
         // and when it ends, whatever home the harness runs on (T-1082).
-        let guard = Guard::new(install.harness, &install.command, &install.home);
+        let guard = Guard::new(install.harness, &install.command, install.owner());
         let guard = if install
             .claude_config()
             .is_some_and(|config| config.keeps_its_findings())
@@ -664,6 +729,18 @@ pub fn rig_with_stand_ins(
     folder: &Path,
     stand_in: &Path,
 ) -> Result<Config> {
+    rig_with_stand_in_seats(installs, folder, stand_in, &[])
+}
+
+/// [`rig_with_stand_ins`], where the windows of the stand-in seats `names` (each seat's model is
+/// its own name) are the stand-in's too: the run says which seats are stand-ins, and the shim
+/// routes no other (B27).
+pub fn rig_with_stand_in_seats(
+    installs: &[Installed],
+    folder: &Path,
+    stand_in: &Path,
+    names: &[String],
+) -> Result<Config> {
     let claude = installs
         .iter()
         .find(|install| install.harness == Harness::Claude)
@@ -675,7 +752,7 @@ pub fn rig_with_stand_ins(
                 "a rig whose Claude windows are the real Claude Code's and the stand-in's needs Claude Code installed",
             ),
         })?;
-    let shim = shimmed_claude(folder, claude.command(), stand_in)?;
+    let shim = shimmed_claude_for(folder, claude.command(), stand_in, names)?;
     Ok(rig(installs, shim))
 }
 
@@ -758,7 +835,7 @@ fn with_homes(mut installed: Installed, planned: Duration, watch_owner: bool) ->
             installed = installed.with_claude_config(Arc::new(login));
         }
     }
-    if let Some(isolation) = Isolation::of_machine_lasting(harness, installed.home(), planned)? {
+    if let Some(isolation) = Isolation::of_machine_lasting(harness, installed.owner(), planned)? {
         installed = installed.with_isolation(Arc::new(isolation));
     }
     Ok(installed)
@@ -805,9 +882,34 @@ pub fn seated(
     named: &[Harness],
     lacks: impl Fn(Harness) -> Option<String>,
 ) -> std::result::Result<(Vec<Harness>, Vec<String>), String> {
+    seated_without(named, &[], lacks)
+}
+
+/// [`seated`], where the run was also told `--without` the harnesses `without` (a rotating run
+/// over every harness, one of which is not there to run: CLN-22): each is left out of every seat
+/// and said, whether or not the machine has it; one both named and left out is the error.
+pub fn seated_without(
+    named: &[Harness],
+    without: &[Harness],
+    lacks: impl Fn(Harness) -> Option<String>,
+) -> std::result::Result<(Vec<Harness>, Vec<String>), String> {
+    if let Some(both) = named.iter().find(|harness| without.contains(harness)) {
+        return Err(format!(
+            "{} was both asked for and left out with --without",
+            both.name()
+        ));
+    }
     let mut seated = Vec::new();
     let mut left_out = Vec::new();
     for harness in Harness::ALL {
+        if without.contains(&harness) {
+            left_out.push(format!(
+                "{} is left out of every seat: the run was told --without {}",
+                harness.name(),
+                harness.name()
+            ));
+            continue;
+        }
         match lacks(harness) {
             None => seated.push(harness),
             Some(why) if named.contains(&harness) => {
@@ -823,6 +925,25 @@ pub fn seated(
         }
     }
     Ok((seated, left_out))
+}
+
+/// The harnesses the run was told to leave out (`--without pi,muse`): none where it named none; a
+/// word that names no harness is the error.
+pub fn without() -> std::result::Result<Vec<Harness>, String> {
+    super::list("without")
+        .iter()
+        .map(|word| {
+            Harness::ALL
+                .into_iter()
+                .find(|harness| harness.name() == word)
+                .ok_or_else(|| {
+                    format!(
+                        "--without names no harness that a rotation seats: {word} (one of {})",
+                        Harness::ALL.map(Harness::name).join(", ")
+                    )
+                })
+        })
+        .collect()
 }
 
 /// The machine's Codex: [`installed`] for the harness the image designer runs on.
@@ -857,7 +978,9 @@ fn login_places(
 
 /// Whether one of `places` is there: the machine has been set up for the harness.
 fn has_login(places: &[PathBuf]) -> bool {
-    places.iter().any(|place| place.exists())
+    places
+        .iter()
+        .any(|place| Account::this().named(place, Purpose::Guard).present())
 }
 
 /// A machine that has no login for `harness`: the places it keeps one in, the
@@ -918,6 +1041,12 @@ fn home_of_unchecked(
         (_, _) => PathBuf::from(named(user_home)?),
     };
     Some(std::path::absolute(&home).unwrap_or(home))
+}
+
+/// The user's own home on this machine as the owner's files are read: a source (`HOME`, else
+/// `USERPROFILE`).
+pub fn owner_home() -> Result<Owned> {
+    Ok(Account::this().named(home()?, Purpose::Guard))
 }
 
 /// The user's own home on this machine: `HOME`, else `USERPROFILE`.
@@ -1001,7 +1130,7 @@ fn allocate_in(home: &Path, first: &str) -> Result<PathBuf> {
     let root = live_root(home);
     // The shared folder itself is made empty, if it is not there: the one place a case's live
     // folder makes anything that is not its own, and a person's own `mkdir` makes the same.
-    crate::door::make_place(&root).map_err(Error::file("make", &root))?;
+    crate::door::allocation_place(&root).map_err(Error::file("make", &root))?;
     let own = self::home().is_ok_and(|own| same_place(&live_root(&own), &root));
     POOL.folder(&root, first, own, || {
         crate::door::made_in(&root, &format!("{first}-"))
@@ -1012,7 +1141,10 @@ fn allocate_in(home: &Path, first: &str) -> Result<PathBuf> {
 
 /// Whether `a` and `b` are one place, by their real paths.
 fn same_place(a: &Path, b: &Path) -> bool {
-    match (fs::canonicalize(a), fs::canonicalize(b)) {
+    match (
+        crate::door::reads::canonicalize(a),
+        crate::door::reads::canonicalize(b),
+    ) {
         (Ok(a), Ok(b)) => a == b,
         _ => a == b,
     }

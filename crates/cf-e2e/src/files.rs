@@ -7,98 +7,42 @@ use std::{fs, io};
 
 use crate::{Error, Result};
 
-/// Whether a live case may make something at `path`: refused where `path` is in the live zone
-/// every run shares (`<home>/.consensflow-candidate/live`) and not below a folder this run made
-/// through the door ([`crate::door::writable`]). Every write, copy and folder of the kit's files
-/// goes through here: a case's project folder is the run's own, and the others' are not its to
-/// change (T-1592).
-pub fn guard(path: &Path) -> Result {
-    guarded(path, false)
-}
-
-fn guarded(path: &Path, folder: bool) -> Result {
-    if !crate::door::in_live_zone(path) {
-        return Ok(());
-    }
-    crate::door::writable(path, folder).map_err(|why| {
-        Error::file("write", path)(io::Error::new(io::ErrorKind::PermissionDenied, why))
-    })
-}
-
-/// Makes the folder `path`, and the ones above it that are not there.
+/// Makes the folder `path`, and the ones above it that are not there: the door's own
+/// ([`crate::door::make_dir`]), below a folder this run made.
 pub fn make_dir(path: &Path) -> Result {
-    guarded(path, true)?;
-    fs::create_dir_all(path).map_err(Error::file("make", path))
+    crate::door::make_dir(path)
 }
 
-/// Writes `contents` to the file `path`, in a folder made for it if it is not
-/// there, over whatever the file held.
+/// Writes `contents` to the file `path`, in a folder made for it if it is not there, over
+/// whatever the file held: the door's own ([`crate::door::write`]), below a folder this run made.
 pub fn write(path: &Path, contents: impl AsRef<[u8]>) -> Result {
-    guard(path)?;
-    if let Some(dir) = path.parent() {
-        make_dir(dir)?;
-    }
-    fs::write(path, contents).map_err(Error::file("write", path))
+    crate::door::write(path, contents)
 }
 
-/// Writes `text` to the file `file` whole or not at all, for a program to say something to
-/// a case that waits for the file and reads it at once (the stand-in programs' own helper, which
-/// writes where the case that started it says, and no case of a live run calls): under another name, then renamed
-/// into place. `fs::write` makes the file before it writes into it, and what a case reads
-/// in that moment is nothing, which is no pid.
-pub fn write_whole(file: &Path, text: &str) -> io::Result<()> {
-    let mut writing = file.as_os_str().to_owned();
-    writing.push(".writing");
-    fs::write(&writing, text)?;
-    fs::rename(writing, file)
+/// Writes `text` to the file `file` whole or not at all ([`crate::door::write_whole`]).
+pub fn write_whole(file: &Path, text: &str) -> Result {
+    crate::door::write_whole(file, text)
 }
 
-/// Writes the process id of this program to `<file>.pid`, whole ([`write_whole`]): the
-/// file in which a stand-in tells a case which process it is.
-pub fn say_its_process(file: &Path) -> io::Result<()> {
-    let mut named = file.as_os_str().to_owned();
-    named.push(".pid");
-    write_whole(Path::new(&named), &std::process::id().to_string())
+/// Writes the process id of this program to `<file>.pid`, whole ([`crate::door::say_its_process`]).
+pub fn say_its_process(file: &Path) -> Result {
+    crate::door::say_its_process(file)
 }
 
-/// Writes `contents` to the file `path` as [`write`] does, and makes it a
-/// program a system will start: executable on Unix, where a script is no
-/// program without that. Windows starts a file by its name's extension.
+/// Writes `contents` to the file `path` as [`write`] does, and makes it a program a system will
+/// start ([`crate::door::write_executable`]).
 pub fn write_executable(path: &Path, contents: impl AsRef<[u8]>) -> Result {
-    guard(path)?;
-    if let Some(dir) = path.parent() {
-        make_dir(dir)?;
-    }
-    executable(path, contents.as_ref()).map_err(Error::file("write", path))
-}
-
-#[cfg(unix)]
-fn executable(path: &Path, contents: &[u8]) -> std::io::Result<()> {
-    use std::io::Write;
-    use std::os::unix::fs::OpenOptionsExt;
-
-    let mut file = fs::OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .mode(0o755)
-        .open(path)?;
-    file.write_all(contents)
-}
-
-#[cfg(not(unix))]
-fn executable(path: &Path, contents: &[u8]) -> std::io::Result<()> {
-    fs::write(path, contents)
+    crate::door::write_executable(path, contents)
 }
 
 /// The bytes of the file `path`.
 pub fn read(path: &Path) -> Result<Vec<u8>> {
-    fs::read(path).map_err(Error::file("read", path))
+    crate::door::reads::read(path).map_err(Error::file("read", path))
 }
 
 /// The text of the file `path`.
 pub fn read_string(path: &Path) -> Result<String> {
-    fs::read_to_string(path).map_err(Error::file("read", path))
+    crate::door::reads::read_to_string(path).map_err(Error::file("read", path))
 }
 
 /// The text of the file `path` up to its last line break: the lines of a file
@@ -119,9 +63,10 @@ pub fn read_finished_lines(path: &Path) -> Result<String> {
     })
 }
 
-/// Copies the file `from` to `to`, in a folder made for it if it is not there.
+/// Copies the file `from` to `to`, in a folder made for it if it is not there
+/// ([`crate::door::copy`]).
 pub fn copy(from: &Path, to: &Path) -> Result {
-    write(to, read(from)?)
+    crate::door::copy(from, to)
 }
 
 /// The first file under the folder `root`, or in the folders under it, whose name
@@ -193,7 +138,7 @@ mod tests {
 
     #[test]
     fn a_real_path_is_as_given_on_windows_whose_real_paths_are_verbatim_ones() {
-        let folder = tempfile::tempdir().unwrap();
+        let folder = crate::door::made("t-").unwrap();
         assert_eq!(real_path_on(folder.path(), true), folder.path());
         assert_eq!(
             real_path_on(folder.path(), false),
@@ -218,7 +163,7 @@ mod tests {
 
     #[test]
     fn a_file_is_written_in_folders_made_for_it_and_over_what_it_held() {
-        let root = tempfile::tempdir().unwrap();
+        let root = crate::door::made("t-").unwrap();
         let file = root.path().join("a").join("b").join("c.txt");
         write(&file, "first").unwrap();
         write(&file, b"second").unwrap();
@@ -228,7 +173,7 @@ mod tests {
 
     #[test]
     fn a_program_is_written_in_folders_made_for_it_and_over_what_it_held() {
-        let root = tempfile::tempdir().unwrap();
+        let root = crate::door::made("t-").unwrap();
         let file = root.path().join("bin").join("claude");
         write_executable(&file, "first").unwrap();
         write_executable(&file, "second").unwrap();
@@ -240,7 +185,7 @@ mod tests {
     fn a_program_written_here_is_executable_for_all_and_a_file_is_not() {
         use std::os::unix::fs::PermissionsExt;
 
-        let root = tempfile::tempdir().unwrap();
+        let root = crate::door::made("t-").unwrap();
         let program = root.path().join("program");
         let plain = root.path().join("plain");
         write_executable(&program, "#!/bin/sh\n").unwrap();
@@ -252,7 +197,7 @@ mod tests {
 
     #[test]
     fn only_the_lines_a_writer_has_finished_are_read_and_a_torn_end_waits_for_the_next_read() {
-        let root = tempfile::tempdir().unwrap();
+        let root = crate::door::made("t-").unwrap();
         let file = root.path().join("record.jsonl");
         let finished = "{\"a\":1}\n{\"b\":\"é\"}\n";
         // A line cut inside a string, as a reader that came between two of its
@@ -283,7 +228,7 @@ mod tests {
 
     #[test]
     fn a_file_is_copied_in_a_folder_made_for_it() {
-        let root = tempfile::tempdir().unwrap();
+        let root = crate::door::made("t-").unwrap();
         let from = root.path().join("from.json");
         write(&from, [0, 159, 146, 150]).unwrap();
         let to = root.path().join("deeper").join("to.json");
@@ -293,7 +238,7 @@ mod tests {
 
     #[test]
     fn a_file_is_found_by_its_name_in_the_folders_below_a_root_and_none_where_there_is_none() {
-        let root = tempfile::tempdir().unwrap();
+        let root = crate::door::made("t-").unwrap();
         let sessions = root.path().join("sessions");
         let day = sessions.join("2026").join("10").join("13");
         write(&day.join("rollout-at-0001.jsonl"), "one").unwrap();
@@ -311,7 +256,7 @@ mod tests {
 
     #[test]
     fn a_folder_is_made_with_the_ones_above_it_and_again_without_complaint() {
-        let root = tempfile::tempdir().unwrap();
+        let root = crate::door::made("t-").unwrap();
         let dir = root.path().join("x").join("y");
         make_dir(&dir).unwrap();
         make_dir(&dir).unwrap();
@@ -320,7 +265,7 @@ mod tests {
 
     #[test]
     fn what_cannot_be_read_is_named_with_its_path() {
-        let root = tempfile::tempdir().unwrap();
+        let root = crate::door::made("t-").unwrap();
         let missing = root.path().join("missing.txt");
         for failed in [
             read(&missing).unwrap_err(),
@@ -344,13 +289,12 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_file_written_whole_is_not_there_until_it_is_written() {
-        let root = tempfile::tempdir().unwrap();
+        let root = crate::door::made("t-").unwrap();
         let file = root.path().join("said");
         let mut writing = file.as_os_str().to_owned();
         writing.push(".writing");
         let made = crate::process::Run::new("mkfifo")
             .arg(&writing)
-            .inheriting_env()
             .run()
             .unwrap();
         assert_eq!(made.code, Some(0), "{made}");
@@ -375,7 +319,7 @@ mod tests {
 
     #[test]
     fn a_program_says_its_process_in_the_file_beside_its_name() {
-        let root = tempfile::tempdir().unwrap();
+        let root = crate::door::made("t-").unwrap();
         let named = root.path().join("job-1-1");
         say_its_process(&named).unwrap();
         assert_eq!(

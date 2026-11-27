@@ -489,18 +489,21 @@ pub(crate) fn leave_pause_notes(
     // on after a hold: that corrects what its requester was given, and a pause
     // that comes after it does not take it back.
     let [paused, moved] = answer_prefixes(task.number);
+    // A question's reminder says nothing of a pause, whichever task it is about: its
+    // own wait decides whether it still goes (`waiting_questions`), and one a
+    // project's Close held comes back with the Resume.
     // And the note of where the task fell (`T-n asked for …`): it says where it went, not why
     // it waits, so the pass that gives the task out does not take it back.
     let fell = format!("T-{} asked for ", task.number);
     let withdrawn: Vec<String> = store
         .db
-        .prepare(&format!(
+        .prepare(
             "UPDATE message SET state = 'cancelled', reason = ?
        WHERE task_id = ? AND recipient_id = ? AND sender_id IS NULL AND kind = 'note'
+         AND id NOT IN (SELECT message_id FROM question_reminder_sent)
          AND state = 'queued' AND body != ? AND substr(body, 1, length(?)) != ?
-         AND substr(body, 1, length(?)) != ? AND substr(body, 1, length(?)) != ? AND NOT {} RETURNING body",
-            crate::waiting_questions::other_holding_sql("message")
-        ))?
+         AND substr(body, 1, length(?)) != ? AND substr(body, 1, length(?)) != ? RETURNING body",
+        )?
         .query_map(
             params![
                 reason,

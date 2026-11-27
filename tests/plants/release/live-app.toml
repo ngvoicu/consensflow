@@ -144,8 +144,8 @@ runs = ["packaged-copy"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/tests/smoke/bundle.rs"
-find = "    std::fs::write(&plist, smoke)"
-replace = "    std::fs::write(&plist, &text)"
+find = "    cf_e2e::door::write(&plist, smoke)"
+replace = "    cf_e2e::door::write(&plist, &text)"
 
 [[plant]]
 name = "live app: an app that is not the release's takes no update but the release's"

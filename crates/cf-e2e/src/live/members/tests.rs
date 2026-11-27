@@ -205,3 +205,21 @@ fn a_member_window_is_its_pane_its_handle_and_the_conversation_it_opened_on() {
     };
     assert_eq!(unopened.session(), None);
 }
+
+/// B27: the shim is told which seats are stand-ins by the roster, not by a list of three model
+/// words: a Claude-kind row on a fake model is one, by its own name; a real row is not.
+#[test]
+fn the_stand_in_seats_are_the_claude_rows_on_a_fake_model_by_their_names() {
+    let roster = vec![
+        json!({ "id": "matrix-reviewer", "kind": "claude-code", "model": "fake" }),
+        json!({ "id": "worker-b", "kind": "claude-code", "model": "worker" }),
+        json!({ "id": "the-chief", "kind": "claude-code", "model": "fake-chief" }),
+        json!({ "id": "real-claude", "kind": "claude-code", "model": "claude-sonnet-5-5" }),
+        json!({ "id": "a-devin", "kind": "devin", "model": "fake" }),
+    ];
+    assert_eq!(
+        stand_in_seats(&roster),
+        ["matrix-reviewer", "worker-b", "the-chief"]
+    );
+    assert!(stand_in_seats(&[]).is_empty());
+}

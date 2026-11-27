@@ -216,7 +216,7 @@ mod tests {
     /// each window's last screen, the records, the ledger, the events and the daemon's last lines
     /// of the run that went red. Two reds of the field6 pair on GitHub's Windows runner kept
     /// nothing of their windows (CI runs 41787972093 and 41792519144, T-1226).
-    struct Reports(PathBuf, tempfile::TempDir);
+    struct Reports(PathBuf, cf_e2e::door::Made);
 
     impl Reports {
         fn new() -> Self {
@@ -225,7 +225,7 @@ mod tests {
 
         /// Reports whose evidence is kept in `kept` where the case fails.
         fn keeping_in(kept: PathBuf) -> Self {
-            Self(kept, tempfile::tempdir().unwrap())
+            Self(kept, cf_e2e::door::made("t-").unwrap())
         }
 
         fn path(&self) -> &Path {
@@ -237,8 +237,8 @@ mod tests {
         fn drop(&mut self) {
             if std::thread::panicking() {
                 let kept = self.0.clone();
-                match copied_below(self.1.path(), &kept) {
-                    Ok(names) => eprintln!(
+                match keep_below(self.1.path(), &kept) {
+                    Ok((kept, names)) => eprintln!(
                         "--- the failed case's evidence is kept in {}: {}",
                         kept.display(),
                         names.join(", ")
@@ -251,9 +251,19 @@ mod tests {
         }
     }
 
+    /// Keeps what `from` holds in a new folder of this run's own below `kept` (the shared folder
+    /// that CI uploads): where the folder is, and the names of what it held.
+    fn keep_below(from: &Path, kept: &Path) -> std::io::Result<(PathBuf, Vec<String>)> {
+        // `made_in` makes the shared folder CI uploads from where it is not there, as an
+        // allocation the door judges.
+        let mut folder = cf_e2e::door::made_in(kept, "case-")?;
+        let names = copied_below(from, folder.path())?;
+        Ok((folder.keep(), names))
+    }
+
     /// Copies what `from` holds into `to`, folders and all: the names of what it held.
     fn copied_below(from: &Path, to: &Path) -> std::io::Result<Vec<String>> {
-        std::fs::create_dir_all(to)?;
+        cf_e2e::door::make_dir(to)?;
         let mut names = Vec::new();
         for entry in std::fs::read_dir(from)? {
             let entry = entry?;
@@ -261,7 +271,7 @@ mod tests {
             if entry.file_type()?.is_dir() {
                 copied_below(&entry.path(), &target)?;
             } else {
-                std::fs::copy(entry.path(), &target)?;
+                cf_e2e::door::copy_keeping_mode(entry.path(), &target)?;
             }
             names.push(entry.file_name().to_string_lossy().into_owned());
         }
@@ -278,8 +288,9 @@ mod tests {
         let kept = cf_e2e::door::made("t1226-kept-").unwrap();
         let write = |reports: &Reports| {
             let folder = reports.path().join("windows");
-            std::fs::create_dir_all(&folder).unwrap();
-            std::fs::write(folder.join("p1-worker.txt"), "the worker's last screen\n").unwrap();
+            cf_e2e::door::make_dir(&folder).unwrap();
+            cf_e2e::door::write(folder.join("p1-worker.txt"), "the worker's last screen\n")
+                .unwrap();
         };
         {
             let reports = Reports::keeping_in(kept.path().to_path_buf());
@@ -300,7 +311,14 @@ mod tests {
         })
         .join();
         assert!(failed.is_err());
-        let screen = std::fs::read_to_string(kept.path().join("windows").join("p1-worker.txt"));
+        // The evidence is in a folder of its own below the shared one.
+        let case = std::fs::read_dir(kept.path())
+            .unwrap()
+            .next()
+            .expect("the failed case kept a folder")
+            .unwrap()
+            .path();
+        let screen = std::fs::read_to_string(case.join("windows").join("p1-worker.txt"));
         assert_eq!(screen.unwrap(), "the worker's last screen\n");
     }
 
@@ -611,7 +629,7 @@ mod tests {
         let mut other = first.clone();
         other["scenario"]["version"] = serde_json::json!(99);
         let file = reports.path().join("other.json");
-        std::fs::write(&file, other.to_string()).unwrap();
+        cf_e2e::door::write(&file, other.to_string()).unwrap();
         let refused = replay(
             &file,
             Path::new(FAKE_AGENT),

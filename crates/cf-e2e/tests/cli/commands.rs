@@ -48,7 +48,6 @@ fn outside_usage() -> Result<String, Box<dyn Error>> {
     let ran = Run::new(cf::binary()?)
         .arg("help")
         .cwd(checkout::root())
-        .inheriting_env()
         .vars(home.vars())
         .var("CONSENSFLOW_TOKEN", "")
         .run()?;

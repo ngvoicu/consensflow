@@ -358,10 +358,7 @@ pub fn processes_with(text: &str) -> Result<Vec<Process>> {
     if cfg!(windows) {
         return Ok(holding(ThisMachine.processes()?, text));
     }
-    let ran = Run::new("ps")
-        .args(["-axo", "pid=,ppid=,command="])
-        .inheriting_env()
-        .run()?;
+    let ran = Run::new("ps").args(["-axo", "pid=,ppid=,command="]).run()?;
     if ran.code != Some(0) {
         return Err(Error::Program {
             action: "list the processes with",

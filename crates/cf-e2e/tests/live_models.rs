@@ -54,9 +54,30 @@ fn named() -> Result<Vec<Harness>> {
 /// What `harness` is read with: the run's search path and shell, ConsensFlow's home in
 /// `scratch`, and the variables of the home the kit gives the harness's windows.
 fn env(installed: &Installed, scratch: &Path) -> Result<Value> {
+    Ok(env_with(&own_var, installed.home_vars()?, scratch))
+}
+
+/// [`env`], where the machine's variables are `lookup`'s and the home's are `home`.
+fn env_with(
+    lookup: &dyn Fn(&str) -> Option<String>,
+    home: Vec<(String, String)>,
+    scratch: &Path,
+) -> Value {
     let mut vars = serde_json::Map::new();
-    for name in ["PATH", "USER", "LANG", "TMPDIR", "SHELL", "HOME"] {
-        if let Some(value) = own_var(name) {
+    // `SystemRoot` and the system's other variables, which Codex on Windows needs to give a fresh
+    // list and a default (T-1937); a machine without them has none to give.
+    for name in [
+        "PATH",
+        "USER",
+        "LANG",
+        "TMPDIR",
+        "SHELL",
+        "SystemRoot",
+        "WINDIR",
+        "ComSpec",
+        "PATHEXT",
+    ] {
+        if let Some(value) = lookup(name) {
             vars.insert(name.to_owned(), Value::String(value));
         }
     }
@@ -64,10 +85,16 @@ fn env(installed: &Installed, scratch: &Path) -> Result<Value> {
         "CONSENSFLOW_HOME".to_owned(),
         json!(scratch.join("consensflow")),
     );
-    for (name, value) in installed.home_vars()? {
+    // A home of the run's own for every variable a program finds one by, then what the harness's
+    // plan says over it: a plan that names only its own folder (Codex's `CODEX_HOME`) leaves the
+    // read with no `HOME` of the caller's (K3 review T-1978, 2).
+    for (name, value) in cf_e2e::standin_process::home_vars(&scratch.join("home")) {
+        vars.insert(name.to_owned(), json!(value));
+    }
+    for (name, value) in home {
         vars.insert(name, Value::String(value));
     }
-    Ok(Value::Object(vars))
+    Value::Object(vars)
 }
 
 /// What one harness's list came to.
@@ -190,4 +217,58 @@ fn each_harness_lists_its_models_with_no_model_turn_and_no_login_of_the_owner_s_
         }
     }
     report::conclude(&log, "what each harness's list came to", &checks)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A harness whose plan names only its own folder (Codex's `CODEX_HOME`) is read on the run's
+    /// own home for the rest, never the caller's `HOME`, profile, AppData or XDG folders.
+    #[test]
+    fn a_read_whose_plan_names_only_its_own_folder_has_no_home_of_the_callers() {
+        let machine = |name: &str| match name {
+            "HOME" | "USERPROFILE" | "APPDATA" | "LOCALAPPDATA" | "XDG_CONFIG_HOME"
+            | "HOMEDRIVE" | "HOMEPATH" => Some(format!("/the-callers/{name}")),
+            "PATH" => Some("p".to_owned()),
+            _ => None,
+        };
+        let plan = vec![("CODEX_HOME".to_owned(), "/scratch/home/.codex".to_owned())];
+        let env = env_with(&machine, plan, Path::new("/scratch"));
+        let slashed = |name: &str| env[name].as_str().unwrap_or("").replace('\\', "/");
+        assert_eq!(slashed("HOME"), "/scratch/home");
+        assert_eq!(slashed("USERPROFILE"), "/scratch/home");
+        assert_eq!(slashed("XDG_CONFIG_HOME"), "/scratch/home/.config");
+        assert_eq!(slashed("CODEX_HOME"), "/scratch/home/.codex");
+        assert!(
+            !env.to_string().contains("the-callers"),
+            "a variable of the caller's reached the read: {env}"
+        );
+    }
+
+    /// T-1937: a Windows Codex given no `SystemRoot` gets a stale model list with no default
+    /// (0.170.0 and 0.171.0 alike); with it, a fresh one. The read is given the system's own
+    /// variables, and the run's home still wins over the machine's.
+    #[test]
+    fn a_models_read_is_given_the_windows_system_variables_the_machine_has() {
+        let machine = |name: &str| match name {
+            "SystemRoot" => Some(r"C:\Windows".to_owned()),
+            "WINDIR" => Some(r"C:\Windows".to_owned()),
+            "ComSpec" => Some(r"C:\Windows\system32\cmd.exe".to_owned()),
+            "PATHEXT" => Some(".EXE;.CMD".to_owned()),
+            "PATH" => Some("p".to_owned()),
+            "HOME" => Some("the-callers-home".to_owned()),
+            _ => None,
+        };
+        let home = vec![("HOME".to_owned(), "the-runs-home".to_owned())];
+        let env = env_with(&machine, home, Path::new("/scratch"));
+        for name in ["SystemRoot", "WINDIR", "ComSpec", "PATHEXT"] {
+            assert!(env[name].is_string(), "{name} was left out: {env}");
+        }
+        assert_eq!(env["HOME"], "the-runs-home");
+        assert!(
+            env["TEMP"].is_null(),
+            "a variable the machine lacks is not made up"
+        );
+    }
 }

@@ -593,6 +593,16 @@ impl Said {
                 .map_err(Stop::Failed)?;
             active.text.push_str(&piece);
         }
+        // The turn's ids bind its end whether or not it said any answer text: a turn of thoughts
+        // and tool calls that ends in an error is as failed as one that had begun to answer.
+        if self.active.is_none() && self.open && event.get("turnClientMessageId").is_some() {
+            self.active = Some(Active {
+                id: String::new(),
+                text: String::new(),
+                request: None,
+                native: None,
+            });
+        }
         if let (Some(active), Some(Value::String(request))) =
             (&mut self.active, event.get("turnClientMessageId"))
         {

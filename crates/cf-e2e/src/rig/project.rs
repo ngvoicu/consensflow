@@ -9,7 +9,7 @@ use serde_json::{json, Value};
 use super::Rig;
 // The models a stand-in agent runs on (`fake`, `fake-2`, `fake-chief`), which a real
 // harness has none of: a member on one is asked for by its own name instead.
-use crate::stand_in_lists::STAND_IN_MODELS;
+use crate::stand_in_lists::{seat_of, Seat};
 use crate::{files, Error, Result};
 
 /// A project of the daemon's, by its id.
@@ -230,7 +230,7 @@ fn body_of(row: &Value, agent: &str, roles: Option<Value>) -> Value {
     }
     let model = row["model"]
         .as_str()
-        .filter(|model| !STAND_IN_MODELS.contains(model))
+        .filter(|model| seat_of(row["kind"].as_str().unwrap_or_default(), model) == Seat::Harness)
         .unwrap_or(agent);
     let mut body = json!({
         "harness": row["kind"],

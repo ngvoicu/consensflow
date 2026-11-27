@@ -6,12 +6,12 @@
 //! (and the chief, whose turn was over, told nothing), and the worker finishes
 //! and the chief gets its result.
 
-use cf_e2e::rig::{Project, OPEN};
+use cf_e2e::rig::{Project, Rig, OPEN};
 use serde_json::{json, Value};
 
 use crate::approval::quit_and_start_again;
 use crate::decided_result::results;
-use crate::{after, rig, secs, session_of, Outcome};
+use crate::{after, config, secs, session_of, Outcome};
 
 /// How a worker's note begins when the quit cut its turn on T-1: what follows names
 /// the turn, by the message that began it (T-814).
@@ -34,7 +34,9 @@ fn told(rig: &cf_e2e::rig::Rig, session: &str, words: &str) -> usize {
 #[test]
 fn a_restart_opens_nothing_and_the_humans_resume_brings_back_the_chief_and_the_worker_told_its_turn_was_cut(
 ) -> Outcome {
-    let rig = rig()?;
+    // The chief takes a moment to end its turn once its answer is written, as a window on a
+    // slow machine does: the app is quit once the turn has ended in its record.
+    let rig = Rig::start(config().var("CF_TEST_REST_MS", "4000"))?;
     let project = Project::open(&rig, "chief", json!({}))?;
     let id = project.id();
     let added = project.add_member("worker")?;
@@ -51,6 +53,14 @@ fn a_restart_opens_nothing_and_the_humans_resume_brings_back_the_chief_and_the_w
     )?;
     rig.wait_for("the chief to have dispatched", secs(60), || {
         Ok(rig.transcript(&chief_session).contains(DISPATCHED))
+    })?;
+    // And its turn to end in its record: the answer is there before the end of the turn is
+    // (Claude writes the stop hooks' summary a moment on, and the record of a turn without it
+    // reads as cut), so a quit between them cuts the turn.
+    rig.wait_for("the chief's turn to end in its record", secs(30), || {
+        Ok(rig
+            .transcript(&chief_session)
+            .contains("\"subtype\":\"stop_hook_summary\""))
     })?;
     rig.wait_for("the worker to be at work on T-1", secs(60), || {
         Ok(project.task(1)?["state"] == "working")

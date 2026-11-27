@@ -88,12 +88,98 @@ fn ask(program: &Path, name: &str, body: &Value) -> Result<Value> {
     let prefix = launch
         .as_ref()
         .map_or(&[][..], |launch| launch.prefix.as_slice());
+    // The helper starts programs on the environment its question carries: that environment
+    // leaves the kit here, and is sealed as a window's is, made whole first.
+    question_sealed(&mut body)?;
     let ran = Run::new(executable)
         .args(prefix)
         .input(format!("{body}\n"))
-        .inheriting_env()
         .run()?;
     answered(name, ran.code, &ran.stdout)
+}
+
+/// Seals the environment a question carries (`env`), which `harness-ask` starts the harness's
+/// programs on (T-2000 finding 1, a helper's question): every home it does not name is given
+/// below the home it names, or below a scratch home of the run's; then the seal holds, or the
+/// question is not asked. A variable given null is one the caller removed, and the kit's own
+/// variables are none of a harness's.
+pub fn question_sealed(body: &mut Value) -> Result {
+    let Some(object) = body.get("env").and_then(Value::as_object) else {
+        return Ok(());
+    };
+    let windows = cfg!(windows);
+    let mut env: Vec<(std::ffi::OsString, std::ffi::OsString)> = Vec::new();
+    for (name, value) in object {
+        if name
+            .to_ascii_uppercase()
+            .starts_with(crate::door::spawn::KIT_PREFIX)
+        {
+            continue;
+        }
+        match value {
+            Value::Null => {}
+            Value::String(text) => env.push((name.into(), text.into())),
+            other => {
+                return Err(Error::Daemon(format!(
+                    "the question's variable {name} is no text: {other}"
+                )))
+            }
+        }
+    }
+    // What the machine is, as every start of the kit is given it (the search path, the system's
+    // variables, the temporary folders, the language): under what the caller named. The helper
+    // starts the harness's program on this environment alone, so a caller no longer builds it.
+    // The kit's own process's environment, of which the machine's variables alone are kept.
+    #[allow(clippy::disallowed_methods)]
+    let held = std::env::vars_os();
+    for (name, value) in crate::process::machine_vars(held) {
+        if !env.iter().any(|(held, _)| {
+            held.to_string_lossy()
+                .eq_ignore_ascii_case(&name.to_string_lossy())
+        }) {
+            env.push((name, value));
+        }
+    }
+    let named_home = ["HOME", "USERPROFILE"].into_iter().find_map(|wanted| {
+        env.iter()
+            .find(|(name, _)| name.to_string_lossy().eq_ignore_ascii_case(wanted))
+            .map(|(_, value)| PathBuf::from(value))
+            .filter(|home| home.is_absolute() && crate::door::is_made_or_below(home))
+    });
+    let base = match named_home {
+        Some(home) => home,
+        None => crate::process::scratch_home()?,
+    };
+    let missing = crate::door::spawn::missing_homes(&env, &base);
+    env.extend(missing);
+    // The helper starts the installed harness's program to read what it holds (a model list, a
+    // version, a record): whichever it is, none of them may update or install anything itself
+    // on the way (T-2086 N5: Pi's `PI_OFFLINE` and Claude Code's `DISABLE_AUTOUPDATER` were not
+    // there). The switches of every harness are given, over what the caller said.
+    for harness in ["claude", "codex", "devin", "muse", "pi"] {
+        for (name, value) in crate::door::spawn::update_switches(harness) {
+            env.retain(|(held, _)| !held.to_string_lossy().eq_ignore_ascii_case(name));
+            env.push(((*name).into(), (*value).into()));
+        }
+    }
+    let sealed = crate::door::sealed(env, &[], windows).map_err(|why| {
+        Error::LiveApp(format!(
+            "the question {} is not asked: {why}",
+            body["op"].as_str().unwrap_or("?")
+        ))
+    })?;
+    body["env"] = Value::Object(
+        sealed
+            .into_iter()
+            .map(|(name, value)| {
+                (
+                    name.to_string_lossy().into_owned(),
+                    json!(value.to_string_lossy()),
+                )
+            })
+            .collect(),
+    );
+    Ok(())
 }
 
 /// Model and usage reads also start Muse; keep those processes on the run's
@@ -324,22 +410,34 @@ pub struct Record {
 
 /// What the record of the conversation `session` of a harness of the kind
 /// `kind` (`claude-code`, `devin`…) says, read in the places `env` names. None
-/// where it says nothing: no record of the conversation, or one that cannot be
-/// read.
+/// where the harness has written nothing of it yet; an error where the record could not be
+/// read, which is never taken for an empty one (T-1997 finding 7).
 pub fn records(kind: &str, session: &str, env: &[(String, String)]) -> Result<Option<Record>> {
     let answer = question(&json!({
         "op": "records", "kind": kind, "session": session, "env": env_object(env),
     }))?;
-    Ok(record_of(&answer))
+    record_of(&answer)
 }
 
-/// The record an answer to `records` holds.
-fn record_of(answer: &Value) -> Option<Record> {
+/// The record an answer to `records` holds, by the state the read came to (`read`): held, absent
+/// (none), or failed (an error, as is an answer that says none of the three).
+fn record_of(answer: &Value) -> Result<Option<Record>> {
     let reading = &answer["reading"];
-    if reading["unknown"] == true {
-        return None;
+    match answer["read"].as_str() {
+        Some("held") => {}
+        Some("absent") => return Ok(None),
+        Some("failed") => {
+            return Err(Error::Daemon(format!(
+                "the harness's record could not be read: {}",
+                reading["reason"].as_str().unwrap_or("no reason given")
+            )))
+        }
+        _ => {
+            let said = "harness-ask's answer to a record read says neither held, absent nor failed";
+            return Err(Error::Daemon(format!("{said}: {answer}")));
+        }
     }
-    Some(Record {
+    Ok(Some(Record {
         items: reading["items"]
             .as_array()
             .map(|items| items.iter().map(Item::of).collect())
@@ -355,7 +453,7 @@ fn record_of(answer: &Value) -> Option<Record> {
         jobs_pending: reading["jobsPending"].as_u64().unwrap_or_default(),
         jobs_retired: reading["jobsRetired"].as_u64().unwrap_or_default(),
         monitors_noticed: reading["monitorsNoticed"].as_u64().unwrap_or_default(),
-    })
+    }))
 }
 
 /// The harness's own window on a new conversation, as the app opens it.
@@ -709,6 +807,7 @@ mod tests {
     fn a_record_is_its_items_whether_the_turn_is_settled_and_what_it_says_of_the_turn() {
         let answer = json!({
             "settled": true,
+            "read": "held",
             "reading": {
                 "items": [
                     { "id": "u1", "role": "user", "text": "Hello" },
@@ -719,7 +818,7 @@ mod tests {
                 "quota": null,
             },
         });
-        let record = record_of(&answer).unwrap();
+        let record = record_of(&answer).unwrap().unwrap();
         assert_eq!(
             record.items,
             [
@@ -740,12 +839,11 @@ mod tests {
         assert!(record.settled);
         assert_eq!(record.settlement, "settled");
         // A conversation the harness kept no record of is none.
-        let unknown =
-            json!({ "settled": true, "reading": { "unknown": true, "reason": "no file" } });
-        assert_eq!(record_of(&unknown), None);
+        let unknown = json!({ "settled": true, "read": "absent", "reading": { "unknown": true, "reason": "no file" } });
+        assert_eq!(record_of(&unknown).unwrap(), None);
         // A turn that is still going is not settled.
-        let going = json!({ "settled": false, "reading": { "items": [], "settlement": { "state": "in-flight" } } });
-        let going = record_of(&going).unwrap();
+        let going = json!({ "settled": false, "read": "held", "reading": { "items": [], "settlement": { "state": "in-flight" } } });
+        let going = record_of(&going).unwrap().unwrap();
         assert!(!going.settled && going.items.is_empty());
         assert_eq!(going.settlement, "in-flight");
     }
@@ -773,5 +871,24 @@ mod tests {
         assert_eq!(start_of(&Value::Null), None);
         let bare = start_of(&json!({ "command": "codex" })).unwrap();
         assert!(bare.args.is_empty() && bare.env.is_empty() && bare.prompt.is_none());
+    }
+
+    /// T-1997 finding 7: a read that failed is an error, and never a record of no rows; an
+    /// answer that says no state is one too.
+    #[test]
+    fn a_failed_read_is_an_error_and_never_rows() {
+        let failed = json!({ "settled": true, "read": "failed", "reading": { "unknown": true, "reason": "unreadable: denied" } });
+        let refused = record_of(&failed).unwrap_err().to_string();
+        assert!(refused.contains("unreadable: denied"), "{refused}");
+        // Devin's native reader, on a store whose schema it does not know: an error naming
+        // SQLite's own words, never a record of no rows; a session the store has no row of yet
+        // is absent (round 2).
+        let devin = json!({ "settled": true, "read": "failed", "reading": { "unknown": true, "reason": "unreadable: no such column: id" } });
+        let refused = record_of(&devin).unwrap_err().to_string();
+        assert!(refused.contains("no such column: id"), "{refused}");
+        let no_row = json!({ "settled": true, "read": "absent", "reading": { "unknown": true, "reason": "unreadable: missing Devin session" } });
+        assert_eq!(record_of(&no_row).unwrap(), None);
+        let unsaid = json!({ "settled": true, "reading": { "unknown": true, "reason": "x" } });
+        assert!(record_of(&unsaid).is_err());
     }
 }

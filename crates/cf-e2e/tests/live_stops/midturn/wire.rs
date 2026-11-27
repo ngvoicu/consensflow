@@ -126,20 +126,20 @@ mod tests {
 
     #[test]
     fn a_wire_is_told_of_since_the_pause_by_the_records_it_gained() {
-        let folder = tempfile::tempdir().unwrap();
+        let folder = cf_e2e::door::made("t-").unwrap();
         let launch = folder
             .path()
             .join("integrations")
             .join("devin")
             .join("launch-1");
-        std::fs::create_dir_all(&launch).unwrap();
+        cf_e2e::door::make_dir(&launch).unwrap();
         let file = launch.join("wire.jsonl");
         let chunk = record(json!({ "update": { "sessionUpdate": "agent_message_chunk" } }));
-        std::fs::write(&file, format!("{chunk}\n{chunk}\n")).unwrap();
+        cf_e2e::door::write(&file, format!("{chunk}\n{chunk}\n")).unwrap();
         let wire = Wire::open(folder.path()).unwrap();
         assert_eq!(wire.since(), "0 wire records since the pause: nothing");
         let cancel = record(json!({ "method": "session/cancel" }));
-        std::fs::write(&file, format!("{chunk}\n{chunk}\n{chunk}\n{cancel}\n")).unwrap();
+        cf_e2e::door::write(&file, format!("{chunk}\n{chunk}\n{chunk}\n{cancel}\n")).unwrap();
         assert_eq!(
             wire.since(),
             "2 wire records since the pause: agent_message_chunk, method:session/cancel"
@@ -150,16 +150,16 @@ mod tests {
 
     #[test]
     fn a_wire_is_told_of_from_its_start_by_its_runs_and_its_first_records_cut() {
-        let folder = tempfile::tempdir().unwrap();
+        let folder = cf_e2e::door::made("t-").unwrap();
         let launch = folder
             .path()
             .join("integrations")
             .join("devin")
             .join("launch-1");
-        std::fs::create_dir_all(&launch).unwrap();
+        cf_e2e::door::make_dir(&launch).unwrap();
         let chunk = record(json!({ "update": { "sessionUpdate": "agent_message_chunk" } }));
         let hello = record(json!({ "method": "initialize", "params": { "protocolVersion": 1 } }));
-        std::fs::write(
+        cf_e2e::door::write(
             launch.join("wire.jsonl"),
             format!("{hello}\n{chunk}\n{chunk}\n"),
         )
@@ -180,19 +180,19 @@ mod tests {
     #[test]
     fn a_tool_is_called_when_a_record_of_a_call_holds_its_command_and_a_prompt_that_quotes_it_is_none(
     ) {
-        let folder = tempfile::tempdir().unwrap();
+        let folder = cf_e2e::door::made("t-").unwrap();
         let launch = folder
             .path()
             .join("integrations")
             .join("devin")
             .join("launch-1");
-        std::fs::create_dir_all(&launch).unwrap();
+        cf_e2e::door::make_dir(&launch).unwrap();
         let prompt = record(json!({
             "method": "session/prompt",
             "params": { "prompt": [{ "text": "Run exactly: ping -c 61 127.0.0.1" }] },
         }));
         let file = launch.join("wire.jsonl");
-        std::fs::write(&file, format!("{prompt}\n")).unwrap();
+        cf_e2e::door::write(&file, format!("{prompt}\n")).unwrap();
         let wire = Wire::open(folder.path()).unwrap();
         assert!(!wire.called("-c 61 127.0.0.1"), "a prompt makes no call");
         let call = record(json!({
@@ -201,31 +201,31 @@ mod tests {
                 "rawInput": { "command": "ping -c 61 127.0.0.1" },
             },
         }));
-        std::fs::write(&file, format!("{prompt}\n{call}\n")).unwrap();
+        cf_e2e::door::write(&file, format!("{prompt}\n{call}\n")).unwrap();
         assert!(wire.called("-c 61 127.0.0.1"));
         assert!(!wire.called("sleep 119"));
         let update = record(json!({
             "update": { "sessionUpdate": "tool_call_update", "content": "sleep 119 ran" },
         }));
-        std::fs::write(&file, format!("{update}\n")).unwrap();
+        cf_e2e::door::write(&file, format!("{update}\n")).unwrap();
         assert!(wire.called("sleep 119"));
     }
 
     #[test]
     fn a_home_with_no_wire_log_says_what_its_devin_folder_holds() {
-        let folder = tempfile::tempdir().unwrap();
+        let folder = cf_e2e::door::made("t-").unwrap();
         assert_eq!(
             missing(folder.path()),
             "no Devin was launched: the home has no integrations/devin folder"
         );
         let launches = folder.path().join("integrations").join("devin");
-        std::fs::create_dir_all(&launches).unwrap();
+        cf_e2e::door::make_dir(&launches).unwrap();
         assert_eq!(
             missing(folder.path()),
             "no Devin was launched: integrations/devin holds no launch"
         );
-        std::fs::create_dir_all(launches.join("launch-1")).unwrap();
-        std::fs::create_dir_all(launches.join("launch-2")).unwrap();
+        cf_e2e::door::make_dir(launches.join("launch-1")).unwrap();
+        cf_e2e::door::make_dir(launches.join("launch-2")).unwrap();
         assert_eq!(
             missing(folder.path()),
             "2 launch folders of Devin, none with a wire.jsonl: it was told where to write one and wrote none"
@@ -234,13 +234,13 @@ mod tests {
 
     #[test]
     fn the_conversation_a_window_shows_is_the_last_the_wire_configures_a_mode_for() {
-        let folder = tempfile::tempdir().unwrap();
+        let folder = cf_e2e::door::made("t-").unwrap();
         let launch = folder
             .path()
             .join("integrations")
             .join("devin")
             .join("launch-1");
-        std::fs::create_dir_all(&launch).unwrap();
+        cf_e2e::door::make_dir(&launch).unwrap();
         let configured = |session: &str| {
             record(json!({
                 "sessionId": session,
@@ -256,7 +256,7 @@ mod tests {
         }));
         let chunk = record(json!({ "update": { "sessionUpdate": "agent_message_chunk" } }));
         let file = launch.join("wire.jsonl");
-        std::fs::write(
+        cf_e2e::door::write(
             &file,
             format!("{}\n{other}\n{chunk}\n", configured("calm-river")),
         )
@@ -264,7 +264,7 @@ mod tests {
         let wire = Wire::open(folder.path()).unwrap();
         assert_eq!(wire.session().as_deref(), Some("calm-river"));
         // A /new or a /resume names another, and it is the one the window shows.
-        std::fs::write(
+        cf_e2e::door::write(
             &file,
             format!(
                 "{}\n{chunk}\n{}\n",
@@ -274,7 +274,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(wire.session().as_deref(), Some("brisk-ember"));
-        std::fs::write(&file, format!("{chunk}\n")).unwrap();
+        cf_e2e::door::write(&file, format!("{chunk}\n")).unwrap();
         assert_eq!(wire.session(), None);
     }
 }

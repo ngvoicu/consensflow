@@ -61,14 +61,23 @@ impl Dispatcher {
             } else {
                 "If only the person can, ask them at the top of your reply, and don't keep the member waiting; once they answer, give the next step as a new task with their answer.".to_owned()
             };
+            // A closed question cannot be answered (`answer` refuses it): the way
+            // on that works is a tell to its member.
+            let body = match (&wait.closed, wait.task) {
+                (Some(why), Some(number)) => format!(
+                    "{subject} question m-{} closed when {why}, and T-{number} has waited {age} since for your words. Tell @{} with `cf tell T-{number} \"…\"`. {next}",
+                    wait.id, wait.sender
+                ),
+                _ => format!(
+                    "{subject} question m-{} has waited {age}. Answer it. {next}",
+                    wait.id
+                ),
+            };
             let note = NewNote {
                 from: None,
                 to: wait.recipient,
                 task: wait.task,
-                body: format!(
-                    "{subject} question m-{} has waited {age}. Answer it. {next}",
-                    wait.id
-                ),
+                body,
             };
             let sent = self.seams.ledger.borrow_mut().remind_question(
                 project.id,

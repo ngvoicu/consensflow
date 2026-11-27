@@ -545,7 +545,7 @@ fn words_told_to_the_window_of_a_task_whose_member_the_human_removes_are_said_to
 
 #[test]
 fn words_still_on_their_way_when_the_harness_fails_the_task_wait_for_its_reopen() {
-    let context = Context::new();
+    let context = Context::tries_off();
     let (tiers, session, told) = told_on_its_way(&context);
     context.adapter.with("zeus", |agent| {
         agent.failed = true;

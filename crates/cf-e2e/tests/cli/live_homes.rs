@@ -72,6 +72,12 @@ const BY_HAND: [(&str, &str, &str); 29] = [
         "the roaming folder below that same run-owned config folder on Windows",
     ),
     (
+        "crates/cf-e2e/tests/live_muse_reads.rs",
+        "HOME",
+        "its questions' HOME is a folder the case makes below its own scratch folder (a home of the \
+         run's, as every start's is); the copy of Muse's login is in the scratch's config folder",
+    ),
+    (
         "crates/cf-e2e/tests/live_pi_parity.rs",
         "HOME",
         "its windows run on a HOME of the case's own, with a Pi folder made for it (`on_own_home`)",
@@ -84,32 +90,25 @@ const BY_HAND: [(&str, &str, &str); 29] = [
     (
         "crates/cf-e2e/tests/live_parity/claude.rs",
         "CLAUDE_CONFIG_DIR",
-        "it copies the owner's whole Claude setup (skills, plugins, agents) into a throwaway on purpose, \
-         to compare a member's window with a bare Claude's; it writes nothing of the owner's",
+        "it reads the owner's Claude login alone (`STILL_ACTS`) and copies it, without its refresh token, into a \
+         config folder of the run's own, to compare a member's window with a bare Claude's; it writes nothing of the owner's",
     ),
     (
         "crates/cf-e2e/tests/live_finish/compacted.rs",
         "HOME",
-        "it reads the machine's Devin config where a launch reads it (`ask::devin_config` is given \
-         the machine's environment) and writes it, with a compaction threshold, into the kit's home \
+        "it reads the machine's Devin config through a source, into a folder of the run's, and asks \
+         `ask::devin_config` there (HOME is that folder), then writes it, with a compaction threshold, into the kit's home \
          (`with_home_file`): no window is given the variable",
     ),
     (
         "crates/cf-e2e/tests/live_finish/compacted.rs",
         "XDG_CONFIG_HOME",
-        "the same read of the machine's Devin config, as macOS and Linux name its folder",
+        "the same folder, as macOS and Linux name the config folder (the run's own, not the machine's)",
     ),
     (
         "crates/cf-e2e/tests/live_finish/compacted.rs",
         "APPDATA",
         "the same read of the machine's Devin config, as Windows names its folder",
-    ),
-    (
-        "crates/cf-e2e/tests/live_compaction_routes.rs",
-        "XDG_CONFIG_HOME",
-        "its Muse turns run alone, in no window of the kit's, on a throwaway copy of `auth.json` and \
-         the model catalog (`guard::copy_muse_into`, as `live muse-reads` does): the login is the \
-         keychain's, and the owner's `~/.config/muse` is digested before and after",
     ),
     (
         "crates/cf-e2e/tests/live_compaction_routes.rs",
@@ -120,8 +119,8 @@ const BY_HAND: [(&str, &str, &str); 29] = [
         "crates/cf-e2e/tests/live_muse/tui.rs",
         "HOME",
         "what `live_muse_background` and `live_muse_posture` share (T-790 moved it there): they run \
-         Muse alone, in no window of the kit's, on a Mac only: the owner's home for the keychain, \
-         which holds the login, and nothing else of it (Muse finds its keychain by HOME, T-705)",
+         Muse alone, in no window of the kit's, behind the test machine's marker: HOME is the run's own root \
+         there, below a folder this run made, and Muse's file sandbox keeps it from the owner's (T-705)",
     ),
     (
         "crates/cf-e2e/tests/live_muse/tui.rs",
@@ -186,17 +185,13 @@ const BY_HAND: [(&str, &str, &str); 29] = [
     ),
     (
         "crates/cf-e2e/tests/live_keychain.rs",
-        "HOME",
-        "it runs the machine's Claude Code by itself, in no rig and on no login of the owner's, to show what a \
-         throwaway CLAUDE_CONFIG_DIR leaves in the owner's login Keychain (T-1102): HOME is the owner's, as \
-         `security` needs it to find the Keychain, and CLAUDE_CONFIG_DIR a folder of the case's own, holding a \
-         made-up login. Nothing of the owner's is read there, and `live::launcher::Guard` holds the owner's \
-         launcher and Keychain around the whole case",
+        "CLAUDE_CONFIG_DIR",
+        "the control's start of Claude Code (`Control::start_claude`) is given a folder of the case's own, holding a made-up login: the folder is the thing it shows the Keychain item of; the door gives HOME itself",
     ),
     (
-        "crates/cf-e2e/tests/live_keychain.rs",
-        "CLAUDE_CONFIG_DIR",
-        "the same: the folder is the thing it shows the Keychain item of",
+        "crates/cf-e2e/src/live/launcher.rs",
+        "XDG_DATA_HOME",
+        "the launcher guard READS the account's data folder (`Account::variable`) to find where Claude's and Devin's versions are listed before and after a run; it gives it to no program",
     ),
     (
         "crates/cf-e2e/tests/live_launcher.rs",
@@ -226,6 +221,54 @@ const BY_HAND: [(&str, &str, &str); 29] = [
          stand-in, no real harness",
     ),
 ];
+
+/// The exact constructions of the doors' own that name a variable of [`HOMES`]: a store the table
+/// lists to protect, the account's variables the renewal is given, the folder of a Pi renewal. Each is
+/// the text of one construction, never a file: any other naming in the same file is still a home made
+/// by hand.
+const DOORS_OWN: [(&str, &str, &str); 6] = [
+    (
+        "crates/cf-e2e/src/live/isolation/pi.rs",
+        "\"PI_CODING_AGENT_DIR\".to_owned(),",
+        "the renewal of Pi's login runs on the OWNER's own Pi folder (`agent`), by name, through the renewal's door: safe only because the renewal needs a test machine's marker, which an owner's account never has",
+    ),
+    (
+        "crates/cf-e2e/src/live/renew.rs",
+        "(\"HOME\".to_owned(), text.clone())",
+        "the renewal's account variables: the ACCOUNT's own home, by name, for the harness the renewal runs once: safe only behind the test machine's marker",
+    ),
+    (
+        "crates/cf-e2e/src/live/renew.rs",
+        "(\"USERPROFILE\".to_owned(), text.clone())",
+        "the same account home, as Windows names it: safe only behind the test machine's marker",
+    ),
+    (
+        "crates/cf-e2e/src/live/stores.rs",
+        "under(\"XDG_CONFIG_HOME\",",
+        "a row of the store table: a folder the doors protect, which no run sets",
+    ),
+    (
+        "crates/cf-e2e/src/live/stores.rs",
+        "under(\"XDG_DATA_HOME\",",
+        "a row of the store table: a folder the doors protect, which no run sets",
+    ),
+    (
+        "crates/cf-e2e/src/live/stores.rs",
+        "under(\"APPDATA\",",
+        "a row of the store table: a folder the doors protect, which no run sets",
+    ),
+];
+
+/// `own` with the doors' own constructions of `file` taken out ([`DOORS_OWN`]).
+fn without_the_doors_own(file: &str, own: &str) -> String {
+    let mut left = own.to_owned();
+    for (source, construction, _) in DOORS_OWN {
+        if source == file {
+            left = left.replace(construction, "");
+        }
+    }
+    left
+}
 
 /// The sources that call `on_own_home`, each with the reason.
 const OWN_HOME: [(&str, &str); 1] = [(
@@ -340,7 +383,7 @@ fn no_live_source_makes_the_home_of_a_real_harness_by_hand() -> Outcome {
         if KIT.contains(&file.as_str()) {
             continue;
         }
-        let own = text(file);
+        let own = without_the_doors_own(file, &text(file));
         let named = HOMES
             .iter()
             .filter(|name| sets(&own, name))
@@ -366,7 +409,13 @@ fn no_live_source_makes_the_home_of_a_real_harness_by_hand() -> Outcome {
          (`live::isolation`, `live::login`) is given every window already, and its checks do \
          not see this one: {by_hand:?}"
     );
-    // What the table excuses is still there to excuse.
+    // What the tables excuse is still there to excuse.
+    for (file, construction, _) in DOORS_OWN {
+        assert!(
+            text(file).contains(construction),
+            "{file} no longer holds {construction}: take it out of DOORS_OWN"
+        );
+    }
     for (file, name, _) in BY_HAND {
         assert!(
             sources.iter().any(|source| source == file)

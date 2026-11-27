@@ -593,9 +593,12 @@ fn the_dropped_lines_report_has_a_place_of_its_own_that_later_lines_cannot_put_o
         trace.event(&event(1, &format!("line{n}")));
     }
     drop(held);
-    // Once the writer has made room, later lines come in behind the report.
+    // Once the writer has made room, later lines come in behind the report. A line in the file
+    // is not yet room: the writer frees its place in the queue after the line is written, so
+    // the queue is still full while only the first line is there (hosted Windows, three runs in
+    // a row: `late` was dropped). A second line says the first one's place is free.
     let until = Instant::now() + Duration::from_secs(10);
-    while kinds(trace.file()).is_empty() {
+    while kinds(trace.file()).len() < 2 {
         assert!(Instant::now() < until, "the writer wrote nothing");
         std::thread::sleep(Duration::from_millis(1));
     }

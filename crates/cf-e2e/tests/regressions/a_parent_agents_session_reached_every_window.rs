@@ -112,7 +112,6 @@ fn no_window_is_given_the_session_of_an_agent_the_app_was_started_from() -> Outc
         for started in rig.started() {
             let shown = cf_e2e::process::Run::new("ps")
                 .args(["eww", "-o", "command=", "-p", &started.pid.to_string()])
-                .inheriting_env()
                 .run()?
                 .stdout;
             // What every window is given shows, so that a `ps` that shows no environment

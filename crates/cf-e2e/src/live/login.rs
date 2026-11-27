@@ -64,6 +64,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
+#[cfg(unix)]
 use std::fs;
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
@@ -76,9 +77,10 @@ use sha2::{Digest, Sha256};
 use super::keychain;
 use super::machine::Harness;
 use super::renew::{self, Kept, Renewal, Renewed, TestMachine};
+use crate::door::source::{Account, Purpose, Source as Owned};
 use crate::process::own_var;
 use crate::rig::ClaudeConfig;
-use crate::{files, Error, Result};
+use crate::{Error, Result};
 
 /// The Keychain service Claude Code keeps its login under, and the start of the
 /// names it keeps another config folder's under (`Claude Code-credentials-<8 hex>`).
@@ -128,11 +130,11 @@ impl Source {
     fn read(&self) -> Result<String> {
         match self {
             Self::File(file) => {
-                crate::standin_process::require_home(file, "Claude login lookup");
-                files::read_string(file).map_err(|failed| {
+                let file = Account::this().named(file, Purpose::Seed);
+                file.require_home("Claude login lookup");
+                file.read_to_string().map_err(|failed| {
                     Error::Daemon(format!(
-                    "Claude Code's login is not in {} ({failed}): log in by running `claude` once",
-                    file.display()
+                    "Claude Code's login is not in {file} ({failed}): log in by running `claude` once"
                 ))
                 })
             }
@@ -148,11 +150,7 @@ impl Source {
                     })?;
                 // The login Keychain asks the person once to let it be read; a run
                 // waits for the answer (the call is limited, below).
-                let ran = super::keychain::security(
-                    "login::Source::read",
-                    keychain_args(&user),
-                    Duration::from_secs(120),
-                )?;
+                let ran = super::keychain::login_item(&user, Duration::from_secs(120))?;
                 if ran.code != Some(0) {
                     // What it printed is the login, or nothing: only what it said is shown.
                     return Err(Error::Daemon(format!(
@@ -180,7 +178,7 @@ impl Source {
 /// account: with `-a`, because the Keychain has another item of the service (the account
 /// `unknown`, expired and with no refresh token) and a lookup that names no account
 /// returns that one.
-fn keychain_args(user: &str) -> Vec<String> {
+pub(crate) fn keychain_args(user: &str) -> Vec<String> {
     ["find-generic-password", "-s", SERVICE, "-a", user, "-w"]
         .map(str::to_owned)
         .into()
@@ -299,13 +297,9 @@ pub fn keychain_services() -> Option<BTreeSet<String>> {
     if !cfg!(target_os = "macos") && !cfg!(test) {
         return None;
     }
-    let ran = super::keychain::security(
-        "login::keychain_services",
-        ["dump-keychain"],
-        Duration::from_secs(60),
-    )
-    .ok()
-    .filter(|ran| ran.code == Some(0))?;
+    let ran = super::keychain::item_names(Duration::from_secs(60))
+        .ok()
+        .filter(|ran| ran.code == Some(0))?;
     Some(services(&ran.stdout))
 }
 
@@ -389,19 +383,27 @@ struct Owner {
 }
 
 impl Owner {
-    fn settings(&self) -> PathBuf {
-        self.home.join(".claude").join("settings.json")
+    /// The home as the owner's files are read.
+    fn owned(&self) -> Owned {
+        Account::this().named(&self.home, Purpose::Guard)
     }
 
-    fn history(&self) -> PathBuf {
-        self.home.join(".claude").join("history.jsonl")
+    fn settings(&self) -> Owned {
+        self.owned().join(".claude/settings.json")
+    }
+
+    fn history(&self) -> Owned {
+        self.owned().join(".claude/history.jsonl")
     }
 
     /// What it is now.
     fn look(&self) -> Seen {
-        let settings = fs::read(self.settings()).ok().map(|bytes| digest(&bytes));
-        let history = fs::metadata(self.history()).map_or(0, |meta| meta.len());
-        let projects = fs::read_to_string(self.home.join(".claude.json"))
+        let settings = self.settings().read().ok().map(|bytes| digest(&bytes));
+        let history = self.history().meta().map_or(0, |meta| meta.len());
+        let projects = self
+            .owned()
+            .join(".claude.json")
+            .read_to_string()
             .ok()
             .and_then(|text| serde_json::from_str::<Value>(&text).ok())
             .and_then(|json| json["projects"].as_object().cloned())
@@ -410,11 +412,13 @@ impl Owner {
             .filter(|(path, _)| is_run_folder(path))
             .map(|(path, entry)| (path, digest(entry.to_string().as_bytes())))
             .collect();
-        let conversations = fs::read_dir(self.home.join(".claude").join("projects"))
+        let conversations = self
+            .owned()
+            .join(".claude/projects")
+            .names()
             .into_iter()
             .flatten()
-            .flatten()
-            .filter_map(|entry| entry.file_name().into_string().ok())
+            .filter_map(|name| name.into_string().ok())
             .filter(|name| is_run_name(name))
             .collect();
         Seen {
@@ -428,7 +432,7 @@ impl Owner {
     /// What `history.jsonl` gained since `before`: the prompts typed since.
     fn typed_since(&self, before: &Seen) -> String {
         let read = || -> io::Result<Vec<u8>> {
-            let mut file = fs::File::open(self.history())?;
+            let mut file = self.history().open()?;
             file.seek(SeekFrom::Start(before.history))?;
             let mut appended = Vec::new();
             file.read_to_end(&mut appended)?;
@@ -463,6 +467,9 @@ fn changes(before: &Seen, after: &Seen, typed: &str) -> Vec<String> {
     }
     for name in after.conversations.difference(&before.conversations) {
         found.push(format!("~/.claude/projects gained {name}"));
+    }
+    for name in before.conversations.difference(&after.conversations) {
+        found.push(format!("~/.claude/projects lost {name}"));
     }
     let prompts = typed
         .lines()
@@ -660,7 +667,7 @@ impl Copy {
 impl Made {
     /// What the folder's `.credentials.json` is of the login that was copied.
     fn copy(&self) -> Copy {
-        let now = fs::read_to_string(self.folder.path().join(".credentials.json"))
+        let now = crate::door::reads::read_to_string(self.folder.path().join(".credentials.json"))
             .ok()
             .and_then(|text| serde_json::from_str::<Value>(&text).ok());
         Copy::of(&self.oauth, now.as_ref())
@@ -795,7 +802,7 @@ impl Login {
         left: Duration,
     ) -> Result<Self> {
         let file = folder.join(".credentials.json");
-        if !file.is_file() {
+        if !Account::this().named(&file, Purpose::Seed).is_a_file() {
             return Err(Error::Daemon(format!(
                 "--claude-config {}: the folder holds no .credentials.json to copy the login from \
                  (a Claude Code that ran on a folder on a Mac keeps its login in the Keychain, not \
@@ -851,9 +858,9 @@ impl Login {
 
     fn seed_trust(&self, config: &Path) -> Result {
         if self.watch_owner {
-            super::machine::seed_claude_trust(config, &self.owner.home)
+            super::machine::seed_claude_trust(config, self.owner.owned())
         } else {
-            super::machine::seed_claude_trust_login_only(config, &self.owner.home)
+            super::machine::seed_claude_trust_login_only(config, self.owner.owned())
         }
     }
 
@@ -865,7 +872,12 @@ impl Login {
         }
         let (oauth, renewed) = self.usable(self.source.read()?, now)?;
         let owner_login = match &self.source {
-            Source::File(file) => OwnerLogin::File(cf_base::file::stat(file).map_err(|e| e.kind())),
+            Source::File(file) => OwnerLogin::File(
+                Account::this()
+                    .named(file, Purpose::Guard)
+                    .stat()
+                    .map_err(|e| e.kind()),
+            ),
             Source::Keychain => OwnerLogin::Keychain(oauth.clone()),
         };
         crate::rig::sweep::say_copies(&self.parent);
@@ -909,6 +921,7 @@ fn claude_renewal(
     home: PathBuf,
     program: impl Fn() -> Result<PathBuf> + Send + Sync + 'static,
 ) -> Renewal {
+    let on = machine.clone();
     Renewal::new(
         machine,
         "Claude Code",
@@ -918,12 +931,15 @@ fn claude_renewal(
             let program = program()?;
             let owner = Owner { home: home.clone() };
             let before = owner.look();
-            let projects = home.join(".claude").join("projects");
+            let home = Account::this().named(&home, Purpose::Guard);
+            let projects = home.join(".claude/projects");
             let ended = renew::one_shot_in(
+                &on,
                 Harness::Claude,
                 &program,
                 &renew::claude_words(&model),
-                &[projects.as_path()],
+                &renew::account_vars(&home),
+                &[&projects],
             )?;
             let changed = owner.changes_since(&before);
             if changed.is_empty() {
@@ -980,12 +996,11 @@ fn copy_records(from: &Path, into: &Path) -> Result {
 /// none. A link is not followed, and a `.key` (the secret of a session's socket, of no use once its
 /// process is gone) is not copied.
 fn copy_tree(from: &Path, to: &Path) -> Result {
-    if !from.is_dir() {
+    if !crate::door::reads::is_dir(from) {
         return Ok(());
     }
     let not_copied = |source: &Path| {
-        source.extension().is_some_and(|ext| ext == "key")
-            || fs::symlink_metadata(source).is_ok_and(|found| found.file_type().is_symlink())
+        source.extension().is_some_and(|ext| ext == "key") || crate::door::reads::is_symlink(source)
     };
     crate::door::copy_tree(from, to, &not_copied)
 }
@@ -1007,9 +1022,10 @@ impl Login {
     /// The latter item also holds the owner's MCP tokens, which are not compared there.
     fn owner_login_changed(&self, copied: &OwnerLogin) -> Option<String> {
         let kept = match (&self.source, copied) {
-            (Source::File(file), OwnerLogin::File(Ok(was))) => {
-                cf_base::file::stat(file).is_ok_and(|now| now == *was)
-            }
+            (Source::File(file), OwnerLogin::File(Ok(was))) => Account::this()
+                .named(file, Purpose::Guard)
+                .stat()
+                .is_ok_and(|now| now == *was),
             (Source::Keychain, OwnerLogin::Keychain(copied)) => self
                 .source
                 .read()

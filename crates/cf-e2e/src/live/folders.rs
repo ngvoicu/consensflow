@@ -237,7 +237,7 @@ mod tests {
         let folder = pool
             .folder(root.path(), "case", true, || made_in(root.path(), "case"))
             .unwrap();
-        std::fs::write(folder.join("left.txt"), "x").unwrap();
+        crate::door::write(folder.join("left.txt"), "x").unwrap();
         lease.passed();
         drop(lease);
         assert!(!folder.exists(), "a passed run left {folder:?}");
@@ -340,9 +340,9 @@ mod tests {
         let pool = pool();
         let root = crate::door::made("cf-test-").unwrap();
         let lease = pool.lease();
-        let other = tempfile::tempdir().unwrap();
+        let other = crate::door::made("t-").unwrap();
         let theirs = other.path().join("theirs");
-        std::fs::create_dir(&theirs).unwrap();
+        crate::door::make_dir(&theirs).unwrap();
         let folder = pool
             .folder(root.path(), "case", true, || {
                 Ok::<_, std::io::Error>(theirs.clone())

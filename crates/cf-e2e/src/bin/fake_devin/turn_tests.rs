@@ -3,7 +3,6 @@
 
 use std::thread;
 
-use rusqlite::Connection;
 use serde_json::Value;
 
 use super::*;
@@ -225,7 +224,7 @@ fn case_at(pace: Pace) -> Case {
 
 impl Case {
     fn nodes(&self) -> Vec<Value> {
-        let db = Connection::open(self.folder.path().join("sessions.db")).unwrap();
+        let db = cf_e2e::door::database::write(self.folder.path().join("sessions.db")).unwrap();
         let mut rows = db
             .prepare("SELECT chat_message FROM message_nodes ORDER BY row_id")
             .unwrap();
@@ -517,7 +516,7 @@ fn the_turns_after_a_new_conversation_go_into_it_and_the_ones_before_stay_in_the
     let opened = Store::open(&case.folder.path().join("sessions.db"), "bright-dune").unwrap();
     case.window.switch(opened, "bright-dune");
     case.window.take("Reply with exactly: AFTER").unwrap();
-    let db = Connection::open(case.folder.path().join("sessions.db")).unwrap();
+    let db = cf_e2e::door::database::write(case.folder.path().join("sessions.db")).unwrap();
     let said_in = |session: &str| -> Vec<String> {
         db.prepare("SELECT chat_message FROM message_nodes WHERE session_id = ? ORDER BY row_id")
             .unwrap()

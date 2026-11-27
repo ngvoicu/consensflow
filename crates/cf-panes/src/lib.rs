@@ -34,6 +34,8 @@ pub mod pane_handlers;
 pub mod privacy;
 #[cfg(target_os = "macos")]
 mod process_tree;
+#[cfg(target_os = "macos")]
+pub use process_tree::{read_identity, UniqueIdentity};
 pub mod pty;
 pub mod screen;
 #[cfg(any(target_os = "macos", test))]

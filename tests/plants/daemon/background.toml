@@ -1077,16 +1077,19 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/bin/fake_devin/command.rs"
-find = '''    let shell = Run::new(cf_e2e::process::git_bash().ok_or_else(|| {
-        "Git Bash is not found: the stand-in Devin runs its command in it, as Devin does on Windows"
-            .to_owned()
-    })?)
-    .args(["-c", &format!("{command}; true")]);'''
-replace = '''    let shell = Run::new("cmd").args([
-        "/d".to_owned(),
-        "/c".to_owned(),
+find = '''    let shell = Run::script_in(
+        cf_e2e::process::git_bash().ok_or_else(|| {
+            "Git Bash is not found: the stand-in Devin runs its command in it, as Devin does on Windows"
+                .to_owned()
+        })?,
+        &["-c"],
+        format!("{command}; true"),
+    );'''
+replace = '''    let shell = Run::script_in(
+        "cmd",
+        &["/d", "/c"],
         format!("ping -n {} 127.0.0.1 > nul", seconds + 1),
-    ]);'''
+    );'''
 
 [[plant]]
 name = "background windows: Git Bash is any file named, though it is not there"

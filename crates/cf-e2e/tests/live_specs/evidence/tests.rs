@@ -7,8 +7,8 @@ const SPEC: &str =
 
 const REGISTRY: &str = "# Spec Registry\n\n| ID | Title | Status | Priority | Progress | Updated |\n|----|-------|--------|----------|----------|---------|\n| hello | Hello | active | medium | 0/2 | 2026-10-13 |\n";
 
-fn project(written: &[(&str, &str)]) -> tempfile::TempDir {
-    let folder = tempfile::tempdir().unwrap();
+fn project(written: &[(&str, &str)]) -> cf_e2e::door::Made {
+    let folder = cf_e2e::door::made("t-").unwrap();
     for (path, text) in written {
         files::write(&folder.path().join(path), text).unwrap();
     }

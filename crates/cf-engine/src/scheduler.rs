@@ -1985,10 +1985,9 @@ impl Dispatcher {
             if owner.is_some_and(|owner| self.is_out(&owner)) {
                 continue;
             }
-            let resumed = self.seams.ledger.borrow_mut().resume_task(
+            let resumed = self.seams.ledger.borrow_mut().resume_held_task(
                 held.project_id,
                 held.number,
-                None,
                 RESUME_WORDS,
             );
             match resumed {

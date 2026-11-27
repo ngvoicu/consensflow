@@ -59,7 +59,7 @@ impl Plugins {
                     .arg(SERVER)
                     .arg(folder.join(format!("plugin-{window}-{number}")))
                     .arg(starts.to_string())
-                    .inheriting_window_env()
+                    .as_this_window(cf_e2e::door::spawn::Window::this())
                     .spawn()
                     .map_err(|failed| failed.to_string())
             })
@@ -114,7 +114,7 @@ pub fn serve(args: &[String]) -> ExitCode {
                 .arg(WORKER)
                 .arg(WORKER_SECONDS.to_string())
                 .arg(worker)
-                .inheriting_window_env()
+                .as_this_window(cf_e2e::door::spawn::Window::this())
                 .closed_input()
                 .spawn();
             match spawned {

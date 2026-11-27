@@ -14,6 +14,7 @@
 mod advisor_off;
 mod compaction;
 mod dialogs;
+mod error_before_text;
 mod fixtures;
 mod launches;
 mod own_turn;

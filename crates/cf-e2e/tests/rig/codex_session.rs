@@ -175,7 +175,6 @@ impl Supervised {
             .var("CF_TEST_CODEX_LOG", &log)
             .var("OPENAI_API_KEY", "sk-not-for-codex")
             .vars(vars.iter().map(|(name, value)| (name, value)))
-            .finding_programs()
             .closed_input()
             .spawn()?;
         // What it prints is of no matter, and a pipe nobody reads would stop it.
@@ -486,7 +485,10 @@ impl Drop for Unlocked {
         use std::os::unix::fs::PermissionsExt;
 
         for folder in std::fs::read_dir(&self.0).into_iter().flatten().flatten() {
-            let _ = std::fs::set_permissions(folder.path(), std::fs::Permissions::from_mode(0o700));
+            let _ = cf_e2e::door::set_permissions(
+                folder.path(),
+                std::fs::Permissions::from_mode(0o700),
+            );
         }
     }
 }

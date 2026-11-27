@@ -165,12 +165,12 @@ mod tests {
     fn folder() -> cf_e2e::door::Made {
         let folder = cf_e2e::door::made("cf-test-").unwrap();
         for name in ["desk.png", "hero.png"] {
-            std::fs::write(folder.path().join(name), cf_e2e::png::SMALL).unwrap();
+            cf_e2e::door::write(folder.path().join(name), cf_e2e::png::SMALL).unwrap();
         }
-        std::fs::create_dir(folder.path().join("my images")).unwrap();
-        std::fs::write(folder.path().join("my images/art.png"), cf_e2e::png::SMALL).unwrap();
-        std::fs::write(folder.path().join("notes.txt"), "notes").unwrap();
-        std::fs::write(folder.path().join("fake.png"), "no picture").unwrap();
+        cf_e2e::door::make_dir(folder.path().join("my images")).unwrap();
+        cf_e2e::door::write(folder.path().join("my images/art.png"), cf_e2e::png::SMALL).unwrap();
+        cf_e2e::door::write(folder.path().join("notes.txt"), "notes").unwrap();
+        cf_e2e::door::write(folder.path().join("fake.png"), "no picture").unwrap();
         folder
     }
 

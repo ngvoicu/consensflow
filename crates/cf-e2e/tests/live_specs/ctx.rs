@@ -49,13 +49,12 @@ fn chief_rollout(home: &Path, thread: &str) -> std::result::Result<String, Strin
 #[cfg(test)]
 #[test]
 fn kit_round3_specs_refuses_a_foreign_codex_home() {
-    let foreign = tempfile::tempdir().unwrap();
-    std::fs::create_dir(foreign.path().join("sessions")).unwrap();
-    std::fs::write(
+    let foreign = cf_e2e::standin_process::unowned_tempdir();
+    cf_e2e::standin_process::foreign_dir(foreign.path().join("sessions"));
+    cf_e2e::standin_process::foreign_write(
         foreign.path().join("sessions/rollout-thread.jsonl"),
         "{\"fake\":true}\n",
-    )
-    .unwrap();
+    );
     assert!(
         chief_rollout(foreign.path(), "thread").is_err(),
         "a foreign rollout was read"

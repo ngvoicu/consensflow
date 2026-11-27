@@ -99,7 +99,7 @@ fn resumes(context: &Context, session: &str) -> usize {
 }
 
 fn old_quota_followed_by_io_errors(rewrite: bool) {
-    let context = Context::new();
+    let context = Context::tries_off();
     let tiers = Tiers::new(&context, &["zeus"]);
     tiers.open();
     passes(&context, 2);

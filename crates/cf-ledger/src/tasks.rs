@@ -13,6 +13,7 @@ mod outage;
 mod own_steps;
 mod pausing;
 mod plan;
+mod turn_retry;
 
 use cf_proto::ledger::{MessageView, TaskThread, TaskView};
 use rusqlite::{params, OptionalExtension};
@@ -39,15 +40,18 @@ pub use outage::{window_closed, SAME_ERROR_WITHIN_MS};
 pub(crate) use own_steps::withdrawn_late;
 pub(crate) use pausing::{
     clear_hold, go_on_in_window, held_for_context, held_tasks_due, hold_for_context, hold_task,
-    pause_again, pause_failed_project_resume, pause_task, pause_task_naming, pause_with_project,
-    paused_by_consensflow, paused_task, relaunch_stalled, rest_while_resumed, resume_task,
-    resume_with_project, resume_words, resume_words_not_in, shut_tracked_doors, stop_asked_by,
-    stop_of, take_over_pause, task_in_hand, task_relaunched, tell_it_goes_on, told_since_paused,
-    unmark_pause, was_relaunched, work_while_resumed,
+    hold_task_for_retry, pause_again, pause_failed_project_resume, pause_task, pause_task_naming,
+    pause_with_project, paused_by_consensflow, paused_task, relaunch_stalled, rest_while_resumed,
+    resume_held_task, resume_task, resume_with_project, resume_words, resume_words_not_in,
+    shut_tracked_doors, stop_asked_by, stop_of, take_over_pause, task_in_hand, task_relaunched,
+    tell_it_goes_on, told_since_paused, turned_away_for_a_question, unmark_pause, was_relaunched,
+    work_while_resumed,
 };
 pub use pausing::{resumed_in_vain, NEVER_BEGAN};
 pub(crate) use plan::{create_plan, decide_tasks, replayed_plan};
 pub use plan::{PlanCreated, PlanSection, PlanTask};
+pub(crate) use turn_retry::start_again as start_tries_again;
+pub use turn_retry::{RetryFact, RetryHold, RetryPlan};
 
 /// What a paused task's window is told when it goes on: the human's Resume
 /// and the daemon's alike.

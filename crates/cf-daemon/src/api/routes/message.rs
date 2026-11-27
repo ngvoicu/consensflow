@@ -1,5 +1,6 @@
 //! `GET /api/inbox/<id>`: one message, whole, to its recipient or its sender,
-//! unless it still waits for the human. The id is the digits as the path had
+//! unless it still waits for the human, or is a reminder its recipient is not
+//! shown (the ledger's `reminder_withheld`). The id is the digits as the path had
 //! them: the 404 quotes them as typed. It changes nothing: a message read here
 //! is received when `cf` says it wrote it whole (`POST /api/answers/read`). A
 //! message no window was handed yet, read while the project is closed, waits for
@@ -35,6 +36,17 @@ pub(super) async fn handle(
             && (Some(message.recipient.as_str()) == handle || message.sender.as_deref() == handle)
             && !(message.state == "gated" && Some(message.recipient.as_str()) == handle)
     });
+    // A reminder that is nobody's to read is shown to none. One a meeting holds is
+    // told to wait, below, as any message it holds is.
+    let visible = match visible {
+        Some(message)
+            if context.ledger.borrow().reminder_withheld(message.id)?
+                == Some(cf_ledger::Withheld::Gone) =>
+        {
+            None
+        }
+        other => other,
+    };
     let until = match &visible {
         Some(message) => Waits::now(context, caller)?.until(message),
         None => None,

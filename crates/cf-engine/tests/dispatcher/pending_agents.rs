@@ -257,7 +257,7 @@ fn a_turn_that_left_a_job_and_agents_is_held_for_both_and_ends_neither() {
 
 #[test]
 fn a_turn_that_ends_with_agents_pending_is_not_a_failure_and_a_failed_turn_is_whatever_it_left() {
-    let context = Context::new();
+    let context = Context::tries_off();
     let tiers = working(&context);
     // The harness reports the turn failed, with agents still running.
     context.adapter.with("zeus", |agent| agent.failed = true);

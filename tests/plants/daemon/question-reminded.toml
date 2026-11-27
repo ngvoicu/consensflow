@@ -1,0 +1,344 @@
+# Q2 (N24): a question a restart or a project Close closed is reminded while its task waits.
+# The wait is a row of `question_wait` (the close's place, the note, the clock, a cursor of its own);
+# eligibility is read where a reminder is written and where it is admitted.
+[run]
+question-reminded-ledger = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "closed_wait::"]
+question-reminded-daemon = ["cargo", "test", "--offline", "-p", "cf-daemon", "--test", "closed_wait_inbox"]
+question-reminded-hold = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "hold_table::"]
+question-reminded-read = ["cargo", "test", "--offline", "-p", "cf-daemon", "--test", "question_read_hold"]
+question-reminded-engine = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "t1924_"]
+
+[[plant]]
+name = "question reminded: a tell still queued is not the chief's action"
+meant = "a_tell_queued_before_the_returned_answers_note_is_the_chiefs_action"
+runs = ["question-reminded-ledger"]
+[[plant.edit]]
+file = "crates/cf-ledger/src/waiting_questions.rs"
+find = "              AND a.state IN ('queued','gated','delivering','delivered','read'))\";"
+replace = "              AND a.state IN ('delivered','read'))\";"
+
+[[plant]]
+name = "question reminded: acted is counted from the note, not from the close"
+meant = "a_tell_queued_before_the_returned_answers_note_is_the_chiefs_action"
+runs = ["question-reminded-ledger"]
+[[plant.edit]]
+file = "crates/cf-ledger/src/waiting_questions.rs"
+find = "\"UPDATE question_wait SET note_id = coalesce(note_id, ?1) WHERE question_id = ?2\","
+replace = "\"UPDATE question_wait SET after_id = ?1, note_id = coalesce(note_id, ?1) WHERE question_id = ?2\","
+
+[[plant]]
+name = "question reminded: the clock is the question's own receipt"
+meant = "a_restarted_question_is_a_wait_once_its_note_is_delivered"
+runs = ["question-reminded-ledger"]
+[[plant.edit]]
+file = "crates/cf-ledger/src/waiting_questions.rs"
+find = "const CLOSED_CLOCK: &str = \"coalesce(w.from_update_at, w.first_read_at, n.delivered_at)\";"
+replace = "const CLOSED_CLOCK: &str = \"coalesce(w.from_update_at, w.first_read_at, q.delivered_at)\";"
+
+[[plant]]
+name = "question reminded: the clock is the note's confirmation after an early read"
+meant = "the_clock_starts_at_the_first_inbox_read_of_a_note_still_on_its_way"
+runs = ["question-reminded-ledger"]
+[[plant.edit]]
+file = "crates/cf-ledger/src/waiting_questions.rs"
+find = "const CLOSED_CLOCK: &str = \"coalesce(w.from_update_at, w.first_read_at, n.delivered_at)\";"
+replace = "const CLOSED_CLOCK: &str = \"coalesce(w.from_update_at, n.delivered_at)\";"
+
+[[plant]]
+name = "question reminded: an early read is not stamped"
+meant = "the_clock_starts_at_the_first_inbox_read_of_a_note_still_on_its_way"
+runs = ["question-reminded-ledger"]
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/receipt.rs"
+find = "        crate::waiting_questions::note_read_early(store, message.id)?;"
+replace = "        let _ = message.id;"
+
+[[plant]]
+name = "question reminded: a closed question's reminder says Answer it"
+meant = "t1924_restart_reminds_the_closed_question"
+runs = ["question-reminded-engine"]
+[[plant.edit]]
+file = "crates/cf-engine/src/waiting_questions.rs"
+find = "                (Some(why), Some(number)) => format!("
+replace = "                (Some(why), Some(number)) if false => format!("
+
+[[plant]]
+name = "question reminded: the open question's cursor is reused"
+meant = "a_closed_questions_reminder_has_a_cursor_of_its_own_and_the_open_ones_link_stays"
+runs = ["question-reminded-ledger"]
+[[plant.edit]]
+file = "crates/cf-ledger/src/waiting_questions.rs"
+find = '''            "UPDATE question_wait SET reminder_id = ?1 WHERE question_id = ?2",
+            params![sent.id, id],
+        )?;'''
+replace = '''            "UPDATE question_wait SET reminder_id = ?1 WHERE question_id = ?2",
+            params![sent.id, id],
+        )?;
+        store.db.execute(
+            "INSERT INTO question_reminder(question_id, reminder_id, ended) VALUES (?2, ?1, 0)
+             ON CONFLICT(question_id) DO UPDATE SET reminder_id=excluded.reminder_id",
+            params![sent.id, id],
+        )?;'''
+
+[[plant]]
+name = "question reminded: a task a person paused is reminded"
+meant = "each_end_stops_the_reminders_and_withdraws_a_queued_one"
+runs = ["question-reminded-ledger"]
+[[plant.edit]]
+file = "crates/cf-ledger/src/waiting_questions.rs"
+find = "WHERE t.deleted_at IS NULL AND t.state IN ('waiting','working')"
+replace = "WHERE t.deleted_at IS NULL AND t.state IN ('waiting','working','paused')"
+
+[[plant]]
+name = "question reminded: no reminder at 30 minutes"
+meant = "t1924_restart_reminds_the_closed_question"
+runs = ["question-reminded-engine"]
+[[plant.edit]]
+file = "crates/cf-engine/src/waiting_questions.rs"
+find = "const FIRST_REMINDER_MS: i64 = 30 * 60_000;"
+replace = "const FIRST_REMINDER_MS: i64 = 300 * 60_000;"
+
+[[plant]]
+name = "question reminded: the next is not two hours after"
+meant = "t1924_restart_reminds_the_closed_question"
+runs = ["question-reminded-engine"]
+[[plant.edit]]
+file = "crates/cf-engine/src/waiting_questions.rs"
+find = "const REPEAT_REMINDER_MS: i64 = 2 * 60 * 60_000;"
+replace = "const REPEAT_REMINDER_MS: i64 = 20 * 60 * 60_000;"
+
+[[plant]]
+name = "question reminded: a queued reminder is let through after the chief acted"
+meant = "each_end_stops_the_reminders_and_withdraws_a_queued_one"
+runs = ["question-reminded-ledger"]
+[[plant.edit]]
+file = "crates/cf-ledger/src/waiting_questions.rs"
+find = '''reminder.handed_at IS NULL AND NOT EXISTS (
+               SELECT 1 {CLOSED_FROM} AND w.question_id=own.question_id)"'''
+replace = '''reminder.handed_at IS NULL AND 0"'''
+
+[[plant]]
+name = "question reminded: a project that is closed is reminded"
+meant = "a_project_close_writes_none_while_it_lasts_and_its_resume_keeps_the_clock"
+runs = ["question-reminded-ledger"]
+[[plant.edit]]
+file = "crates/cf-ledger/src/waiting_questions.rs"
+find = "    JOIN project pr ON pr.id=q.project_id AND pr.state='open'"
+replace = "    JOIN project pr ON pr.id=q.project_id"
+
+[[plant]]
+name = "question reminded: a wait's rows stay when its project is deleted"
+meant = "a_project_with_a_recorded_wait_is_deleted_with_it"
+runs = ["question-reminded-ledger"]
+[[plant.edit]]
+file = "crates/cf-ledger/migrations/0046.sql"
+find = "REFERENCES message(id) ON DELETE CASCADE,"
+replace = "REFERENCES message(id),"
+
+[[plant]]
+name = "question reminded: the inbox counts withheld reminders in its limit"
+meant = "q2_a_hundred_withdrawn_reminders_hide_no_eligible_one"
+runs = ["question-reminded-daemon"]
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages.rs"
+find = '''    for id in ids {
+        if shown.len() == limit {'''
+replace = '''    for id in ids.into_iter().take(limit) {
+        if shown.len() == limit {'''
+
+[[plant]]
+name = "question reminded: a reminder given back during a Close is withdrawn"
+meant = "a_reminder_given_back_during_a_close_is_kept"
+runs = ["question-reminded-ledger"]
+[[plant.edit]]
+file = "crates/cf-ledger/src/waiting_questions.rs"
+find = '''JOIN project held ON held.id=reminder.project_id AND held.state='open''''
+replace = '''JOIN project held ON held.id=reminder.project_id'''
+
+[[plant]]
+name = "question reminded: the Resume withdraws a held reminder with the pause notes"
+meant = "a_reminder_given_back_during_a_close_is_kept"
+runs = ["question-reminded-ledger"]
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/pauses.rs"
+find = '''         AND id NOT IN (SELECT message_id FROM question_reminder_sent)
+'''
+replace = ''''''
+
+[[plant]]
+name = "question reminded: a reminder is not recorded as one"
+meant = "a_reminder_that_failed_and_was_replaced_is_not_listed"
+runs = ["question-reminded-ledger"]
+[[plant.edit]]
+file = "crates/cf-ledger/src/waiting_questions.rs"
+find = '''        "INSERT INTO question_reminder_sent(message_id) VALUES (?1)",
+        [sent.id],'''
+replace = '''        "INSERT INTO question_reminder_sent(message_id) SELECT ?1 WHERE 0",
+        [sent.id],'''
+
+[[plant]]
+name = "question reminded: the migration links no returned answer's note"
+meant = "the_migration_links_only_the_note_the_ledger_names"
+runs = ["question-reminded-ledger"]
+[[plant.edit]]
+file = "crates/cf-ledger/migrations/0046.sql"
+find = '''           ORDER BY a.id LIMIT 1) AS note'''
+replace = '''             AND 0 ORDER BY a.id LIMIT 1) AS note'''
+
+[[plant]]
+name = "question reminded: an unnamed note's wait has no clock from the update"
+meant = "the_migration_keeps_the_wait_of_a_renamed_member"
+runs = ["question-reminded-ledger"]
+[[plant.edit]]
+file = "crates/cf-ledger/migrations/0046.sql"
+find = '''       CASE WHEN note IS NULL THEN strftime('%Y-%m-%dT%H:%M:%fZ', 'now') END'''
+replace = '''       NULL'''
+
+[[plant]]
+name = "question reminded: an old wait's boundary is not the question's id"
+meant = "the_migration_links_only_the_note_the_ledger_names"
+runs = ["question-reminded-ledger"]
+[[plant.edit]]
+file = "crates/cf-ledger/migrations/0046.sql"
+find = '''SELECT question_id, question_id, note,'''
+replace = '''SELECT question_id, (SELECT COALESCE(MAX(id), 0) FROM message), note,'''
+
+[[plant]]
+name = "question reminded: the inbox lists a withheld reminder"
+meant = "q2_the_inbox_shows_no_reminder_of_an_ended_task_or_member"
+runs = ["question-reminded-daemon"]
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages.rs"
+find = '''        if crate::waiting_questions::withheld(store, id)?.is_none() {'''
+replace = '''        if true {'''
+
+[[plant]]
+name = "question reminded: a withheld reminder is served whole"
+meant = "q2_the_inbox_shows_no_reminder_of_an_ended_task_or_member"
+runs = ["question-reminded-daemon"]
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/routes/message.rs"
+find = '''                == Some(cf_ledger::Withheld::Gone) =>'''
+replace = '''                == Some(cf_ledger::Withheld::Gone)
+                && false =>'''
+
+[[plant]]
+name = "question reminded: a meeting-held reminder is told as gone, not as waiting"
+meant = "q2_a_meeting_holds_reminders_from_the_inbox"
+runs = ["question-reminded-daemon"]
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/routes/message.rs"
+find = '''                == Some(cf_ledger::Withheld::Gone) =>'''
+replace = '''                .is_some() =>'''
+
+[[plant]]
+name = "question reminded: a receipt is taken of a withheld reminder"
+meant = "a_receipt_is_taken_of_no_reminder_the_wait_no_longer_allows_even_unlisted"
+runs = ["question-reminded-ledger"]
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/receipt.rs"
+find = '''            if crate::waiting_questions::withheld(store, message.id)?.is_some()
+                || crate::meeting::is_held(store, message.id)?'''
+replace = '''            if crate::meeting::is_held(store, message.id)?'''
+
+[[plant]]
+name = "question reminded: a reminder a Close holds is shown"
+meant = "q2_a_look_while_the_project_is_closed_consumes_no_reminder"
+runs = ["question-reminded-daemon"]
+[[plant.edit]]
+file = "crates/cf-ledger/src/waiting_questions.rs"
+find = '''            if !open || stale_reminder(store, message)? {'''
+replace = '''            if stale_reminder(store, message)? {'''
+
+[[plant]]
+name = "question reminded: a cancelled or failed reminder is shown"
+meant = "a_reminder_that_failed_and_was_replaced_is_not_listed"
+runs = ["question-reminded-ledger"]
+[[plant.edit]]
+file = "crates/cf-ledger/src/waiting_questions.rs"
+find = '''        _ => Some(Withheld::Gone),
+    })'''
+replace = '''        _ => None,
+    })'''
+
+[[plant]]
+name = "question reminded: a reminder the chief had is hidden when its task ends"
+meant = "a_reminder_the_chief_has_had_stays_readable_when_its_wait_ends"
+runs = ["question-reminded-ledger", "question-reminded-daemon"]
+[[plant.edit]]
+file = "crates/cf-ledger/src/waiting_questions.rs"
+find = '''    if had || matches!(state.as_str(), "delivered" | "read") {'''
+replace = '''    let _ = had;
+    if matches!(state.as_str(), "delivered" | "read") {'''
+
+[[plant]]
+name = "question reminded: a reminder read early does not count as had"
+meant = "a_reminder_the_chief_has_had_stays_readable_when_its_wait_ends"
+runs = ["question-reminded-ledger", "question-reminded-daemon"]
+[[plant.edit]]
+file = "crates/cf-ledger/src/waiting_questions.rs"
+find = '''                      OR COALESCE(json_extract(m.receipt, '$.readEarly'), '') != '','''
+replace = '''                      ,'''
+
+[[plant]]
+name = "question reminded: a reminder handed to its window does not count as had"
+meant = "a_reminder_the_chief_has_had_stays_readable_when_its_wait_ends"
+runs = ["question-reminded-ledger"]
+[[plant.edit]]
+file = "crates/cf-ledger/src/waiting_questions.rs"
+find = '''                    m.handed_at IS NOT NULL OR m.delivered_at IS NOT NULL'''
+replace = '''                    m.delivered_at IS NOT NULL'''
+
+[[plant]]
+name = "question reminded: a meeting does not hold a reminder"
+meant = "a_reminder_a_meeting_holds_is_not_listed_and_takes_no_receipt"
+runs = ["question-reminded-ledger", "question-reminded-daemon"]
+[[plant.edit]]
+file = "crates/cf-ledger/src/waiting_questions.rs"
+find = '''            } else if in_meeting {'''
+replace = '''            } else if false {'''
+
+[[plant]]
+name = "question reminded: a read of a note a meeting holds is taken"
+meant = "an_ordinary_note_a_hold_keeps_takes_no_receipt"
+runs = ["question-reminded-ledger"]
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/receipt.rs"
+find = '''            if crate::waiting_questions::withheld(store, message.id)?.is_some()
+                || crate::meeting::is_held(store, message.id)?'''
+replace = '''            if crate::waiting_questions::withheld(store, message.id)?.is_some()
+                || false'''
+
+[[plant]]
+name = "question reminded: a read of a note a Close holds is taken"
+meant = "an_ordinary_note_a_hold_keeps_takes_no_receipt"
+runs = ["question-reminded-ledger"]
+[[plant.edit]]
+file = "crates/cf-ledger/src/meeting.rs"
+find = '''closed.state != 'open')))",'''
+replace = '''closed.state = 'gone')))",'''
+
+[[plant]]
+name = "question reminded: a Close's hold asks handed_at alone, not transport's handover decision"
+meant = "a_whole_read_is_received_wherever_its_reader_has_the_message_and_nothing_else_holds"
+runs = ["question-reminded-hold", "question-reminded-read"]
+[[plant.edit]]
+file = "crates/cf-ledger/src/meeting.rs"
+find = '''m.state IN ('queued', 'delivering') AND NOT {}'''
+replace = '''m.state IN ('queued', 'delivering') AND m.handed_at IS NULL'''
+[[plant.edit]]
+file = "crates/cf-ledger/src/meeting.rs"
+find = '''            held_by_meeting("m"),
+            crate::messages::handed_over_condition("m")
+        ))?'''
+replace = '''            held_by_meeting("m")
+        ))?'''
+
+[[plant]]
+name = "question reminded: transport's handover decision forgets an answer's claim"
+meant = "a_claimed_answer_read_during_a_close_is_received_and_not_returned"
+runs = ["question-reminded-read"]
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = '''AND ({alias}.handed_at IS NOT NULL OR {alias}.claimed_at IS NOT NULL)))"'''
+replace = '''AND {alias}.handed_at IS NOT NULL))"'''

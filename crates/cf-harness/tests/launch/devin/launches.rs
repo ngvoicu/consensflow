@@ -136,8 +136,8 @@ fn can_go_on_with_a_session_whose_store_holds_a_message_of_the_users_and_not_wit
     let devin = home.adapter();
     assert_eq!(
         finished(devin.resumable("calm-river")),
-        None,
-        "Devin's store is not there: its record cannot be read"
+        Some(false),
+        "Devin's store is not there yet: no session of it was written, so none has a message to go on with"
     );
     let store = home.store();
     assert_eq!(

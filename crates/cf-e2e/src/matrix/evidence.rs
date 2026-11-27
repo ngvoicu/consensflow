@@ -11,8 +11,9 @@ use std::path::{Path, PathBuf};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
+use crate::door::source::{Account, Purpose};
 use crate::live::report::Check;
-use crate::{files, Error, Result};
+use crate::{Error, Result};
 
 /// The folder of the reports, from the checkout's root.
 pub const REPORTS: &str = "app/src-tauri/target/live-matrix";
@@ -62,28 +63,34 @@ impl Owner {
     fn look_with_logins(links: &[PathBuf], files: &[PathBuf], login_files: &[PathBuf]) -> Self {
         let mut seen = BTreeMap::new();
         for link in links {
-            let target = std::fs::read_link(link).map_or_else(
-                |_| "no link".to_owned(),
-                |to| format!("-> {}", to.display()),
-            );
+            let target = Account::this()
+                .named(link, Purpose::Guard)
+                .link_target()
+                .map_or_else(
+                    |_| "no link".to_owned(),
+                    |to| format!("-> {}", to.display()),
+                );
             seen.insert(link.clone(), OwnerFile::Text(target));
         }
         for file in files.iter().filter(|file| !login_files.contains(file)) {
-            let hash = std::fs::read(file).map_or_else(
-                |_| "absent".to_owned(),
-                |bytes| {
-                    let digest = Sha256::digest(bytes);
-                    digest
-                        .iter()
-                        .take(8)
-                        .map(|byte| format!("{byte:02x}"))
-                        .collect()
-                },
-            );
+            let hash = Account::this()
+                .named(file, Purpose::Guard)
+                .read()
+                .map_or_else(
+                    |_| "absent".to_owned(),
+                    |bytes| {
+                        let digest = Sha256::digest(bytes);
+                        digest
+                            .iter()
+                            .take(8)
+                            .map(|byte| format!("{byte:02x}"))
+                            .collect()
+                    },
+                );
             seen.insert(file.clone(), OwnerFile::Text(hash));
         }
         for file in login_files {
-            let observed = match cf_base::file::stat(file) {
+            let observed = match Account::this().named(file, Purpose::Guard).stat() {
                 Ok(stat) => OwnerFile::Login(Some(stat)),
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                     OwnerFile::Login(None)
@@ -272,7 +279,7 @@ pub fn ledger_snapshot(db: &Path, to: &Path) -> Result {
     let wal = PathBuf::from(format!("{}-wal", db.display()));
     let stamp = || {
         [db, wal.as_path()].map(|file| {
-            std::fs::metadata(file)
+            crate::door::reads::metadata(file)
                 .ok()
                 .map(|meta| (meta.len(), meta.modified().ok()))
         })
@@ -286,7 +293,7 @@ pub fn ledger_snapshot(db: &Path, to: &Path) -> Result {
     for _ in 0..5 {
         let before = stamp();
         crate::door::copy_keeping_mode(db, &clone)?;
-        if wal.is_file() {
+        if crate::door::reads::is_file(&wal) {
             crate::door::copy_keeping_mode(&wal, clones.path().join("clone.db-wal"))?;
         }
         if stamp() == before {
@@ -304,14 +311,12 @@ pub fn ledger_snapshot(db: &Path, to: &Path) -> Result {
     if let Some(folder) = to.parent() {
         crate::door::make_dir(folder)?;
     }
-    // `VACUUM INTO` writes the file itself, so the write is asked of the guard first.
-    files::guard(to)?;
-    let source = rusqlite::Connection::open(&clone).map_err(failed)?;
-    source
-        .execute("VACUUM INTO ?1", [to.to_string_lossy().as_ref()])
-        .map_err(failed)?;
-    let check: String = rusqlite::Connection::open(to)
-        .and_then(|copy| copy.query_row("PRAGMA integrity_check", [], |row| row.get(0)))
+    // `VACUUM INTO` writes the file itself: its destination is its own judged act, made new
+    // (T-2002 correction 7).
+    let source = crate::door::database::write(&clone)?;
+    crate::door::database::vacuum_into(&source, to)?;
+    let check: String = crate::door::database::read(to)?
+        .query_row("PRAGMA integrity_check", [], |row| row.get(0))
         .map_err(failed)?;
     if check != "ok" {
         return Err(Error::Daemon(format!(
@@ -328,7 +333,7 @@ pub fn holds_none(folder: &Path, secrets: &[String]) -> Check {
     let mut found = Vec::new();
     let mut read = 0;
     for file in crate::checkout::files_below(folder, &[]).unwrap_or_default() {
-        let Ok(bytes) = std::fs::read(&file) else {
+        let Ok(bytes) = crate::door::reads::read(&file) else {
             continue;
         };
         read += 1;
@@ -378,7 +383,7 @@ mod tests {
         let login = folder.path().join("auth.json");
         let before = Owner::look_with_logins(&[], &[], std::slice::from_ref(&login));
         assert!(before.unchanged(&before.again()).ok);
-        std::fs::write(&login, "synthetic login").unwrap();
+        crate::door::write(&login, "synthetic login").unwrap();
         let after = before.again();
         let changed = before.unchanged(&after);
         assert!(!changed.ok);
@@ -396,19 +401,14 @@ mod tests {
         let folder = crate::door::made("cf-matrix-owner-").unwrap();
         let login = folder.path().join("auth.json");
         let replacement = folder.path().join("replacement");
-        std::fs::write(&login, "one").unwrap();
-        std::fs::write(&replacement, "two").unwrap();
+        crate::door::write(&login, "one").unwrap();
+        crate::door::write(&replacement, "two").unwrap();
         let modified = std::fs::metadata(&login).unwrap().modified().unwrap();
-        std::fs::OpenOptions::new()
-            .write(true)
-            .open(&replacement)
-            .unwrap()
-            .set_times(std::fs::FileTimes::new().set_modified(modified))
-            .unwrap();
+        crate::door::set_modified(&replacement, modified).unwrap();
         let before = Owner::look_with_logins(&[], &[], std::slice::from_ref(&login));
         let old = cf_base::file::stat(&login).unwrap();
-        std::fs::rename(&login, folder.path().join("old")).unwrap();
-        std::fs::rename(&replacement, &login).unwrap();
+        crate::door::rename(&login, folder.path().join("old")).unwrap();
+        crate::door::rename(&replacement, &login).unwrap();
         let new = cf_base::file::stat(&login).unwrap();
         assert_eq!((old.size, old.mtime_ms), (new.size, new.mtime_ms));
         assert_ne!(old.identity, new.identity);
@@ -420,7 +420,7 @@ mod tests {
     fn t1744_review_matrix_cannot_pass_an_unstatable_login() {
         let folder = crate::door::made("cf-matrix-owner-").unwrap();
         let login = folder.path().join("auth.json");
-        std::os::unix::fs::symlink("auth.json", &login).unwrap();
+        crate::door::symlink("auth.json", &login).unwrap();
         let before = Owner::look_with_logins(&[], &[], std::slice::from_ref(&login));
         let check = before.unchanged(&before.again());
         assert!(!check.ok);
@@ -434,13 +434,13 @@ mod tests {
             folder.path().join("auth.json"),
             folder.path().join("claude"),
         );
-        std::fs::write(&file, "{}").unwrap();
+        crate::door::write(&file, "{}").unwrap();
         #[cfg(unix)]
-        std::os::unix::fs::symlink("versions/2.1.316", &link).unwrap();
+        crate::door::symlink("versions/2.1.316", &link).unwrap();
         let missing = folder.path().join("none.json");
         let before = Owner::look(std::slice::from_ref(&link), &[file.clone(), missing]);
         assert!(before.unchanged(&before.again()).ok);
-        std::fs::write(&file, "{\"a\":1}").unwrap();
+        crate::door::write(&file, "{\"a\":1}").unwrap();
         let after = before.again();
         let check = before.unchanged(&after);
         assert!(!check.ok);
@@ -448,9 +448,9 @@ mod tests {
         assert!(!check.detail.contains("none.json"), "{}", check.detail);
         #[cfg(unix)]
         {
-            std::fs::write(&file, "{}").unwrap();
-            std::fs::remove_file(&link).unwrap();
-            std::os::unix::fs::symlink("versions/2.1.400", &link).unwrap();
+            crate::door::write(&file, "{}").unwrap();
+            crate::door::remove(&link).unwrap();
+            crate::door::symlink("versions/2.1.400", &link).unwrap();
             let moved = before.unchanged(&before.again());
             assert!(!moved.ok);
             assert!(
@@ -535,10 +535,10 @@ mod tests {
     #[test]
     fn the_evidence_holds_no_token_and_a_ledger_is_copied_whole_while_it_is_held() {
         let folder = crate::door::made("cf-test-").unwrap();
-        std::fs::write(folder.path().join("a.json"), "{\"said\":\"hello\"}").unwrap();
+        crate::door::write(folder.path().join("a.json"), "{\"said\":\"hello\"}").unwrap();
         let tokens = ["0123456789abcdef".to_owned(), "short".to_owned()];
         assert!(holds_none(folder.path(), &tokens).ok);
-        std::fs::write(
+        crate::door::write(
             folder.path().join("b.log"),
             "env CONSENSFLOW_TOKEN=0123456789abcdef",
         )
@@ -555,16 +555,17 @@ mod tests {
         );
 
         let db = folder.path().join("ledger.db");
-        let held = rusqlite::Connection::open(&db).unwrap();
+        let held = crate::door::database::write(&db).unwrap();
         // Held as the daemon holds its ledger: no reader can join it.
         held.execute_batch("PRAGMA journal_mode=WAL; PRAGMA locking_mode=EXCLUSIVE; CREATE TABLE task(n INTEGER); INSERT INTO task VALUES (1), (2);").unwrap();
-        assert!(rusqlite::Connection::open(&db)
-            .and_then(|reader| reader
-                .query_row("SELECT count(*) FROM task", [], |row| row.get::<_, i64>(0)))
-            .is_err());
+        assert!(crate::door::database::write(&db)
+            .map(|reader| {
+                reader.query_row("SELECT count(*) FROM task", [], |row| row.get::<_, i64>(0))
+            })
+            .is_ok_and(|counted| counted.is_err()));
         let copy = folder.path().join("copy/ledger.db");
         ledger_snapshot(&db, &copy).unwrap();
-        let read: i64 = rusqlite::Connection::open(&copy)
+        let read: i64 = crate::door::database::write(&copy)
             .unwrap()
             .query_row("SELECT count(*) FROM task", [], |row| row.get(0))
             .unwrap();

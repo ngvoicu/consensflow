@@ -30,11 +30,16 @@ use cf_e2e::live::members::{self, Plan};
 use cf_e2e::live::{Harness, Log, Who};
 use cf_e2e::process::own_var;
 use cf_e2e::{Error, Result};
-use rusqlite::{Connection, OpenFlags, OptionalExtension};
+use rusqlite::{Connection, OptionalExtension};
 use serde_json::{json, Value};
 
 use crate::check::{self, Finished};
 use crate::task::Task;
+
+/// A folder or file standing for the owner's, as a test makes one: read for `Guard`, never written.
+fn owned(path: impl AsRef<std::path::Path>) -> cf_e2e::door::source::Source {
+    cf_e2e::door::source::Account::this().named(path, cf_e2e::door::source::Purpose::Guard)
+}
 
 /// The context, in tokens, past which the worker's Devin compacts its session.
 pub const THRESHOLD: u64 = 1000;
@@ -73,13 +78,23 @@ fn config_in(machine: &Path) -> Result<Value> {
     // The folder the adapter reads Devin's config in, on each system: `XDG_CONFIG_HOME` on
     // macOS and Linux, Windows' data folder (`APPDATA`) there. Without the second, the case
     // read the Windows machine's own config (integration B round 2, T-800).
+    // The machine's config is read as an owner's file, through a source, into a folder of the
+    // run's own; the helper is asked there, on homes that are the run's (the seal refuses a
+    // question whose homes are the account's).
+    let scratch = cf_e2e::door::made("finish-devin-config-")
+        .map_err(|failed| Error::Daemon(failed.to_string()))?;
+    let file = cf_e2e::door::source::Account::this()
+        .named(machine, cf_e2e::door::source::Purpose::Seed)
+        .join("devin/config.json");
+    if file.is_a_file() {
+        cf_e2e::door::make_dir(scratch.path().join("devin"))?;
+        file.copy_into(scratch.path().join("devin/config.json"))?;
+    }
+    let folder = scratch.path().to_string_lossy().into_owned();
     let env = [
-        ("HOME".to_owned(), home()?.to_string_lossy().into_owned()),
-        (
-            "XDG_CONFIG_HOME".to_owned(),
-            machine.to_string_lossy().into_owned(),
-        ),
-        ("APPDATA".to_owned(), machine.to_string_lossy().into_owned()),
+        ("HOME".to_owned(), folder.clone()),
+        ("XDG_CONFIG_HOME".to_owned(), folder.clone()),
+        ("APPDATA".to_owned(), folder),
     ];
     let mut config = ask::devin_config(&env)?;
     let Some(fields) = config.as_object_mut() else {
@@ -90,6 +105,15 @@ fn config_in(machine: &Path) -> Result<Value> {
     let agent = fields.entry("agent").or_insert_with(|| json!({}));
     agent["compaction_threshold_tokens"] = json!(THRESHOLD);
     Ok(config)
+}
+
+/// Why this step is skipped, said before any harness is queried, login read or window opened: on
+/// Windows Devin keeps its config in its data folder, where the case cannot give it a threshold
+/// of its own (CLN-22). None where the step runs.
+pub fn skipped(windows: bool) -> Option<&'static str> {
+    windows.then_some(
+        "Devin compaction on Windows is not covered: it keeps its config in its data folder, where the run cannot set a threshold of its own; no harness or model was started",
+    )
 }
 
 /// Runs the Devin worker on a task its compactor compacts: what it came to, which holds
@@ -146,8 +170,7 @@ impl Session {
 fn compaction(folder: &Path, env: &[(String, String)]) -> Result<Option<Session>> {
     let store = store(cfg!(windows), env)?;
     let failed = |cause: rusqlite::Error| Error::Daemon(format!("{}: {cause}", store.display()));
-    let db =
-        Connection::open_with_flags(&store, OpenFlags::SQLITE_OPEN_READ_ONLY).map_err(failed)?;
+    let db = cf_e2e::door::database::read(&store)?;
     db.busy_timeout(Duration::from_secs(5)).map_err(failed)?;
     let mut places = vec![folder.to_string_lossy().into_owned()];
     if let Ok(real) = folder.canonicalize() {
@@ -216,6 +239,17 @@ mod tests {
 
     use super::*;
 
+    /// CLN-22: on Windows the step is a skip that starts nothing, named as one; elsewhere it runs.
+    #[test]
+    fn devins_compaction_on_windows_is_a_skip_said_before_any_harness_is_reached() {
+        let said = skipped(true).expect("Windows skips");
+        assert!(
+            said.contains("not covered") && said.contains("no harness or model was started"),
+            "{said}"
+        );
+        assert!(skipped(false).is_none());
+    }
+
     #[test]
     fn the_compacted_plans_store_is_below_the_runs_home() {
         let plan = plan(&json!({}));
@@ -226,10 +260,10 @@ mod tests {
             .any(|file| { file.harness == Harness::Devin && file.variable == "XDG_CONFIG_HOME" }));
         let root = cf_e2e::door::made("finish-store-guard-").unwrap();
         // Exercise the kit's actual isolation layouts using only a fabricated owner and login.
-        let owner = tempfile::tempdir().unwrap();
+        let owner = cf_e2e::door::made("t-").unwrap();
         for folder in ["data/devin", "roaming/devin"] {
-            std::fs::create_dir_all(owner.path().join(folder)).unwrap();
-            std::fs::write(
+            cf_e2e::door::make_dir(owner.path().join(folder)).unwrap();
+            cf_e2e::door::write(
                 owner.path().join(folder).join("credentials.toml"),
                 "api_key = 'fixture'\n",
             )
@@ -246,15 +280,15 @@ mod tests {
         };
         check_layout(
             true,
-            Isolation::devin_on_windows(owner.path(), &owner.path().join("roaming")),
+            Isolation::devin_on_windows(owned(owner.path()), owned(owner.path().join("roaming"))),
         );
         #[cfg(unix)]
         check_layout(
             false,
             Isolation::devin(
-                owner.path(),
-                &owner.path().join("config"),
-                &owner.path().join("data"),
+                owned(owner.path()),
+                owned(owner.path().join("config")),
+                owned(owner.path().join("data")),
             ),
         );
         let data = root.path().join("data");
@@ -276,7 +310,7 @@ mod tests {
                 found.starts_with(root.path()),
                 "Devin's store is outside the run's home"
             );
-            let foreign = tempfile::tempdir().unwrap();
+            let foreign = cf_e2e::standin_process::unowned_tempdir();
             let name = if windows { "APPDATA" } else { "XDG_DATA_HOME" };
             let mut outside = env.to_vec();
             outside.push((
@@ -293,8 +327,8 @@ mod tests {
             );
         }
         let db_path = store(cfg!(windows), &env).unwrap();
-        std::fs::create_dir_all(db_path.parent().unwrap()).unwrap();
-        let db = Connection::open(&db_path).unwrap();
+        cf_e2e::door::make_dir(db_path.parent().unwrap()).unwrap();
+        let db = cf_e2e::door::database::write(&db_path).unwrap();
         db.execute_batch(
             "create table sessions (id text, main_chain_id integer, working_directory text, created_at integer);
              create table message_nodes (session_id text, node_id integer, parent_node_id integer, chat_message text);",
@@ -320,13 +354,13 @@ mod tests {
         );
         #[cfg(unix)]
         {
-            let foreign = tempfile::tempdir().unwrap();
+            let foreign = cf_e2e::standin_process::unowned_tempdir();
             let other = foreign.path().join("sessions.db");
-            std::fs::write(&other, b"not this run's store").unwrap();
+            cf_e2e::standin_process::foreign_write(&other, b"not this run's store");
             let linked_data = root.path().join("linked-data");
             let link = linked_data.join("devin/cli/sessions.db");
-            std::fs::create_dir_all(link.parent().unwrap()).unwrap();
-            std::os::unix::fs::symlink(&other, &link).unwrap();
+            cf_e2e::door::make_dir(link.parent().unwrap()).unwrap();
+            cf_e2e::door::symlink(&other, &link).unwrap();
             let mut linked = env.to_vec();
             linked.push((
                 "XDG_DATA_HOME".to_owned(),
@@ -370,7 +404,7 @@ mod tests {
     fn the_owners_config_is_read_as_a_launch_reads_it_with_its_comments_and_none_as_empty() {
         // Calliope's P3-1 on T-655: the adapter reads the owner's config as JSONC, and
         // one that is not there as empty; the case read it as JSON, and required it.
-        let machine = tempfile::tempdir().unwrap();
+        let machine = cf_e2e::door::made("t-").unwrap();
         assert_eq!(
             given(machine.path()),
             json!({ "agent": { "compaction_threshold_tokens": THRESHOLD } })

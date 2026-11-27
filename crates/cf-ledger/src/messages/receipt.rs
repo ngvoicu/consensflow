@@ -148,6 +148,9 @@ fn keep_read(store: &mut Store, message: &MessageView, via: Read) -> Result<(), 
     if message.kind == "question" && message.recipient_role == "chief" && !message.urgent {
         crate::waiting_questions::read_early(store, message.id)?;
     }
+    if message.kind == "note" {
+        crate::waiting_questions::note_read_early(store, message.id)?;
+    }
     Ok(())
 }
 
@@ -226,7 +229,7 @@ fn arrived(store: &Store, task: i64, window: i64) -> Result<bool, LedgerError> {
 /// An answer gated for the human still obliges, as does one that failed, was
 /// cancelled or declined. A withdrawn question with an answer still obliges if
 /// that answer did not stand; one withdrawn without an answer obliges no more.
-fn outstanding(store: &Store, task: i64, window: i64) -> Result<bool, LedgerError> {
+pub(crate) fn outstanding(store: &Store, task: i64, window: i64) -> Result<bool, LedgerError> {
     if store.db.prepare(
         "SELECT 1 FROM question_binding WHERE task_id = ?1 AND participant_id = ?2 AND closed IN (2,3) LIMIT 1",
     )?.exists(params![task, window])? {
@@ -542,6 +545,13 @@ pub(crate) fn receive_read(
             else {
                 continue;
             };
+            // What a hold keeps from its recipient is not received by a read of it: a
+            // reminder it is not shown, a message a meeting or a Close holds. A read changes nothing.
+            if crate::waiting_questions::withheld(store, message.id)?.is_some()
+                || crate::meeting::is_held(store, message.id)?
+            {
+                continue;
+            }
             let role = says_a_role(store, message.id)?;
             if via == Read::Inbox && role {
                 received += read_part(store, &message, 1, 1, cf)?;

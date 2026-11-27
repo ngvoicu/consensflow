@@ -143,8 +143,10 @@ fn next_delivery_among(
 /// proved by what the window's record showed: a task message, an answer or
 /// words told to the window (`told`) that is `delivered` and rides in no
 /// other's paste. What the window wrote after its marker is the task's result.
-/// The last is the last delivered, whatever their ids say: the human may pass
-/// on held words in another order than they were written.
+/// The last is the last the ledger confirmed, by its own order of writes (the sequence of its
+/// `delivery.confirmed` events), whatever their ids say (the human may pass on held words in
+/// another order than they were written) and whatever a clock dated them (a clock put back
+/// dates a later confirmation earlier).
 pub(crate) fn last_pasted(
     store: &Store,
     participant_id: i64,
@@ -156,7 +158,9 @@ pub(crate) fn last_pasted(
             "{MESSAGE_SELECT} WHERE m.task_id = ? AND m.recipient_id = ?
          AND (m.kind IN ('task', 'answer') OR ({}))
          AND m.state = 'delivered' AND m.carried_by IS NULL
-       ORDER BY m.delivered_at DESC, m.id DESC LIMIT 1",
+       ORDER BY COALESCE((SELECT MAX(e.id) FROM event e WHERE e.kind = 'delivery.confirmed'
+                           AND CASE WHEN json_valid(e.data) THEN json_extract(e.data, '$.message') END = m.id), 0) DESC,
+                m.id DESC LIMIT 1",
             told("m")
         ),
         params![task_id, participant_id],
@@ -500,6 +504,11 @@ pub(crate) fn admit(
         if stale {
             return Ok(HandOver::Withdrawn);
         }
+        // The daemon's bare words that resume a task go into no window that waits to be
+        // answered, where a question opened since they were queued (D3's N35).
+        if crate::tasks::turned_away_for_a_question(store, &message)? {
+            return Ok(HandOver::Withdrawn);
+        }
         if let Some(task) = message_task(store, message_id)? {
             if withdrawn_late(store, &message, &task)? {
                 return Ok(HandOver::Withdrawn);
@@ -661,6 +670,18 @@ pub(crate) fn confirm_sent_by_hand(
     })
 }
 
+/// The one decision that a message is its recipient's already, written for the
+/// message row `alias`: its hand-over has begun at the window and is not over.
+/// [`handed_over`] lists by it, and a hold that keeps a message from its recipient
+/// ([`crate::meeting::is_held`]) lets one it says is handed be read and received.
+pub(crate) fn handed_over_condition(alias: &str) -> String {
+    format!(
+        "(({alias}.state = 'delivering' AND {alias}.handed_at IS NOT NULL)
+          OR ({alias}.state = 'queued'
+              AND ({alias}.handed_at IS NOT NULL OR {alias}.claimed_at IS NOT NULL)))"
+    )
+}
+
 /// The messages of a project whose hand-over has begun at their window and is not
 /// over: one on its way that its transport let go ([`admit`]), and an answer a
 /// question's door claimed for its harness (`claim_answer`). Every other message
@@ -668,13 +689,11 @@ pub(crate) fn confirm_sent_by_hand(
 pub(crate) fn handed_over(store: &Store, project_id: i64) -> Result<Vec<i64>, LedgerError> {
     Ok(store
         .db
-        .prepare(
-            "SELECT id FROM message
-             WHERE project_id = ?
-               AND ((state = 'delivering' AND handed_at IS NOT NULL)
-                    OR (state = 'queued' AND (handed_at IS NOT NULL OR claimed_at IS NOT NULL)))
-             ORDER BY id",
-        )?
+        .prepare(&format!(
+            "SELECT m.id FROM message m
+             WHERE m.project_id = ? AND {} ORDER BY m.id",
+            handed_over_condition("m")
+        ))?
         .query_map([project_id], |row| row.get(0))?
         .collect::<rusqlite::Result<_>>()?)
 }

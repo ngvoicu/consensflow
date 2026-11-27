@@ -25,7 +25,8 @@
 //!   attempt (`--retries=0`) and run once (`--repeat-each=1`), and a run that asks for
 //!   more attempts is refused; a group that
 //!   asks for retries of its own is given them over that, and the reporter says a
-//!   test run more than once (Sol's look at round 7).
+//!   test run more than once (Sol's look at round 7). It is given a width too
+//!   (`--workers`: `playwright_words` says which).
 //! - Anything else, every other `cargo xtask …` among them, says no more than its
 //!   exit status.
 
@@ -164,9 +165,10 @@ impl Reporter {
     }
 
     /// Whether `command` takes the threads the driver was asked for: a run under
-    /// nextest, and a plain `cargo test` it is not under (given them after its `--`).
+    /// nextest, a run of Playwright's (as its workers), and a plain `cargo test` that is
+    /// not under nextest (given them after its `--`).
     pub(super) fn takes_threads(self, command: &[String]) -> bool {
-        self == Self::Nextest || is_cargo_test(command)
+        matches!(self, Self::Nextest | Self::Playwright) || is_cargo_test(command)
     }
 
     /// What the report in `dir` says the run's tests did: none for a command that

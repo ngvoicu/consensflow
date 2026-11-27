@@ -81,6 +81,7 @@ fn tarball(scratch: &Path, context: &Context, identity: &str, command: &str, id:
         env: &[],
         node: r"C:\Program Files\nodejs",
         machine: "zeewin2",
+        marked: false,
         limits: None,
     });
     let into = scratch.join(id);
@@ -247,6 +248,7 @@ fn bootstrap_invocation(
         env: &[],
         node: r"C:\Program Files\nodejs",
         machine: "zeewin2",
+        marked: false,
         limits: None,
     });
     let file = scratch.join(format!("run-{id}.ps1"));

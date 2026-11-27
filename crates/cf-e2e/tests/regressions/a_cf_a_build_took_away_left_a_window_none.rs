@@ -22,14 +22,14 @@ use crate::{config, secs, Outcome};
 
 #[test]
 fn a_chief_runs_cf_in_its_window_though_the_build_it_was_made_from_is_gone() -> Outcome {
-    let build = tempfile::tempdir()?;
+    let build = cf_e2e::door::made("t-")?;
     let release = build.path().join("release");
     files::make_dir(&release)?;
     let built = release.join("cf");
-    std::fs::copy(cf::binary()?, &built)?;
+    cf_e2e::door::copy_keeping_mode(cf::binary()?, &built)?;
     let rig = Rig::start(config().cf_from(&built))?;
     // The build is taken from under the rig, as the link of a new one takes it for a moment.
-    std::fs::remove_file(&built)?;
+    cf_e2e::door::remove(&built)?;
     assert!(!built.exists());
 
     let project = Project::open(&rig, "chief", json!({}))?;

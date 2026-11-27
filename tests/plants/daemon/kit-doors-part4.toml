@@ -1,0 +1,210 @@
+# The plants of K3's doors, part 4: the guards the last critical review (T-2295) found with no plant,
+# each held by a test that fails when it goes. A plant here is run by the tests that ask the guard
+# a question and start nothing the guard keeps out: no run of this table names a test that starts
+# the Keychain's utility, cargo or a harness's program by its real path.
+[run]
+kd4-reads = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "door::k3_tests::a_path_below_a_protected_root_is_read_by_no_plain_reader_and_no_copy"]
+kd4-shell = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "door::k3_tests::a_shell_told_a_command_is_judged_by_its_program_and_an_unreadable_one_is_refused"]
+kd4-shells = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "door::shells::tests::a_posix_command_that_is_not_one_program_with_words_is_refused"]
+kd4-words = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "process::tests::a_script_naming_a_program_with_a_door_of_its_own_is_refused_before_it_starts"]
+kd4-entry = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "door::k3_tests::a_script_entry_starts_a_shell_and_no_other_program"]
+kd4-audit = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "door::rule::a_new_caller_of_a_script_entry_is_found_outside_the_files_that_call_one_today"]
+kd4-cargo = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "door::k3_tests::no_child_is_told_the_accounts_cargo_or_rustup_folder"]
+kd4-cargo-homes = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "door::k3_tests::the_starts_that_run_cargo_are_told_the_cargo_and_rustup_folders"]
+kd4-again = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "door::again::tests::the_say_only_child_is_told_the_toolchain_homes"]
+kd4-control = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "door::keychain::control_tests::the_control_starts_claude_on_the_accounts_home_and_a_folder_this_run_made_and_no_other"]
+kd4-live-reads = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "door::rule::the_rule_finds_a_read_outside_the_readers_and_an_account_asked_for_outside_its_files"]
+
+[[plant]]
+name = "K3 part 4: the read door admits a path inside a protected root"
+meant = "a_path_below_a_protected_root_is_read_by_no_plain_reader_and_no_copy"
+runs = ["kd4-reads"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/door/reads.rs"
+find = '''pub(super) fn admitted_by(roots: &Roots, path: &Path) -> io::Result<()> {'''
+replace = '''pub(super) fn admitted_by(roots: &Roots, path: &Path) -> io::Result<()> {
+    if true {
+        return Ok(());
+    }'''
+
+[[plant]]
+name = "K3 part 4: a shell's command is not judged by the program it starts"
+meant = "a_shell_told_a_command_is_judged_by_its_program_and_an_unreadable_one_is_refused"
+runs = ["kd4-shell"]
+platforms = ["linux", "macos"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/door.rs"
+find = '''    let Some(shell) = shell else {
+        return Ok(judged);
+    };'''
+replace = '''    let Some(shell) = shell.filter(|_| false) else {
+        return Ok(judged);
+    };'''
+
+[[plant]]
+name = "K3 part 4: a command that cannot be read is taken for no command"
+meant = "a_shell_told_a_command_is_judged_by_its_program_and_an_unreadable_one_is_refused"
+runs = ["kd4-shell"]
+platforms = ["linux", "macos"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/door.rs"
+find = '''    match shells::told(shell, args)? {'''
+replace = '''    match shells::told(shell, args).unwrap_or(shells::Told::Nothing) {'''
+
+[[plant]]
+name = "K3 part 4: the reader takes a shell's own character for a word"
+meant = "a_posix_command_that_is_not_one_program_with_words_is_refused"
+runs = ["kd4-shells"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/door/shells.rs"
+find = '''                    return unread(&format!("`{next}` is the shell's own"));'''
+replace = '''                    word.get_or_insert_with(String::new).push(next);'''
+
+[[plant]]
+name = "K3 part 4: a script entry does not read its words for a program with a door"
+meant = "a_script_naming_a_program_with_a_door_of_its_own_is_refused_before_it_starts"
+runs = ["kd4-words"]
+platforms = ["linux", "macos"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/process.rs"
+find = '''            return match crate::door::shells::names_a_door_program(&words) {'''
+replace = '''            return match crate::door::shells::names_a_door_program(&words).filter(|_| false) {'''
+
+[[plant]]
+name = "K3 part 4: a script entry starts a program that is no shell"
+meant = "a_script_entry_starts_a_shell_and_no_other_program"
+runs = ["kd4-entry"]
+platforms = ["linux", "macos"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/process.rs"
+find = '''            if crate::door::shells::shell_named(&self.program.to_string_lossy()).is_none() {'''
+replace = '''            if false && crate::door::shells::shell_named(&self.program.to_string_lossy()).is_none() {'''
+
+[[plant]]
+name = "K3 part 4: the audit does not find a new caller of a script entry"
+meant = "a_new_caller_of_a_script_entry_is_found_outside_the_files_that_call_one_today"
+runs = ["kd4-audit"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/door/rule.rs"
+find = '''    if before == Some("Run") && matches!(last, "fixture_script" | "script_in" | "shell_line") {'''
+replace = '''    if false && before == Some("Run") && matches!(last, "fixture_script" | "script_in" | "shell_line") {'''
+
+[[plant]]
+name = "K3 part 4: every child is told the account's cargo and rustup folders"
+meant = "no_child_is_told_the_accounts_cargo_or_rustup_folder"
+runs = ["kd4-cargo"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/door/account.rs"
+find = '''    let (path, digest) = own_file()?;
+    Ok(vec![
+        (
+            PROTECTED_FILE.to_owned(),
+            path.to_string_lossy().into_owned(),
+        ),
+        (PROTECTED_DIGEST.to_owned(), digest),
+    ])'''
+replace = '''    let (path, digest) = own_file()?;
+    let mut told = vec![
+        (
+            PROTECTED_FILE.to_owned(),
+            path.to_string_lossy().into_owned(),
+        ),
+        (PROTECTED_DIGEST.to_owned(), digest),
+    ];
+    told.extend(toolchain_homes());
+    Ok(told)'''
+
+[[plant]]
+name = "K3 part 4: the cargo and rustup folders are not found where the person's home has them"
+meant = "the_starts_that_run_cargo_are_told_the_cargo_and_rustup_folders"
+runs = ["kd4-cargo-homes"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/door/account.rs"
+find = '''.or_else(|| home.map(|home| home.join(below)).filter(|dir| dir.is_dir()));'''
+replace = '''.or_else(|| home.map(|home| home.join(below)).filter(|dir| !dir.is_dir()));'''
+
+[[plant]]
+name = "K3 part 4: the say-only child is not told the cargo and rustup folders"
+meant = "the_say_only_child_is_told_the_toolchain_homes"
+runs = ["kd4-again"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/door/again.rs"
+find = '''    for (name, value) in super::account::toolchain_homes() {
+        run = run.var(name, value);
+    }'''
+replace = '''    for (name, value) in super::account::toolchain_homes() {
+        let _ = (name, value);
+    }'''
+
+[[plant]]
+name = "K3 part 4: the Keychain control starts a program that is not Claude Code's"
+meant = "the_control_starts_claude_on_the_accounts_home_and_a_folder_this_run_made_and_no_other"
+runs = ["kd4-control"]
+platforms = ["linux", "macos"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/door/keychain.rs"
+find = '''            Ok(crate::door::spawn::Program::Harness("claude")) => {}'''
+replace = '''            Ok(_) => {}'''
+
+[[plant]]
+name = "K3 part 4: the Keychain control takes a config folder spelled in another case for none"
+meant = "the_control_starts_claude_on_the_accounts_home_and_a_folder_this_run_made_and_no_other"
+runs = ["kd4-control"]
+platforms = ["linux", "macos"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/door/keychain.rs"
+find = '''        let config = |name: &str| name.eq_ignore_ascii_case("CLAUDE_CONFIG_DIR");'''
+replace = '''        let config = |name: &str| name == "CLAUDE_CONFIG_DIR";'''
+
+[[plant]]
+name = "K3 part 4: the Keychain control takes a config folder that no run made"
+meant = "the_control_starts_claude_on_the_accounts_home_and_a_folder_this_run_made_and_no_other"
+runs = ["kd4-control"]
+platforms = ["linux", "macos"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/door/keychain.rs"
+find = '''            if config(name) && !crate::door::is_made_or_below(Path::new(value)) {'''
+replace = '''            if false && config(name) && !crate::door::is_made_or_below(Path::new(value)) {'''
+
+[[plant]]
+name = "K3 part 4: a live case's own function is not read for a read of the file system"
+meant = "the_rule_finds_a_read_outside_the_readers_and_an_account_asked_for_outside_its_files"
+runs = ["kd4-live-reads"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/door/rule.rs"
+find = '''        if class == Class::Read && (!self.holds_reads || self.in_cfg_test > 0) {'''
+replace = '''        if class == Class::Read && (!self.holds_reads || self.in_test > 0) {'''
+
+[[plant]]
+name = "K3 part 4: a live case's own function is not read for the owner's files"
+meant = "the_rule_finds_a_read_outside_the_readers_and_an_account_asked_for_outside_its_files"
+runs = ["kd4-live-reads"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/door/rule.rs"
+find = '''        if class == Class::Owner && (self.asks_account || self.in_cfg_test > 0) {'''
+replace = '''        if class == Class::Owner && (self.asks_account || self.in_test > 0) {'''
+
+[[plant]]
+name = "K3 part 4: the audit does not find the owner's home given with no account named"
+meant = "the_rule_finds_a_read_outside_the_readers_and_an_account_asked_for_outside_its_files"
+runs = ["kd4-live-reads"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/door/rule.rs"
+find = '''const OWNER_CALLS: &[&str] = &["owner", "owner_home"];'''
+replace = '''const OWNER_CALLS: &[&str] = &[];'''

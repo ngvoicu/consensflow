@@ -1648,6 +1648,11 @@ impl Dispatcher {
         let Some(thread) = self.seams.ledger.borrow().last_task(participant.id)? else {
             return Ok(());
         };
+        // A task held for a retry, or whose retry's Resume is on its way, is told its turn
+        // failed once, at the first try: the failed end still in view tells nothing more.
+        if thread.task.retry.is_some() {
+            return Ok(());
+        }
         if self
             .delivered_at(participant.id, &thread, observed.items())?
             .is_none()

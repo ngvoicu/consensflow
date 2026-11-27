@@ -56,6 +56,21 @@ impl Holds for Native {
     }
 }
 
+/// The unique identifier of the process `pid` as the pane host reads it: a Mac's alone (Linux has
+/// none, and a process it chose was proved by no identifier).
+#[cfg(target_os = "macos")]
+fn unique_of(pid: u32) -> Option<u64> {
+    i32::try_from(pid)
+        .ok()
+        .and_then(cf_panes::read_identity)
+        .map(|read| read.unique)
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn unique_of(_pid: u32) -> Option<u64> {
+    None
+}
+
 /// A process held by its number.
 #[cfg(unix)]
 struct Number(u32);
@@ -66,6 +81,10 @@ impl Held for Number {
         identity(self.0)
             .map(|found| found.map(|identity| identity.started))
             .map_err(|failed: Error| io::Error::other(failed.to_string()))
+    }
+
+    fn unique(&self) -> io::Result<Option<u64>> {
+        Ok(unique_of(self.0))
     }
 
     fn end(&self) -> io::Result<()> {
@@ -103,6 +122,11 @@ impl Held for win::Handle {
         self.created()
     }
 
+    fn unique(&self) -> io::Result<Option<u64>> {
+        // The handle is the proof: it holds the process, and its creation time is checked on it.
+        Ok(None)
+    }
+
     fn end(&self) -> io::Result<()> {
         self.terminate()
     }
@@ -121,7 +145,7 @@ mod mac {
 
     use nix::libc;
 
-    use super::super::{ps, refined_by_bsd, Bsd, Identity, Running};
+    use super::super::{ps, refined_by_bsd, Bsd, Identity, Link, Running};
     use crate::{Error, Result};
 
     /// Every process `ps` lists, each with when it began as the system says it to the
@@ -155,10 +179,40 @@ mod mac {
         }))
     }
 
+    /// What `proc_pidinfo` says of the process `pid`, as one read: its parent, when it began, and
+    /// the identifiers the pane host reads ([`cf_panes::read_identity`]: its own unique identifier
+    /// and its forker's), the read of its short information made again after them. A process
+    /// whose number another has in between, or that execs in between, is not read: none. A process
+    /// the host will not read (another user's) has the rest and proves nothing ([`Link::Unread`]).
+    pub(in super::super) fn bsd(pid: u32) -> io::Result<Option<Bsd>> {
+        let Some(first) = short(pid)? else {
+            return Ok(None);
+        };
+        let identity = i32::try_from(pid).ok().and_then(cf_panes::read_identity);
+        let Some(second) = short(pid)? else {
+            return Ok(None);
+        };
+        if first != second {
+            return Ok(None);
+        }
+        let link = match identity {
+            // The host's read and this one name one birth, to the microsecond.
+            Some(read) if read.born == (first.started / 1_000_000, first.started % 1_000_000) => {
+                Link::Forked {
+                    own: read.unique,
+                    forker: read.starter,
+                }
+            }
+            Some(_) => return Ok(None),
+            None => Link::Unread,
+        };
+        Ok(Some(Bsd { link, ..first }))
+    }
+
     /// What `proc_pidinfo` (`PROC_PIDTBSDINFO`) says of the process `pid`: none where no
     /// process has the number, or the one that has it has ended and waits to be reaped,
     /// which nothing ends.
-    pub(in super::super) fn bsd(pid: u32) -> io::Result<Option<Bsd>> {
+    fn short(pid: u32) -> io::Result<Option<Bsd>> {
         let Ok(number) = i32::try_from(pid) else {
             return Ok(None);
         };
@@ -199,6 +253,7 @@ mod mac {
         Ok(Some(Bsd {
             ppid: info.pbi_ppid,
             started: microseconds(info.pbi_start_tvsec, info.pbi_start_tvusec),
+            link: Link::Unread,
         }))
     }
 
@@ -252,29 +307,118 @@ mod mac {
 mod win {
     use std::io;
 
+    use windows_sys::Wdk::System::SystemInformation::NtQuerySystemInformation;
+    use windows_sys::Wdk::System::Threading::{
+        NtQueryInformationProcess, ProcessBasicInformation, ProcessCommandLineInformation,
+    };
     use windows_sys::Win32::Foundation::{
-        CloseHandle, ERROR_INVALID_PARAMETER, FILETIME, HANDLE, WAIT_OBJECT_0,
+        CloseHandle, ERROR_INVALID_PARAMETER, FILETIME, HANDLE, UNICODE_STRING, WAIT_OBJECT_0,
     };
     use windows_sys::Win32::System::Threading::{
-        GetProcessTimes, OpenProcess, TerminateProcess, WaitForSingleObject, PROCESS_ACCESS_RIGHTS,
+        GetProcessTimes, OpenProcess, QueryFullProcessImageNameW, TerminateProcess,
+        WaitForSingleObject, PROCESS_ACCESS_RIGHTS, PROCESS_BASIC_INFORMATION, PROCESS_NAME_WIN32,
         PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE, PROCESS_TERMINATE,
     };
 
-    use super::super::{refined_by_handle, with_cygwin_parents, Identity, Running};
+    use super::super::{
+        refined_by_handle, table_of_system, text_in_buffer, with_cygwin_parents, Identity, Opened,
+        Running,
+    };
     use crate::process::Run;
     use crate::{Error, Result};
 
-    /// Every process of Windows' table, each with its creation time as its own handle says
-    /// it ([`refined_by_handle`]), and the parent Git Bash says for a Cygwin program whose
-    /// own has gone ([`with_cygwin_parents`]).
+    /// Every process of Windows' table, each with its creation time and its creator as its own
+    /// handle says them ([`refined_by_handle`]), and what Git Bash says of the parent of a Cygwin
+    /// program whose own has gone, as a description only ([`with_cygwin_parents`]). Every handle
+    /// stays open until all of them are read, so that no number of the reading is another
+    /// process's before the end of it: one reading, with exact creation times, which the edges of
+    /// the window's tree are proved by ([`super::super::descending_from`]).
     pub(in super::super) fn processes() -> Result<Vec<Running>> {
-        let listed = refined_by_handle(super::super::table()?, |pid| {
+        let held: std::cell::RefCell<std::collections::HashMap<u32, Handle>> =
+            std::cell::RefCell::new(std::collections::HashMap::new());
+        let listed = refined_by_handle(system_table()?, |pid| {
             match open(pid, PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_SYNCHRONIZE)? {
-                Some(handle) => handle.created(),
+                Some(handle) => {
+                    let opened = handle.opened()?;
+                    held.borrow_mut().insert(pid, handle);
+                    Ok(opened)
+                }
                 None => Ok(None),
             }
         });
-        Ok(with_cygwin_parents(listed, cygwin_ps))
+        // The handles are still open: each says what its image is and what it was started with
+        // (the table says neither), and, after `ps -W` was read, its creation time again. A
+        // process that cannot be opened has neither: it is none the window's own, which no
+        // command it runs can be told by.
+        let listed = listed
+            .into_iter()
+            .map(|mut process| {
+                if let Some(handle) = held.borrow().get(&process.identity.pid) {
+                    process.exe = handle.image_path();
+                    process.command = handle.command_line().unwrap_or_default();
+                }
+                process
+            })
+            .collect();
+        let rows = with_cygwin_parents(listed, cygwin_ps, |pid| {
+            held.borrow()
+                .get(&pid)
+                .and_then(|handle| handle.created().ok().flatten())
+        });
+        drop(held);
+        Ok(rows)
+    }
+
+    // The table's offsets are of a 64-bit Windows: a build for another is refused here.
+    const _: () = assert!(std::mem::size_of::<usize>() == 8);
+
+    /// The class `SystemProcessInformation` of `NtQuerySystemInformation`.
+    const SYSTEM_PROCESS_INFORMATION: i32 = 5;
+    /// `STATUS_INFO_LENGTH_MISMATCH` and `STATUS_BUFFER_TOO_SMALL`: the room was not enough.
+    const TOO_SMALL: [i32; 2] = [0xC000_0004_u32 as i32, 0xC000_0023_u32 as i32];
+
+    /// Every process of the machine as the system's own table says it (number, creator, creation
+    /// time), in one call and with no program started: read in a buffer that grows to what the
+    /// system says it needs (the table grows between two calls, so room is added to it).
+    fn system_table() -> Result<Vec<Running>> {
+        let mut room = 1usize << 20;
+        for _ in 0..8 {
+            // Words, so that the entries laid over it are aligned.
+            let mut buffer = vec![0u64; room.div_ceil(8)];
+            let mut needed = 0u32;
+            #[allow(unsafe_code)]
+            // SAFETY: the buffer is writable for the size passed with it.
+            let status = unsafe {
+                NtQuerySystemInformation(
+                    SYSTEM_PROCESS_INFORMATION,
+                    buffer.as_mut_ptr().cast(),
+                    u32::try_from(buffer.len() * 8).unwrap_or(u32::MAX),
+                    &mut needed,
+                )
+            };
+            if status >= 0 {
+                // SAFETY of the view: the buffer is initialised, and its bytes are read at their
+                // length.
+                #[allow(unsafe_code)]
+                let bytes = unsafe {
+                    std::slice::from_raw_parts(buffer.as_ptr().cast::<u8>(), buffer.len() * 8)
+                };
+                return Ok(table_of_system(bytes));
+            }
+            if !TOO_SMALL.contains(&status) {
+                return Err(Error::Program {
+                    action: "list the processes with",
+                    program: "NtQuerySystemInformation".to_owned(),
+                    source: io::Error::other(format!("status {status:#x}")),
+                });
+            }
+            room = room.max(needed as usize).saturating_add(1 << 18);
+        }
+        Err(Error::Program {
+            action: "list the processes with",
+            program: "NtQuerySystemInformation".to_owned(),
+            source: io::Error::other("the table kept growing"),
+        })
     }
 
     /// What `ps -W` of the folder `folder` says (Git Bash's own, which lists the Cygwin
@@ -289,7 +433,7 @@ mod win {
         if !ps.is_file() || !layer {
             return None;
         }
-        let ran = Run::new(ps).args(["-W"]).inheriting_env().run().ok()?;
+        let ran = Run::new(ps).args(["-W"]).run().ok()?;
         (ran.code == Some(0)).then_some(ran.stdout)
     }
 
@@ -367,6 +511,119 @@ mod win {
             Ok(Some(
                 (u64::from(created.dwHighDateTime) << 32) | u64::from(created.dwLowDateTime),
             ))
+        }
+
+        /// When the process was created and the number of the process that created it, read on
+        /// this handle: none where it has exited. The creator is none where the system will
+        /// not say.
+        pub(in super::super) fn opened(&self) -> io::Result<Option<Opened>> {
+            let Some(created) = self.created()? else {
+                return Ok(None);
+            };
+            let mut information = PROCESS_BASIC_INFORMATION::default();
+            let mut written = 0u32;
+            #[allow(unsafe_code)]
+            // SAFETY: the handle is open with the right to query it, and the structure is the one
+            // the information class names, at its size.
+            let status = unsafe {
+                NtQueryInformationProcess(
+                    self.0,
+                    ProcessBasicInformation,
+                    (&mut information as *mut PROCESS_BASIC_INFORMATION).cast(),
+                    std::mem::size_of::<PROCESS_BASIC_INFORMATION>() as u32,
+                    &mut written,
+                )
+            };
+            let creator = (status >= 0)
+                .then(|| u32::try_from(information.InheritedFromUniqueProcessId).ok())
+                .flatten();
+            Ok(Some(Opened { created, creator }))
+        }
+
+        /// The whole path the process's program runs from, as the system keeps it: none where it
+        /// will not say.
+        fn image_path(&self) -> Option<String> {
+            // The path a program may have is longer than the one most have.
+            for room in [1_024usize, 32_768] {
+                let mut path = vec![0u16; room];
+                let mut length = u32::try_from(room).ok()?;
+                #[allow(unsafe_code)]
+                // SAFETY: the buffer is writable for `length` units, which the system lowers to
+                // the units it wrote.
+                let read = unsafe {
+                    QueryFullProcessImageNameW(
+                        self.0,
+                        PROCESS_NAME_WIN32,
+                        path.as_mut_ptr(),
+                        &mut length,
+                    )
+                };
+                if read != 0 {
+                    return Some(String::from_utf16_lossy(&path[..length as usize]));
+                }
+            }
+            None
+        }
+
+        /// The command line the process was started with, as the system keeps it and says it to
+        /// a handle with the right to query: no memory of the process is read. None where it
+        /// will not say.
+        fn command_line(&self) -> Option<String> {
+            let mut needed = 0u32;
+            #[allow(unsafe_code)]
+            // SAFETY: no buffer and no room for one: the call only says how much it needs.
+            unsafe {
+                NtQueryInformationProcess(
+                    self.0,
+                    ProcessCommandLineInformation,
+                    std::ptr::null_mut(),
+                    0,
+                    &mut needed,
+                )
+            };
+            if (needed as usize) < std::mem::size_of::<UNICODE_STRING>() {
+                return None;
+            }
+            // Words, so that the string laid over it is aligned.
+            let mut buffer = vec![0u64; (needed as usize).div_ceil(8)];
+            #[allow(unsafe_code)]
+            // SAFETY: the buffer is writable for the size passed with it.
+            let status = unsafe {
+                NtQueryInformationProcess(
+                    self.0,
+                    ProcessCommandLineInformation,
+                    buffer.as_mut_ptr().cast(),
+                    u32::try_from(buffer.len() * 8).ok()?,
+                    &mut needed,
+                )
+            };
+            if status < 0 {
+                return None;
+            }
+            let text = buffer.as_ptr().cast::<UNICODE_STRING>();
+            #[allow(unsafe_code)]
+            // SAFETY: on success the buffer holds a UNICODE_STRING at its start (it is at least
+            // that big, checked above), read by value.
+            let (length, chars) = unsafe { ((*text).Length as usize, (*text).Buffer) };
+            // The text is the kernel's to place, in the buffer given: where it says it lies outside
+            // that, or is not whole units, it is no command line.
+            let (offset, units) = text_in_buffer(
+                buffer.as_ptr() as usize,
+                buffer.len() * 8,
+                std::mem::size_of::<UNICODE_STRING>(),
+                length,
+                chars as usize,
+            )?;
+            #[allow(unsafe_code)]
+            // SAFETY: `text_in_buffer` put `units` 16-bit units at `offset` inside the buffer, on a
+            // 2-byte boundary, and the buffer is alive and not written meanwhile.
+            let units = unsafe {
+                std::slice::from_raw_parts(
+                    buffer.as_ptr().cast::<u8>().add(offset).cast::<u16>(),
+                    units,
+                )
+            };
+            Some(String::from_utf16_lossy(units))
         }
 
         /// Ends the process, through this handle: one that exited meanwhile is ended.

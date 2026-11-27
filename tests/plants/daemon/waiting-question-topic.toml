@@ -52,8 +52,9 @@ meant = "moved_answer_contract::a13_cancelling_a_topic_keeps_the_other_holdings_
 runs = ["cancel-reminder"]
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/pauses.rs"
-find = "AND substr(body, 1, length(?)) != ? AND NOT {} RETURNING body"
-replace = "AND substr(body, 1, length(?)) != ? AND ({} OR 1) RETURNING body"
+find = '''         AND id NOT IN (SELECT message_id FROM question_reminder_sent)
+'''
+replace = ''
 
 [[plant]]
 name = "waiting question topic: failing the topic drops its gated question"

@@ -1,7 +1,8 @@
 // The tests for the machines that install by links: the Unix ones. The portable ones, a launcher that
 // is a file as Windows installs it, are in the parent.
 
-use std::os::unix::fs::{symlink, PermissionsExt};
+use crate::door::symlink;
+use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
 use super::*;
@@ -11,16 +12,16 @@ impl OwnerHome {
     /// An executable file at `below`.
     fn executable(&self, below: &str, text: &str) {
         self.write(below, text);
-        fs::set_permissions(self.path(below), fs::Permissions::from_mode(0o755)).unwrap();
+        crate::door::set_permissions(self.path(below), fs::Permissions::from_mode(0o755)).unwrap();
     }
 
     /// A link at `below` to `to`, over one that is there, as an installer makes it.
     fn link(&self, below: &str, to: &Path) {
         let at = self.path(below);
-        fs::create_dir_all(at.parent().unwrap()).unwrap();
+        crate::door::make_dir(at.parent().unwrap()).unwrap();
         let staged = at.with_extension("staged");
         symlink(to, &staged).unwrap();
-        fs::rename(&staged, &at).unwrap();
+        crate::door::rename(&staged, &at).unwrap();
     }
 
     /// Claude Code as its native installer leaves it.
@@ -60,8 +61,11 @@ fn a_version_probe_is_run_with_the_switches_of_its_harness() {
         ".local/bin/claude",
         "#!/bin/sh\necho \"claude-${DISABLE_AUTOUPDATER:-unset}-${DISABLE_UPDATES:-unset}\"\n",
     );
+    // Muse is not started for its version at all: the file beside its launcher says it
+    // (T-1997 finding 4).
+    home.executable(".local/bin/.muse-version", "1.4.25\n");
     let muse = Installed::at(Harness::Muse, home.path(".local/bin/muse"), home.0.path());
-    assert_eq!(version_of(&muse), "muse-update-off-1");
+    assert_eq!(version_of(&muse), "1.4.25");
     let claude = Installed::at(
         Harness::Claude,
         home.path(".local/bin/claude"),
@@ -76,8 +80,13 @@ fn a_launcher_that_is_left_alone_is_no_change_and_the_summary_names_it_and_its_h
     let command = home.claude();
     let watch = Watch::of(Harness::Claude, &command, home.0.path());
     let seen = watch.look();
-    assert!(seen.changes_to(&watch.look(), home.0.path()).is_empty());
-    let summary = seen.summary(home.0.path());
+    assert!(seen
+        .changes_to(
+            &watch.look(),
+            &crate::door::source::Source::from(home.0.path())
+        )
+        .is_empty());
+    let summary = seen.summary(&crate::door::source::Source::from(home.0.path()));
     assert!(summary.starts_with("~/.local/bin/claude "), "{summary}");
     assert_eq!(
         summary.matches("~/.local/bin/claude ").count(),
@@ -92,8 +101,8 @@ fn a_link_taken_to_a_copy_of_the_same_binary_is_a_change_whatever_the_bytes_say(
     let command = home.claude();
     let was = fs::read_link(&command).unwrap();
     let elsewhere = home.path("rig/claude/versions/2.1.316");
-    fs::create_dir_all(elsewhere.parent().unwrap()).unwrap();
-    fs::copy(&was, &elsewhere).unwrap();
+    crate::door::make_dir(elsewhere.parent().unwrap()).unwrap();
+    crate::door::copy_keeping_mode(&was, &elsewhere).unwrap();
     let found = changes(
         &Watch::of(Harness::Claude, &command, home.0.path()),
         &home,
@@ -133,7 +142,7 @@ fn a_launcher_that_dangles_that_is_gone_or_that_became_a_file_is_named_for_what_
     // The run's folder was removed when it ended (T-1068): the link reads what it read, and
     // ends nowhere.
     let found = changes(&watch, &home, || {
-        fs::remove_file(home.path(".local/share/claude/versions/2.1.316")).unwrap();
+        crate::door::remove(home.path(".local/share/claude/versions/2.1.316")).unwrap();
     });
     assert!(
         found
@@ -143,7 +152,7 @@ fn a_launcher_that_dangles_that_is_gone_or_that_became_a_file_is_named_for_what_
     );
     // Gone; made; a link for a file.
     let found = changes(&watch, &home, || {
-        fs::remove_file(home.path(".local/bin/claude")).unwrap();
+        crate::door::remove(home.path(".local/bin/claude")).unwrap();
     });
     assert!(
         found
@@ -180,7 +189,7 @@ fn a_launcher_that_dangles_that_is_gone_or_that_became_a_file_is_named_for_what_
         &Watch::of(Harness::Claude, &command, home.0.path()),
         &home,
         || {
-            fs::remove_file(home.path(".local/bin/claude")).unwrap();
+            crate::door::remove(home.path(".local/bin/claude")).unwrap();
             home.write(".local/bin/claude", "a file");
         },
     );
@@ -298,7 +307,12 @@ fn codex_is_watched_where_the_kit_runs_it_and_nowhere_in_a_home_that_is_its_own_
         Path::new("/opt/homebrew/bin/codex"),
         home.0.path(),
     );
-    assert_eq!(watch.launchers, [PathBuf::from("/opt/homebrew/bin/codex")]);
+    assert_eq!(
+        watch.launchers,
+        [crate::door::source::Source::from(PathBuf::from(
+            "/opt/homebrew/bin/codex"
+        ))]
+    );
     assert!(watch.folders.is_empty() && watch.files.is_empty());
     let pi = Watch::of(
         Harness::Pi,
@@ -311,6 +325,7 @@ fn codex_is_watched_where_the_kit_runs_it_and_nowhere_in_a_home_that_is_its_own_
             PathBuf::from("/opt/homebrew/bin/pi"),
             home.path(".local/bin/pi")
         ]
+        .map(crate::door::source::Source::from)
     );
 }
 

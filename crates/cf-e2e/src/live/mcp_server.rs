@@ -325,7 +325,7 @@ mod tests {
             ])
         );
         assert_eq!(server.detached_pid(), None);
-        std::fs::write(pid_file(DETACHED_STEM), "4244").unwrap();
+        crate::door::write(pid_file(DETACHED_STEM), "4244").unwrap();
         assert_eq!(server.detached_pid(), Some(4244));
         assert_eq!(server.pid(), None, "the one that stays has its own file");
     }
@@ -338,11 +338,11 @@ mod tests {
         assert!(!server.runs());
         assert!(server.config().is_file());
         // What an earlier run's server left is taken away: it says nothing of this run.
-        std::fs::write(folder.path().join("quiet-server.pid"), "4242").unwrap();
+        crate::door::write(folder.path().join("quiet-server.pid"), "4242").unwrap();
         let again = Server::write(folder.path(), &python()).unwrap();
         assert_eq!(again.pid(), None);
         // And so is what a window wrote that the run did not mean to look at.
-        std::fs::write(folder.path().join("quiet-server.pid"), "4243").unwrap();
+        crate::door::write(folder.path().join("quiet-server.pid"), "4243").unwrap();
         assert_eq!(again.pid(), Some(4243));
         again.forget();
         assert_eq!(again.pid(), None);
@@ -357,7 +357,6 @@ mod tests {
         let ran = Run::new(runtime.program())
             .arg(script)
             .arg(folder.path().join("quiet-server.pid"))
-            .inheriting_env()
             .input(format!("{}\n", lines.join("\n")))
             .run()
             .unwrap();

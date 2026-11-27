@@ -407,7 +407,7 @@ fn read_of<'a>(path: &str, text: &'a str) -> &'a str {
 /// The files of the tools and of the rig that start a program a caller names (std's
 /// `Command::new` of a value, not of a name written there), and what holds them to no app
 /// of the live app's identity: the gate each calls (`cf_base::bundle`), or what they start.
-const STARTERS: [(&str, &str); 5] = [
+const STARTERS: [(&str, &str); 6] = [
     (
         "tools/cf-publish/src/process.rs",
         "curl, gh and tar alone, which its callers name; it is built on serde_json and sha2 alone",
@@ -423,6 +423,10 @@ const STARTERS: [(&str, &str); 5] = [
     (
         "crates/cf-e2e/src/door/tests.rs",
         "the test's own program, started again as a child the door's cases end or leave",
+    ),
+    (
+        "crates/cf-e2e/src/door/identity_reds.rs",
+        "Windows' own cmd.exe, from SystemRoot, to make a junction in a folder of the test's",
     ),
     (
         "tools/cf-publish/tests/release_build.rs",

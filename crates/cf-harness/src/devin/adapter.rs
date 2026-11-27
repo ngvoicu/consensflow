@@ -426,7 +426,7 @@ impl Adapter for DevinAdapter {
     /// Devin keeps a session's messages in its store, which is read with no window
     /// open as with one: a session with a message of the user's in it had a turn
     /// and is gone on with, and one the store holds with none, or holds no row of
-    /// (Devin writes the row with the first message), has nothing to go on with. A
+    /// (Devin writes the row with the first message), or no store of it at all yet, has nothing to go on with. A
     /// session Devin compacted holds none of the user's on its main chain, which is
     /// a new one of its own: the system messages it opens with, the skills it loaded
     /// and the summary of the conversation (T-655; T-1388: `/compact` through

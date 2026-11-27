@@ -205,7 +205,7 @@ fn two_answers_kept_for_a_paused_worker(
         rig.wait_for_daemon_exit(secs(10))?;
         let root = rig.close_keeping_the_root()?;
         {
-            let db = rusqlite::Connection::open(file)?;
+            let db = cf_e2e::door::database::write(file)?;
             for question in &questions {
                 let id: i64 = question.trim_start_matches("m-").parse().map_err(|_| {
                     Error::Daemon(format!("question has no numeric id: {question}"))

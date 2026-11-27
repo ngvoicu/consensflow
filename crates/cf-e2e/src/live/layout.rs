@@ -14,7 +14,6 @@
 //! anything at all below it changed ([`Layout::unchanged`]).
 
 use std::collections::BTreeMap;
-use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
@@ -270,21 +269,21 @@ fn aged(folder: &Path, ago: Duration) -> io::Result<()> {
 /// Everything in `roots`, by path, as it is now.
 fn snapshot(roots: &[PathBuf]) -> BTreeMap<PathBuf, Entry> {
     fn walk(path: &Path, found: &mut BTreeMap<PathBuf, Entry>) {
-        let Ok(meta) = fs::symlink_metadata(path) else {
+        let Ok(meta) = door::reads::symlink_metadata(path) else {
             return;
         };
         let modified = meta.modified().unwrap_or(SystemTime::UNIX_EPOCH);
         if meta.is_dir() {
             found.insert(path.to_path_buf(), Entry::Folder(modified));
-            if let Ok(entries) = fs::read_dir(path) {
-                for entry in entries.flatten() {
-                    walk(&entry.path(), found);
+            if let Ok(entries) = door::reads::read_dir(path) {
+                for entry in entries {
+                    walk(&entry, found);
                 }
             }
         } else if meta.is_file() {
             found.insert(
                 path.to_path_buf(),
-                Entry::File(fs::read(path).unwrap_or_default(), modified),
+                Entry::File(door::reads::read(path).unwrap_or_default(), modified),
             );
         } else {
             found.insert(path.to_path_buf(), Entry::Link);

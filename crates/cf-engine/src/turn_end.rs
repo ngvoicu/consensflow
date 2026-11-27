@@ -484,6 +484,11 @@ impl Dispatcher {
         if observed.failed {
             // A failed turn holds its task for nothing it left (T-532's P3-3).
             record.held.borrow_mut().reset();
+            // A turn its harness still works on (Codex's parent turn errored with a child
+            // agent at work) is not over: nothing is tried or failed until its end settles.
+            if crate::turn_retry::turn_at_work(observed) {
+                return Ok(Turn::Open);
+            }
             let why = self.why_it_failed(participant, record, observed).await?;
             // The task may have moved on while the window was looked at.
             let still = self
@@ -493,7 +498,14 @@ impl Dispatcher {
                 .active_task(participant.id, false)?
                 .is_some_and(|now| now.task.id == thread.task.id && now.task.state == "working");
             if still && !self.forgotten(record) {
-                self.fail_task(project, participant.id, &thread.task, &why.said, &why.key)?;
+                // Two tries, each a hold of the task and main's own Resume, before it fails
+                // (`turn_retry`).
+                match self.failed_end(project, participant, &thread.task, &why.said, &why.key)? {
+                    crate::turn_retry::Tried::Held => {}
+                    crate::turn_retry::Tried::Fails(said) => {
+                        self.fail_task(project, participant.id, &thread.task, &said, &why.key)?;
+                    }
+                }
             }
             return Ok(Turn::Open);
         }

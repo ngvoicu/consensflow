@@ -67,7 +67,7 @@ use serde_json::{json, Value};
 use crate::claude::install;
 use crate::contract::{Agent, Input, Interrupt, LaunchId, Question, Records, Skill, TurnLeft};
 use crate::launch::adapter;
-use crate::records::{self, Options};
+use crate::records::{self, Options, Reading};
 use crate::shared::input_box::{self, InputBox};
 use crate::shared::record_state::record_state;
 use crate::shared::{trust, window_args};
@@ -264,7 +264,14 @@ fn read_record(question: &Value) -> Result<Value, String> {
         SystemClock.now_ms(),
     );
     let settled = record_state(reading.clone()).settled;
-    Ok(json!({ "reading": &*reading, "settled": settled }))
+    // Which of the adapter's three states the read came to: a reader that takes a failure for
+    // an empty record reads a conversation as having said nothing (T-1997 finding 7).
+    let read = match &*reading {
+        Reading::Known(_) => "held",
+        Reading::Missing(_) => "absent",
+        Reading::Unknown(_) => "failed",
+    };
+    Ok(json!({ "reading": &*reading, "settled": settled, "read": read }))
 }
 
 /// Whether the turn of the conversation the question names was cut, as the human's

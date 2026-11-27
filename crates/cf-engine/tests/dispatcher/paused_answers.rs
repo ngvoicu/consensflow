@@ -1178,7 +1178,7 @@ fn a_resumed_turn_that_fails_fails_the_task_and_leaves_the_note_of_the_tells_ans
     // Calliope's P3: the early resume's "moved on" note is queued (the chief is at work) when
     // the resumed window's turn fails and the task fails with it; dropping the task's queued
     // messages took the note, and the answer with it, since the tell has its note already.
-    let context = Context::new();
+    let context = Context::tries_off();
     let (project, told) = told_at_work(&context);
     context.adapter.busy("chief");
     context.resume_task(project, 1, "Go on, or say you finished");

@@ -331,11 +331,11 @@ runs = ["ledger-suspended"]
 file = "crates/cf-ledger/src/tasks/pausing.rs"
 find = '''
                 "UPDATE task SET assignee_id = NULL, state = 'open', body = ?, updated_at = ?,
-             paused_with_project = 0, held_until = NULL
+             paused_with_project = 0, held_until = NULL, retry_hold = NULL
            WHERE id = ?",'''
 replace = '''
                 "UPDATE task SET assignee_id = NULL, state = 'open', body = ?, updated_at = ?,
-             held_until = NULL
+             held_until = NULL, retry_hold = NULL
            WHERE id = ?",'''
 
 [[plant]]
@@ -1611,8 +1611,8 @@ runs = ["ledger-handed"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/delivery.rs"
-find = '''(handed_at IS NOT NULL OR claimed_at IS NOT NULL)'''
-replace = '''(handed_at IS NOT NULL)'''
+find = '''({alias}.handed_at IS NOT NULL OR {alias}.claimed_at IS NOT NULL)'''
+replace = '''({alias}.handed_at IS NOT NULL)'''
 
 [[plant]]
 name = "resume tasks: a reader of a closed project reads a delivery only begun, as round 7 did"

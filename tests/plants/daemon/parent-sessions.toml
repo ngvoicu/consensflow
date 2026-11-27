@@ -312,10 +312,8 @@ runs = ["parent-sessions-kit-homes"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/machine.rs"
-find = '''            Some(isolation) => isolation.vars(),
-'''
-replace = '''            Some(_) => Ok(Vec::new()),
-'''
+find = '''                let vars = isolation.standalone_vars()?;'''
+replace = '''                let vars: Vec<(String, String)> = { let _ = isolation; Vec::new() };'''
 
 [[plant]]
 name = "parent-sessions: the Codex interrupt case starts Codex's server on the person's home"

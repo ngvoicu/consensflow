@@ -32,12 +32,25 @@ pub(crate) const TASK_SELECT: &str = "
              AND json_extract(s.receipt, '$.shown') IS NOT NULL
              AND json_extract(s.receipt, '$.over') IS NULL
            ORDER BY s.id DESC LIMIT 1) AS aside,
+         (SELECT json_object('kind', r.kind,
+                  'which', CASE WHEN t.state = 'paused' THEN t.turn_retries + 1
+                                ELSE max(t.turn_retries, 1) END,
+                  'of', 2,
+                  'dueAt', CASE WHEN t.state = 'paused' THEN t.held_until END)
+            FROM turn_retry r
+           WHERE r.task_id = t.id
+             AND ((t.state = 'paused' AND t.held_until IS NOT NULL AND r.id = t.retry_hold)
+               OR (r.message_id IS NOT NULL AND t.state IN ('queued', 'working', 'waiting')
+                   AND EXISTS (SELECT 1 FROM message w WHERE w.id = r.message_id
+                                AND w.state IN ('queued', 'delivering'))))
+           ORDER BY r.id DESC LIMIT 1) AS retry,
          (SELECT h.body FROM message h JOIN participant hp ON hp.id = h.recipient_id
            WHERE t.held_until IS NOT NULL AND h.task_id = t.id AND h.sender_id IS NULL
              AND h.kind = 'note' AND hp.role = 'chief'
              AND h.state IN ('queued', 'delivering', 'delivered', 'read')
              AND NOT (json_valid(h.receipt) AND json_extract(h.receipt, '$.shown') IS NOT NULL)
              AND h.body LIKE 'T-' || t.number || ' waits with @%'
+             AND t.retry_hold IS NULL
              AND h.id > coalesce((SELECT max(s.id) FROM message s
                    WHERE s.task_id = t.id AND s.state = 'read' AND s.sender_id IS NULL
                      AND s.kind = 'note' AND json_valid(s.receipt)
@@ -291,6 +304,20 @@ pub(crate) fn task_view(row: &Row<'_>) -> rusqlite::Result<TaskView> {
         // never a hold with that member, though its hold is kept to its end (T-1517's note).
         // A hold's first note is typed to the chief, not shown: its line says the hold all
         // the same while the task is held, unless a newer note is shown (RS-25).
+        retry: row
+            .get::<_, Option<String>>("retry")?
+            .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+            .and_then(|retry| {
+                Some(cf_proto::ledger::TaskRetry {
+                    kind: retry.get("kind")?.as_str()?.to_owned(),
+                    which: retry.get("which")?.as_i64()?,
+                    of: retry.get("of")?.as_i64()?,
+                    due_at: retry
+                        .get("dueAt")
+                        .and_then(serde_json::Value::as_str)
+                        .map(str::to_owned),
+                })
+            }),
         aside: match row.get::<_, Option<String>>("member_left")? {
             Some(member) => Some(format!("its member @{member} has left the staff")),
             None => row

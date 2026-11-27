@@ -429,6 +429,7 @@ mod tests {
             ppid,
             command: command.to_owned(),
             exe: None,
+            link: cf_e2e::live::members::Link::Number,
         }
     }
 
@@ -469,16 +470,16 @@ mod tests {
     fn a_hook_of_another_run_on_the_machine_is_not_the_hook_the_case_waits_for() {
         use cf_e2e::live::claude::processes_with;
 
+        // Its command line says `hook claude`: the words are the script's name and argument,
+        // which the shell does nothing with.
         let mut decoy = cf_e2e::process::Run::new("/bin/sh")
-            .args(["-c", "read line; : hook claude"])
-            .inheriting_env()
+            .args(["-c", "read line", "hook", "claude"])
             .spawn()
             .unwrap();
         let pid = decoy.id();
         // The case's window: another process, which the decoy does not descend from.
         let mut window = cf_e2e::process::Run::new("sleep")
             .arg("30")
-            .inheriting_env()
             .spawn()
             .unwrap();
         let own = ThisMachine.identity(window.id()).unwrap();

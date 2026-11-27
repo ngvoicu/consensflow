@@ -24,7 +24,7 @@ use crate::{Error, Result};
 /// --json`): each with its `name` and, in a Codex that says it, its `transport`.
 pub fn mcp_servers(codex: &Path, env: &[(String, String)]) -> Result<Value> {
     let (home, safe) = mcp_environment(env)?;
-    Run::new(codex)
+    Run::harness("codex", codex)
         .args(["mcp", "list", "--json"])
         .vars(safe)
         .cwd(home)
@@ -386,7 +386,7 @@ mod tests {
         let run = crate::door::made("cf-codex-mcp-").unwrap();
         let program = run.path().join("fake-codex");
         let home = run.path().join("codex");
-        std::fs::create_dir_all(&home).unwrap();
+        crate::door::make_dir(&home).unwrap();
         crate::door::write_executable(&program, format!("#!/bin/sh\nif [ \"$CODEX_HOME\" = '{}' ]; then printf '[true]'; else printf '[false]'; fi\n", home.display())).unwrap();
         let env = vec![("CODEX_HOME".to_owned(), home.display().to_string())];
         assert_eq!(
@@ -505,7 +505,7 @@ done
 
     #[cfg(unix)]
     fn server() -> AppServer {
-        AppServer::start(Run::new("/bin/sh").args(["-c", SERVER])).unwrap()
+        AppServer::start(Run::fixture_script(SERVER)).unwrap()
     }
 
     #[cfg(unix)]
@@ -555,7 +555,7 @@ done
     #[cfg(unix)]
     #[test]
     fn a_request_the_server_does_not_answer_is_a_timeout_that_names_it() {
-        let server = AppServer::start(Run::new("/bin/sh").args(["-c", "cat > /dev/null"])).unwrap();
+        let server = AppServer::start(Run::fixture_script("cat > /dev/null")).unwrap();
         let failed = server
             .request("thread/start", &json!({}), Duration::from_millis(200))
             .unwrap_err();

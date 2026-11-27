@@ -283,6 +283,32 @@ impl Ledger {
         tasks::hold_task(&mut self.store, project_id, number, until, because)
     }
 
+    /// The daemon holds a task whose turn failed until its next try goes in (the first after
+    /// `plan.unit_ms`, the second after `plan.second_units` of them), and keeps the fact of
+    /// that retry in the same write; where the two tries in a row are used, it holds nothing
+    /// (D3's N35).
+    pub fn hold_task_for_retry(
+        &mut self,
+        project_id: i64,
+        number: i64,
+        because: &str,
+        fact: &crate::RetryFact<'_>,
+        plan: crate::RetryPlan,
+    ) -> Result<crate::RetryHold, LedgerError> {
+        tasks::hold_task_for_retry(&mut self.store, project_id, number, because, fact, plan)
+    }
+
+    /// The daemon resumes a held task at its time: with the words that resume it, unless a
+    /// question of its window has no answer, which leaves it waiting with no words.
+    pub fn resume_held_task(
+        &mut self,
+        project_id: i64,
+        number: i64,
+        body: &str,
+    ) -> Result<TaskMoved, LedgerError> {
+        tasks::resume_held_task(&mut self.store, project_id, number, body)
+    }
+
     /// The daemon ends a held task's hold without resuming it: the task stays paused.
     pub fn clear_hold(
         &mut self,

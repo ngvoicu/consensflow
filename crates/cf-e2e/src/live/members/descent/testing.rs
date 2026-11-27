@@ -6,7 +6,7 @@ use std::cell::RefCell;
 use std::io;
 use std::rc::Rc;
 
-use super::{Held, Holds, Identity, Machine, Running};
+use super::{Held, Holds, Identity, Link, Machine, Running};
 use crate::Result;
 
 /// What a number is now, where a test says it is not the process listed.
@@ -28,6 +28,8 @@ pub(crate) enum Now {
 pub(crate) struct Listed {
     listed: Vec<Running>,
     now: Vec<(u32, Now)>,
+    uniques: Vec<(u32, u64)>,
+    unreadable: Vec<u32>,
     ended: Rc<RefCell<Vec<u32>>>,
 }
 
@@ -37,6 +39,8 @@ impl Listed {
         Self {
             listed,
             now: Vec::new(),
+            uniques: Vec::new(),
+            unreadable: Vec::new(),
             ended: Rc::default(),
         }
     }
@@ -45,6 +49,38 @@ impl Listed {
     pub(crate) fn with(mut self, pid: u32, now: Now) -> Self {
         self.now.push((pid, now));
         self
+    }
+
+    /// The machine, the process with the number `pid` having the unique identifier `unique` now.
+    pub(crate) fn with_unique(mut self, pid: u32, unique: u64) -> Self {
+        self.uniques.push((pid, unique));
+        self
+    }
+
+    /// The machine, the identifier of the process with the number `pid` unreadable now.
+    pub(crate) fn without_unique(mut self, pid: u32) -> Self {
+        self.unreadable.push(pid);
+        self
+    }
+
+    /// The unique identifier the number has now: the one a test says, else the listed row's.
+    fn unique_of(&self, pid: u32) -> Option<u64> {
+        if self.unreadable.contains(&pid) {
+            return None;
+        }
+        self.uniques
+            .iter()
+            .find(|(number, _)| *number == pid)
+            .map(|(_, unique)| *unique)
+            .or_else(|| {
+                self.listed
+                    .iter()
+                    .find(|process| process.identity.pid == pid)
+                    .and_then(|process| match process.link {
+                        Link::Forked { own, .. } => Some(own),
+                        _ => None,
+                    })
+            })
     }
 
     /// The numbers it was asked to end, in order.
@@ -91,6 +127,7 @@ impl Holds for Listed {
                 pid,
                 now,
                 listed,
+                unique: self.unique_of(pid),
                 ended: Rc::clone(&self.ended),
             }))),
         }
@@ -102,6 +139,7 @@ struct Fake {
     pid: u32,
     now: Option<Now>,
     listed: Option<u64>,
+    unique: Option<u64>,
     ended: Rc<RefCell<Vec<u32>>>,
 }
 
@@ -112,6 +150,10 @@ impl Held for Fake {
             Some(Now::Unreadable) => Err(io::Error::other("unreadable")),
             _ => Ok(self.listed),
         }
+    }
+
+    fn unique(&self) -> io::Result<Option<u64>> {
+        Ok(self.unique)
     }
 
     fn end(&self) -> io::Result<()> {

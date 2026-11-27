@@ -20,6 +20,9 @@ pub struct QuestionWait {
     pub recipient_id: i64,
     pub received_at: String,
     pub reminder: Option<MessageView>,
+    /// For a question a restart or a project Close closed: how it ended
+    /// (`ConsensFlow restarted`, `the project closed`). None for an open one.
+    pub closed: Option<String>,
 }
 
 /// For a tracked question its window's holding is distinct from its topic.
@@ -86,8 +89,85 @@ pub(crate) fn waiting(store: &Store, project: i64) -> Result<Vec<QuestionWait>, 
                     recipient_id: row.get(5)?,
                     received_at: row.get(6)?,
                     reminder: None,
+                    closed: None,
                 },
                 row.get(7)?,
+            ))
+        })?
+        .collect::<rusqlite::Result<_>>()?;
+    let mut waits = rows
+        .into_iter()
+        .map(|(mut wait, prior)| {
+            wait.reminder = prior.map(|id| store.message(id)).transpose()?.flatten();
+            Ok(wait)
+        })
+        .collect::<Result<Vec<_>, LedgerError>>()?;
+    waits.extend(closed_waiting(store, project)?);
+    Ok(waits)
+}
+
+/// The closed waits (Q2) that are eligible, from `question_wait w`: the question's
+/// binding still holds T-1869's wait (`closed = 2`), its task is still the asking
+/// member's, waiting or working, not deleted, in an open project; the member is on
+/// the staff and the chief is the question's chief; and the chief has not acted
+/// since the close: no message of the project's chief to that member on that task
+/// holds a higher id than the close's place (a queued or gated one counts, one
+/// that failed or was taken back does not). Read, never kept, so each end of the
+/// wait ends the reminders with no step of its own. The clock is not part of it.
+const CLOSED_FROM: &str = "FROM question_wait w
+    JOIN question_binding b ON b.question_id=w.question_id AND b.closed=2
+    JOIN message q ON q.id=w.question_id AND q.kind='question'
+    JOIN task t ON t.id=b.task_id AND t.project_id=q.project_id AND t.assignee_id=b.participant_id
+    JOIN project pr ON pr.id=q.project_id AND pr.state='open'
+    JOIN participant s ON s.id=q.sender_id AND s.project_id=q.project_id
+    JOIN participant r ON r.id=q.recipient_id AND r.project_id=q.project_id
+    LEFT JOIN message n ON n.id=w.note_id
+    WHERE t.deleted_at IS NULL AND t.state IN ('waiting','working')
+      AND s.left_at IS NULL AND s.role NOT IN ('chief','human')
+      AND r.role='chief' AND r.left_at IS NULL
+      AND NOT EXISTS (SELECT 1 FROM message a JOIN participant c ON c.id=a.sender_id
+            WHERE c.role='chief' AND a.recipient_id=b.participant_id AND a.task_id=t.id
+              AND a.kind IN ('task','note') AND a.id > w.after_id
+              AND a.state IN ('queued','gated','delivering','delivered','read'))";
+
+/// When a closed question's reminders are counted from: the update, for a wait
+/// an earlier build left with no note the ledger names; else when the chief first
+/// had the note, its earliest inbox read while the paste was on its way, else its
+/// delivery. None until it did.
+const CLOSED_CLOCK: &str = "coalesce(w.from_update_at, w.first_read_at, n.delivered_at)";
+
+/// The closed questions' waits whose clock has started, oldest first.
+fn closed_waiting(store: &Store, project: i64) -> Result<Vec<QuestionWait>, LedgerError> {
+    let rows: Vec<(QuestionWait, Option<i64>)> = store
+        .db
+        .prepare(&format!(
+            "SELECT q.id, t.number, s.handle, r.handle, q.recipient_id, {CLOSED_CLOCK}, w.reminder_id, q.reason
+             {CLOSED_FROM} AND q.project_id=? AND {CLOSED_CLOCK} IS NOT NULL
+             ORDER BY {CLOSED_CLOCK}, q.id"
+        ))?
+        .query_map([project], |row| {
+            let reason: Option<String> = row.get(7)?;
+            let number: i64 = row.get(1)?;
+            Ok((
+                QuestionWait {
+                    id: row.get(0)?,
+                    task: Some(number),
+                    held_task: Some(number),
+                    sender: row.get(2)?,
+                    recipient: row.get(3)?,
+                    recipient_id: row.get(4)?,
+                    received_at: row.get(5)?,
+                    reminder: None,
+                    closed: Some(
+                        if reason.as_deref() == Some(crate::messages::CLOSED_PROJECT_QUESTION) {
+                            crate::messages::CLOSED_PROJECT_QUESTION
+                        } else {
+                            crate::messages::RESTARTED_QUESTION
+                        }
+                        .to_owned(),
+                    ),
+                },
+                row.get(6)?,
             ))
         })?
         .collect::<rusqlite::Result<_>>()?;
@@ -97,6 +177,93 @@ pub(crate) fn waiting(store: &Store, project: i64) -> Result<Vec<QuestionWait>, 
             Ok(wait)
         })
         .collect()
+}
+
+/// A close keeps its wait: the close's place is the last message written so far.
+/// The note is linked when it is written ([`link_note`]).
+pub(crate) fn begin_wait(store: &Store, question: i64) -> Result<(), LedgerError> {
+    store.db.execute(
+        "INSERT OR IGNORE INTO question_wait(question_id, after_id)
+         VALUES (?1, (SELECT COALESCE(MAX(id), 0) FROM message))",
+        [question],
+    )?;
+    Ok(())
+}
+
+/// The one note the chief was given for the closed question: the first written is
+/// kept. A question with no wait keeps nothing.
+pub(crate) fn link_note(store: &Store, question: i64, note: i64) -> Result<(), LedgerError> {
+    store.db.execute(
+        "UPDATE question_wait SET note_id = coalesce(note_id, ?1) WHERE question_id = ?2",
+        params![note, question],
+    )?;
+    Ok(())
+}
+
+/// The note was read in the inbox while its paste was on its way: that is the
+/// chief's earliest receipt, whenever the paste is confirmed.
+pub(crate) fn note_read_early(store: &mut Store, note: i64) -> Result<(), LedgerError> {
+    let at = store.at();
+    store.db.execute(
+        "UPDATE question_wait SET first_read_at = coalesce(first_read_at, ?1) WHERE note_id = ?2",
+        params![at, note],
+    )?;
+    Ok(())
+}
+
+/// The reminder's note, known as a reminder from now on whatever the cursors name.
+fn reminder_note(
+    store: &mut Store,
+    project: i64,
+    new_note: &NewNote,
+) -> Result<MessageView, LedgerError> {
+    let sent = note(store, project, new_note)?;
+    store.db.execute(
+        "INSERT INTO question_reminder_sent(message_id) VALUES (?1)",
+        [sent.id],
+    )?;
+    Ok(sent)
+}
+
+/// A reminder of a closed question, in one write with its eligibility, its own
+/// cursor and the queued reminder. None where the wait is not eligible, the
+/// cursor is not `previous`, or a reminder is still on its way.
+fn remind_closed(
+    store: &mut Store,
+    project: i64,
+    id: i64,
+    previous: Option<i64>,
+    new_note: &NewNote,
+) -> Result<Option<MessageView>, LedgerError> {
+    store.write(|store| {
+        let current: Option<(Option<i64>, Option<String>)> = store
+            .db
+            .query_row(
+                &format!(
+                    "SELECT w.reminder_id, (SELECT state FROM message WHERE id=w.reminder_id)
+                     {CLOSED_FROM} AND q.id=?1 AND q.project_id=?2 AND {CLOSED_CLOCK} IS NOT NULL"
+                ),
+                params![id, project],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?;
+        let Some((last, state)) = current else {
+            return Ok(None);
+        };
+        if last != previous
+            || state
+                .as_deref()
+                .is_some_and(|state| matches!(state, "queued" | "gated" | "delivering"))
+        {
+            return Ok(None);
+        }
+        let sent = reminder_note(store, project, new_note)?;
+        store.db.execute(
+            "UPDATE question_wait SET reminder_id = ?1 WHERE question_id = ?2",
+            params![sent.id, id],
+        )?;
+        Ok(Some(sent))
+    })
 }
 
 /// A question printed whole to the chief while its paste is still in flight
@@ -137,7 +304,7 @@ pub(crate) fn remind(
             )
             .optional()?;
         let Some((last, state)) = current else {
-            return Ok(None);
+            return remind_closed(store, project, id, previous, new_note);
         };
         if last != previous
             || state
@@ -146,7 +313,7 @@ pub(crate) fn remind(
         {
             return Ok(None);
         }
-        let sent = note(store, project, new_note)?;
+        let sent = reminder_note(store, project, new_note)?;
         store.db.execute(
             "INSERT INTO question_reminder(question_id, reminder_id, ended) VALUES (?1, ?2, 0)
              ON CONFLICT(question_id) DO UPDATE SET reminder_id=excluded.reminder_id, ended=0",
@@ -202,7 +369,7 @@ pub(crate) fn end_for_task(
 
 /// A queued or returned reminder is stale once its question no longer waits.
 pub(crate) fn stale_reminder(store: &Store, reminder: i64) -> Result<bool, LedgerError> {
-    Ok(store
+    let open = store
         .db
         .prepare(&format!(
             "SELECT 1 FROM question_reminder qr JOIN message reminder ON reminder.id=qr.reminder_id
@@ -213,7 +380,77 @@ pub(crate) fn stale_reminder(store: &Store, reminder: i64) -> Result<bool, Ledge
             holding_join(),
             is_open()
         ))?
+        .exists([reminder])?;
+    if open {
+        return Ok(true);
+    }
+    // A project's Close holds a reminder, as transport does: it is judged at the
+    // Resume, when the tasks it paused are at work again.
+    Ok(store
+        .db
+        .prepare(&format!(
+            "SELECT 1 FROM question_wait own JOIN message reminder ON reminder.id=own.reminder_id
+             JOIN project held ON held.id=reminder.project_id AND held.state='open'
+             WHERE own.reminder_id=? AND reminder.handed_at IS NULL AND NOT EXISTS (
+               SELECT 1 {CLOSED_FROM} AND w.question_id=own.question_id)"
+        ))?
         .exists([reminder])?)
+}
+
+/// Why a reminder is not shown to its recipient now.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Withheld {
+    /// A chief's meeting holds it: it is deliverable once the meeting ends, and a
+    /// reader is told it waits.
+    Meeting,
+    /// It no longer applies or is held otherwise (a Close, its wait ended, it was
+    /// withdrawn or failed): it is nobody's to read.
+    Gone,
+}
+
+/// Whether `message` is a reminder its recipient is not to be shown now: listed,
+/// served or received, it is one transport would hand over this moment, or one the
+/// recipient has had. A reminder the recipient has had stays its own whatever
+/// happens to its wait: delivered or read, handed to its window, or read whole
+/// while its paste was on its way. One it has not had is shown only while the
+/// project is open, its wait stands and no meeting holds it; one cancelled or
+/// failed before the recipient had it is nobody's. Any other message is shown.
+/// Nothing is changed by asking.
+pub(crate) fn withheld(store: &Store, message: i64) -> Result<Option<Withheld>, LedgerError> {
+    let found: Option<(String, bool, bool, bool)> = store
+        .db
+        .query_row(
+            "SELECT m.state,
+                    m.handed_at IS NOT NULL OR m.delivered_at IS NOT NULL
+                      OR COALESCE(json_extract(m.receipt, '$.readEarly'), '') != '',
+                    p.state='open',
+                    EXISTS (SELECT 1 FROM message held WHERE held.id = m.id AND {held})
+             FROM question_reminder_sent sent JOIN message m ON m.id=sent.message_id
+             JOIN project p ON p.id=m.project_id WHERE sent.message_id=?"
+                .replace("{held}", &crate::meeting::held_by_meeting("held"))
+                .as_str(),
+            [message],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )
+        .optional()?;
+    let Some((state, had, open, in_meeting)) = found else {
+        return Ok(None);
+    };
+    if had || matches!(state.as_str(), "delivered" | "read") {
+        return Ok(None);
+    }
+    Ok(match state.as_str() {
+        "queued" | "delivering" => {
+            if !open || stale_reminder(store, message)? {
+                Some(Withheld::Gone)
+            } else if in_meeting {
+                Some(Withheld::Meeting)
+            } else {
+                None
+            }
+        }
+        _ => Some(Withheld::Gone),
+    })
 }
 
 #[cfg(test)]

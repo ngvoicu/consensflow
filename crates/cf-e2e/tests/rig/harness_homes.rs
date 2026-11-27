@@ -18,13 +18,18 @@ use serde_json::json;
 
 use crate::{Outcome, FAKE_AGENT};
 
+/// A folder or file standing for the owner's, as a test makes one: read for `Guard`, never written.
+fn owned(path: impl AsRef<std::path::Path>) -> cf_e2e::door::source::Source {
+    cf_e2e::door::source::Account::this().named(path, cf_e2e::door::source::Purpose::Guard)
+}
+
 /// What the owner's setups hold that no run may touch.
 const SENTINEL: &str = "SENTINEL-the-owners-own";
 
 /// A pretend owner: a home with the three harnesses' setups in it, each file holding the
 /// sentinel, and a Pi login of a key.
 struct Owner {
-    home: tempfile::TempDir,
+    home: cf_e2e::door::Made,
 }
 
 type Made<T> = Result<T, Box<dyn std::error::Error>>;
@@ -32,7 +37,7 @@ type Made<T> = Result<T, Box<dyn std::error::Error>>;
 impl Owner {
     fn new() -> Made<Self> {
         let owner = Self {
-            home: tempfile::tempdir()?,
+            home: cf_e2e::door::made("t-")?,
         };
         for file in [
             ".pi/agent/settings.json",
@@ -72,8 +77,8 @@ impl Owner {
 
     fn write(&self, below: &str, text: &str) -> Made<()> {
         let file = self.path(below);
-        fs::create_dir_all(file.parent().ok_or("a file below the home has a folder")?)?;
-        fs::write(file, text)?;
+        cf_e2e::door::make_dir(file.parent().ok_or("a file below the home has a folder")?)?;
+        cf_e2e::door::write(file, text)?;
         Ok(())
     }
 
@@ -107,16 +112,23 @@ impl Owner {
         vec![
             Installed::at(Harness::Pi, self.path("bin/pi"), home).with_isolation(Arc::new(
                 Isolation::pi(
-                    home,
-                    &self.path(".pi/agent"),
+                    owned(home),
+                    owned(self.path(".pi/agent")),
                     "openrouter/meta/muse-spark-1.3",
                     run,
                 ),
             )),
             Installed::at(Harness::Codex, self.path("bin/codex"), self.path(".codex"))
-                .with_isolation(Arc::new(Isolation::codex(home, &self.path(".codex")))),
+                .with_isolation(Arc::new(Isolation::codex(
+                    owned(home),
+                    owned(self.path(".codex")),
+                ))),
             Installed::at(Harness::Devin, self.path("bin/devin"), home).with_isolation(Arc::new(
-                Isolation::devin(home, &self.path(".config"), &self.path(".local/share")),
+                Isolation::devin(
+                    owned(home),
+                    owned(self.path(".config")),
+                    owned(self.path(".local/share")),
+                ),
             )),
         ]
     }
@@ -161,9 +173,12 @@ fn a_rig_that_clears_the_environment_still_runs_each_harness_on_a_home_of_the_ru
         assert!(!at.starts_with(home), "{name} is {}", at.display());
         assert!(at.is_dir(), "{name} is {}", at.display());
     }
-    // The owner's home is the windows' all the same (their project folders are below it), and
-    // none of the variables a harness reads its login by names it.
-    assert_eq!(named(&rig, "HOME"), home);
+    // The owner's home is where the windows' project folders are below, and no variable a program
+    // finds a home by names it: the windows' own `HOME` is the rig's (K3 review T-1978, 2).
+    assert_eq!(rig.project_home().map(PathBuf::from).as_deref(), Some(home));
+    let own = named(&rig, "HOME");
+    assert!(!own.starts_with(home), "HOME is {}", own.display());
+    assert!(own.is_dir(), "HOME is {}", own.display());
     // The homes hold the logins (a key, a Codex login) and nothing else of the owner's.
     let pi = named(&rig, "PI_CODING_AGENT_DIR");
     assert!(fs::read_to_string(pi.join("auth.json"))?.contains("sk-or-OWNERS"));
@@ -184,8 +199,8 @@ fn a_run_that_writes_only_in_its_homes_leaves_the_owners_setup_as_it_was() -> Ou
     // What the harnesses write as they run: sessions, settings, a trust table, a database.
     let write = |folder: PathBuf, file: &str| -> Made<()> {
         let file = folder.join(file);
-        fs::create_dir_all(file.parent().ok_or("a file has a folder")?)?;
-        fs::write(file, "the run's own")?;
+        cf_e2e::door::make_dir(file.parent().ok_or("a file has a folder")?)?;
+        cf_e2e::door::write(file, "the run's own")?;
         Ok(())
     };
     write(
@@ -259,8 +274,8 @@ fn a_pi_login_that_will_not_last_the_run_stops_the_rig_before_anything_starts() 
     let home = owner.home.path();
     let pi = Installed::at(Harness::Pi, owner.path("bin/pi"), home).with_isolation(Arc::new(
         Isolation::pi(
-            home,
-            &owner.path(".pi/agent"),
+            owned(home),
+            owned(owner.path(".pi/agent")),
             "openai/gpt-6-luna",
             Duration::from_secs(3600),
         ),
@@ -293,7 +308,7 @@ fn a_rig_that_runs_muse_beside_devins_home_reads_muse_where_its_muse_writes() ->
     let before = owner.everything()?;
     // No window runs Muse here; a live rig asks Muse its allowance before it writes its
     // launcher (T-1076), which this one answers, at 10% of its window and its week.
-    let bin = tempfile::tempdir()?;
+    let bin = cf_e2e::door::made("t-")?;
     let binary = bin.path().join("muse-bin-1.4.14-R7309.1");
     cf_e2e::files::write_executable(
         &binary,
@@ -307,6 +322,24 @@ fn a_rig_that_runs_muse_beside_devins_home_reads_muse_where_its_muse_writes() ->
     // A home lasts the run, and the next rig starts on it (the next project, the app's restart):
     // it finds the link the last one left, which leads to that rig's Muse.
     let installs = owner.installs();
+    // K3: a real Muse window on a Mac runs only on a machine marked as a test machine; off one the
+    // rig is refused before anything is made.
+    if cfg!(target_os = "macos") && cf_e2e::live::renew::TestMachine::detect().is_none() {
+        let config = live::rig(&installs, FAKE_AGENT).muse_live(muse.clone(), owner.home.path());
+        match Rig::start(config) {
+            Ok(rig) => {
+                rig.close()?;
+                return Err("a live Muse rig started on a Mac off a test machine".into());
+            }
+            Err(refused) => assert!(refused.to_string().contains("test machine"), "{refused}"),
+        }
+        assert_eq!(
+            owner.everything()?,
+            before,
+            "the refused rig changed the owner's homes"
+        );
+        return Ok(());
+    }
     for run in 1..=2 {
         let config = live::rig(&installs, FAKE_AGENT).muse_live(muse.clone(), owner.home.path());
         let rig = Rig::start(config)?;
@@ -336,8 +369,8 @@ fn a_rig_that_runs_muse_beside_devins_home_reads_muse_where_its_muse_writes() ->
             .join(".local/share/muse/sessions/2026/11/02")
             .join(session)
             .join("session.jsonl");
-        fs::create_dir_all(log.parent().ok_or("a log has a folder")?)?;
-        fs::write(&log, "{}\n")?;
+        cf_e2e::door::make_dir(log.parent().ok_or("a log has a folder")?)?;
+        cf_e2e::door::write(&log, "{}\n")?;
         let found = named(&rig, "XDG_DATA_HOME")
             .join("muse/sessions/2026/11/02")
             .join(session)
