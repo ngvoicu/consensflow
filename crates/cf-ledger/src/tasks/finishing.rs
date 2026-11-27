@@ -35,10 +35,10 @@ use super::{
     task_by_id,
 };
 use crate::messages::{
-    drop_queued_but_told, fold, leave_pause_notes, notes_waiting, put_back_paused_answers,
-    queued_paused_answers, recover_after_lost_answer, release_carried, say_again, tell_sent_back,
-    warnings_on_their_way, warnings_queued, withdraw_at_work, withdraw_open_questions,
-    withdraw_paused_answers, Afterwards, Dropped,
+    close_by_the_result, drop_queued_but_told, fold, leave_pause_notes, notes_waiting,
+    open_questions, put_back_paused_answers, queued_paused_answers, recover_after_lost_answer,
+    release_carried, say_again, tell_sent_back, warnings_on_their_way, warnings_queued,
+    withdraw_at_work, withdraw_open_questions, withdraw_paused_answers, Afterwards, Dropped,
 };
 use crate::model::{
     self, require_active, sql_list, LedgerError, ACTIVE_TASK_STATES, FINISHED_TASK_STATES, MAX_BODY,
@@ -208,6 +208,20 @@ fn record_counted(
             withdraw_paused_answers(store, &task, "finished")?;
             leave_pause_notes(store, &task, "finished", Afterwards::MovesOn)?;
         }
+        // The chief or the human takes the words as the result while questions of the task are
+        // still open (T-2197): each closes with the result, however it was tracked and whether
+        // its window stays, and the result names it.
+        let mut body = body.to_owned();
+        if let (true, Some(window)) = (finished_by_word, task.assignee_id) {
+            let open = open_questions(store, task.id, window)?;
+            close_by_the_result(store, &task, &open)?;
+            for question in open {
+                body.push_str(&format!(
+                    "\n\n(ConsensFlow: m-{question} was left unanswered and is closed. To send words to its window, reopen the task: `cf task reopen T-{number} \"…\"`.)"
+                ));
+            }
+        }
+        let body = body.as_str();
         // The chief may explicitly take a raised question as the result.
         // That withdraws unanswered questions without ending the holding or
         // withdrawing an answer already accepted for its window.

@@ -81,11 +81,12 @@ pub(crate) use pauses::{
     warnings_on_their_way, warnings_queued, Afterwards,
 };
 pub use pauses::{MAY_STILL_RUN, NOT_PROVEN_GONE};
-pub use receipt::Read;
 pub(crate) use receipt::{
-    claim_answer, door_born_closed, outstanding, receive_read, receive_read_part, reconcile,
-    reconcile_answered_on_open, release_all_claims, release_claims, settle_claim,
+    claim_answer, door_born_closed, open_questions, outstanding, questions_to_report, receive_read,
+    receive_read_part, reconcile, reconcile_answered_on_open, release_all_claims, release_claims,
+    settle_claim,
 };
+pub use receipt::{Read, TURN_ON_OPEN_QUESTION};
 pub(crate) use roles::{note_role, role_notes_to, role_of_note};
 pub(crate) use taken_back::take_back;
 pub(crate) use told::{
@@ -156,6 +157,30 @@ pub(crate) fn note(
             body: &note.body,
             task: note.task,
             kind: "note",
+            ..Sent::default()
+        },
+    )
+}
+
+/// A note that reports the ended turn `turn` of a window to its task's requester (T-2197):
+/// as [`note`], and its `message.sent` event carries `report: turn`, which is how the ledger
+/// knows the turn was told (`questions_to_report`).
+pub(crate) fn report_note(
+    store: &mut Store,
+    project_id: i64,
+    note: &NewNote,
+    turn: &str,
+) -> Result<MessageView, LedgerError> {
+    send(
+        store,
+        project_id,
+        &Sent {
+            from: note.from.as_deref(),
+            to: &note.to,
+            body: &note.body,
+            task: note.task,
+            kind: "note",
+            report: Some(turn),
             ..Sent::default()
         },
     )
@@ -364,6 +389,19 @@ pub(crate) fn answer(
                 ),
                 403,
             ));
+        }
+        // A question its own task's result closed says what reaches the window now, before
+        // the refusals about the window it was asked in.
+        if question.state == "cancelled" {
+            let task = match binding {
+                Some(_) => crate::holding::task_of_question(store, question_id)?,
+                None => message_task(store, question_id)?,
+            };
+            if let Some(task) = task
+                .filter(|task| question.reason.as_deref() == Some(&gave_result_reason(task.number)))
+            {
+                return Err(closed_by_the_result(question_id, &task));
+            }
         }
         if crate::holding::awaiting_handover(store, question_id)? {
             return Err(LedgerError::refused_with("handover-pending", "This window is receiving another brief. Wait for the send to finish, then try again.", 409));
@@ -585,6 +623,58 @@ fn finished_task_takes_no_answer(
     Ok(LedgerError::refused_with(code, words, 409))
 }
 
+/// Why a question that its task's result closed was withdrawn (T-2197).
+pub(crate) fn gave_result_reason(number: i64) -> String {
+    format!("T-{number} gave its result with it unanswered")
+}
+
+/// The refusal of an answer to a question its task's result closed: what sends words to its
+/// window as the task stands now.
+fn closed_by_the_result(question: i64, task: &TaskRow) -> LedgerError {
+    let number = task.number;
+    let way = match task.state.as_str() {
+        "done" => format!(
+            "To send words to its window, reopen the task: `cf task reopen T-{number} \"…\"`."
+        ),
+        "accepted" => format!(
+            "To send words to its window, add a follow-up: `cf task add --after T-{number} \"…\"`."
+        ),
+        "queued" | "working" | "waiting" | "paused" => {
+            format!("To send words to its window: `cf tell T-{number} \"…\"`.")
+        }
+        _ => "Start a new task with what you meant to answer.".to_owned(),
+    };
+    LedgerError::refused_with(
+        "question-withdrawn",
+        format!("m-{question} is closed: T-{number} gave its result with it unanswered. {way}"),
+        409,
+    )
+}
+
+/// Closes the questions `ids` of the task its result closed (T-2197): withdrawn with why,
+/// whatever tracked them, their doors shut and their holding closed, so no answer is taken
+/// for any, whether the window stays open or not.
+pub(crate) fn close_by_the_result(
+    store: &Store,
+    task: &TaskRow,
+    ids: &[i64],
+) -> Result<(), LedgerError> {
+    let reason = gave_result_reason(task.number);
+    for id in ids {
+        store.db.execute(
+            "UPDATE message SET state = 'cancelled', reason = ?1,
+                 door_closed_at = COALESCE(door_closed_at, (SELECT updated_at FROM task WHERE id = ?2))
+             WHERE id = ?3 AND kind = 'question'",
+            params![reason, task.id, id],
+        )?;
+        store.db.execute(
+            "UPDATE question_binding SET closed = 1 WHERE question_id = ? AND closed = 0",
+            [id],
+        )?;
+    }
+    Ok(())
+}
+
 /// A question recorded before holding tracking keeps the earlier refusal.
 fn legacy_finished_task_takes_no_answer(task: &TaskRow) -> LedgerError {
     let number = task.number;
@@ -637,7 +727,7 @@ pub(crate) fn withdraw_open_questions(
               WHERE {} = ?2 AND sender_id = ?3 AND kind = 'question' AND urgent = 0
                 AND id IN (SELECT question_id FROM question_binding)
                 AND (state IN ('queued', 'delivering', 'gated', 'delivered', 'read', 'failed')
-                     OR (state = 'cancelled' AND reason IS NOT ?4 AND reason IS NOT ?5 AND reason IS NOT ?6 AND EXISTS (
+                     OR (state = 'cancelled' AND reason IS NOT ?4 AND reason IS NOT ?5 AND reason IS NOT ?6\n                     AND reason IS NOT ('T-' || (SELECT number FROM task WHERE id = ?2) || ' gave its result with it unanswered') AND EXISTS (
                          SELECT 1 FROM message a WHERE a.reply_to = message.id AND a.kind = 'answer')))
                 AND NOT {}",
             crate::holding::task_for_question_sql("message"),

@@ -84,7 +84,9 @@ use std::sync::Arc;
 use cf_base::{js, time};
 use cf_harness::contract::Observed;
 use cf_harness::records::{Command, Item, Monitor, Pending, Reading, Role, Source};
-use cf_ledger::{NewNote, NewQuestion, ParticipantView, ProjectView, TaskThread};
+use cf_ledger::{
+    NewNote, NewQuestion, ParticipantView, ProjectView, TaskThread, TURN_ON_OPEN_QUESTION,
+};
 use cf_proto::ledger::MessageView;
 use serde_json::Value;
 
@@ -408,6 +410,84 @@ impl Dispatcher {
         Ok(released)
     }
 
+    /// A waiting task's window ended a turn with words while a question of its task is open:
+    /// the requester is told those words once, with how to take them as the result if they are
+    /// (T-2197). The engine never takes them as the result itself. Whether the turn is one to
+    /// tell is the ledger's alone (`questions_to_report`): a message of the task was pasted
+    /// after the newest open question, and no such note was sent since.
+    fn report_turn_on_open_question(
+        &self,
+        project: &ProjectView,
+        participant: &ParticipantView,
+        thread: &TaskThread,
+        observed: &Observed,
+        watching: Watching,
+    ) -> Result<(), EngineError> {
+        let items = observed.items();
+        let from = items
+            .iter()
+            .rposition(|item| item.role == Role::User && !item.compaction)
+            .map_or(0, |at| at + 1);
+        let replacements = self.seams.ledger.borrow().role_notes_to(participant.id)?;
+        let Some(answers) = answers_to_the_task(&items[from..], &replacements)
+            .filter(|answers| answers.last.is_some_and(|last| last.complete))
+        else {
+            return Ok(());
+        };
+        if !has_words(&answers.final_run) || pending_after_look(observed, watching).total() > 0 {
+            return Ok(());
+        }
+        // The turn is the one that ended with this last complete item: the ledger knows it was
+        // told by the item's identity written into the note's own event.
+        let Some(turn) = answers.last.map(|last| Arc::clone(&last.id)) else {
+            return Ok(());
+        };
+        let open = self.seams.ledger.borrow().questions_to_report(
+            participant.id,
+            thread.task.id,
+            &turn,
+        )?;
+        let Some((last, rest)) = open.split_last() else {
+            return Ok(());
+        };
+        let names = if rest.is_empty() {
+            format!(" m-{last}")
+        } else {
+            let rest: Vec<String> = rest.iter().map(|id| format!("m-{id}")).collect();
+            format!("s {} and m-{last}", rest.join(", "))
+        };
+        let number = thread.task.number;
+        let handle = &participant.handle;
+        // Finish takes words the window's record shows came after a paste of its task's
+        // messages; in another conversation of the window it cannot (`no-delivery`).
+        let finishable = self
+            .latest_message_at(thread, participant, items, &replacements)?
+            .is_some();
+        let how = if finishable {
+            format!("If they are its result: `cf task finish T-{number}`.")
+        } else {
+            format!(
+                "These words came from another conversation of its window, so `cf task finish T-{number}` cannot take them: `cf tell T-{number} \"…\"` reaches the window."
+            )
+        };
+        let body = format!(
+            "{}\n\n(ConsensFlow: @{handle}'s {TURN_ON_OPEN_QUESTION}{names} still open. {how})",
+            words_of(&answers.final_run),
+        );
+        self.seams.ledger.borrow_mut().report_note(
+            project.id,
+            &NewNote {
+                from: Some(participant.handle.clone()),
+                to: thread.task.requester.clone(),
+                task: Some(number),
+                body,
+            },
+            &turn,
+        )?;
+        self.changed();
+        Ok(())
+    }
+
     /// A worker's turn, looked at: whether it is over with an answer to its task's latest
     /// message, and what that comes to ([`Turn`]). A turn that failed is its task's
     /// failure, whatever it left running, with why ([`Dispatcher::why_it_failed`]); one
@@ -461,6 +541,16 @@ impl Dispatcher {
             }
             _ => false,
         };
+        // A waiting task's turn that ended with words past an open question is told to the
+        // requester, never taken as the result (T-2197).
+        if let Some(thread) = task.as_ref().filter(|thread| {
+            thread.task.state == "waiting"
+                && observed.settled
+                && !observed.failed
+                && !observed.shared
+        }) {
+            self.report_turn_on_open_question(project, participant, thread, observed, watching)?;
+        }
         let Some(thread) = task.filter(|thread| thread.task.state == "working" && !waiting) else {
             record.held.borrow_mut().drop_hold();
             if observed.failed {
@@ -1732,6 +1822,14 @@ impl Words for Run<'_> {
     fn last_words(&self) -> bool {
         self.last_words
     }
+}
+
+/// Whether the turn wrote any words of its own (what [`words_of`] would put in place of).
+fn has_words(final_run: &(impl Words + ?Sized)) -> bool {
+    final_run
+        .items()
+        .iter()
+        .any(|item| !item.commentary && !js::trim(&item.text).is_empty())
 }
 
 /// The words of a final answer, in the items it was written in: each trimmed, a blank

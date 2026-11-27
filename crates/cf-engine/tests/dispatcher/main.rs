@@ -107,6 +107,8 @@ mod no_adapter;
 mod not_ready;
 mod nothing_to_stop;
 mod open_deadline;
+mod open_question_invariant;
+mod open_question_result;
 mod out_of_quota;
 mod outage_notes;
 mod own_steps;
