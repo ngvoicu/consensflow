@@ -112,6 +112,11 @@ fn options(
     let (app, connection) = BridgeBuilder::new(Role::Host).connect(app_input, app_output);
     drop(tokio::task::spawn_local(connection));
     let (noted, told) = (Rc::clone(exited), Rc::clone(handles));
+    // The `cf` of the test's bundle is there, as the app's is: on Windows the guard's stand-ins
+    // are made from it, and a bundle with none would start the windows without the guard.
+    let bundle = machine::bundle_of(&root.join("bundle").join("bin").join("cf"));
+    std::fs::create_dir_all(&bundle.bin).expect("the bundle's folder");
+    std::fs::write(&bundle.cf, b"a cf").expect("the bundle's cf");
     let options = Options {
         input: Box::new(daemon_input),
         output: Box::new(daemon_output),
@@ -121,7 +126,7 @@ fn options(
             Ok(())
         }),
         exit: Rc::new(move |code| noted.borrow_mut().push(code)),
-        bundle: machine::bundle_of(&root.join("bundle").join("bin").join("cf")),
+        bundle,
         signals: false,
     };
     (options, app)
