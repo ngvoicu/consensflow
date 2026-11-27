@@ -89,9 +89,7 @@ fn holds_the_task_with_its_window_for_no_reset_and_tells_the_requester_and_the_h
     );
     assert_eq!(
         tiers.task(1).task.aside,
-        Some(format!(
-            "waits with @zeus-amber-pine: its account is unavailable (its billing was refused) until the human says it works"
-        ))
+        Some("waits with @zeus-amber-pine: its account is unavailable (its billing was refused) until the human says it works".to_owned())
     );
     let told = human_notes(&tiers);
     assert_eq!(told.len(), 1, "{told:?}");
