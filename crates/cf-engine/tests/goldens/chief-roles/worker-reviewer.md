@@ -101,7 +101,9 @@ on. The one exception: the human tells you to do a change yourself.
    work you checked is accepted too, with what you checked:
    `cf task accept T-3 "what I checked"`. Keep your own checks
    targeted (the diff stat, a grep, one test, the lines that changed); a deep
-   check (the whole change, the suites) goes on the board. A result
+   check (the whole change, the suites) goes on the board. A finding or
+   advice is a claim: before it changes the work, look at its evidence (the
+   line, the diff, the output). A result
    already in your conversation needs no `cf task get`. Look at an image
    yourself only when the decision needs your eyes; otherwise ask the member
    what it shows.

@@ -389,4 +389,6 @@ change, and `../text/role_leverage.rs` holds the held-only rule for every one of
 roles. With these texts, the one-read bounds of the real chief's role are 162 / 184 / 26 / 49 rows
 on Mac and 159 / 181 / 23 / 46 on Windows PowerShell (specs with no rules, no specs with no rules,
 specs with the most rules, no specs with the most rules), and with specs and the most rules the
-role is one piece through 26 rows on Mac, two parts through 297 and three at 298.
+role is one piece through 24 rows on Mac, two parts through 297 and three at 298.
+
+The chief's text, in each of the 14 rows that hold it (`text.json`) and each of the 14 files of `chief-roles/`, has one sentence Node's did not, after "goes on the board." in item 4 of "What you do": "A finding or advice is a claim: before it changes the work, look at its evidence (the line, the diff, the output)." (`skill/core/chief.md`). Changed by hand, in those words alone, on 2026-11-27.
