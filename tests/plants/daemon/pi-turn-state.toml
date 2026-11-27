@@ -92,10 +92,8 @@ runs = ["pts-extension"]
 
 [[plant.edit]]
 file = "hosts/pi-extension/consensflow-delivery.mjs"
-find = "    restAfter = ended\n    await say(true)\n"
-replace = "    restAfter = ended\n    if (ctx.sessionManager?.getLeafEntry?.()?.message?.stopReason === 'stop') await say(true)\n"
-
-# --- the reader ---
+find = "    begun = ended\n    ends = []\n"
+replace = "    if (ctx.sessionManager?.getLeafEntry?.()?.message?.stopReason === 'stop') begun = ended\n    else begun = ended + 1\n    ends = []\n"
 
 [[plant]]
 name = "pi turn state: the reader lets a quiet file overrule working"

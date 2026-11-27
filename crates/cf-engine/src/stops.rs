@@ -1339,6 +1339,11 @@ mod tests {
             assert!(words.contains("short prompt"), "{words}");
             assert!(!words.contains("may be hung"), "{words}");
         }
+        assert!(
+            human.ends_with("Failing that, pause T-1 and delete @zeus's session.")
+                || human.ends_with("Failing that, delete @zeus's session."),
+            "{human}"
+        );
         // A window whose harness itself says a turn is on (Pi's word) is said so, and may be hung.
         let (human, told) =
             kept_words("zeus", 1, 3, None, Some("paused"), true, None, Says::AtWork);
@@ -1350,11 +1355,6 @@ mod tests {
             assert!(words.contains("may be hung"), "{words}");
             assert!(!words.contains("misreading"), "{words}");
         }
-        assert!(
-            human.ends_with("Failing that, pause T-1 and delete @zeus's session.")
-                || human.ends_with("Failing that, delete @zeus's session."),
-            "{human}"
-        );
         let work = kept_words(
             "zeus",
             1,

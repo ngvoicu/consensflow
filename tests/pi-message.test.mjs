@@ -354,6 +354,11 @@ describe('consensflow Pi worker followup, sent by Rust', { skip: cargoMissing },
       while ((await exists(join(s.inbox, `${id}.json`))) && Date.now() < deadline)
         await new Promise((resolve) => setTimeout(resolve, 5))
 
+      // Its run begins and ends: the window rests again, and a copy would be sent if nothing
+      // remembered the id.
+      await s.pi.handlers.get('agent_start')({}, s.ctx)
+      await s.pi.handlers.get('agent_settled')({ aborted: false }, s.ctx)
+      await s.extension.pass()
       await writeFile(join(s.inbox, `${id}.json`), record)
       await s.extension.pass()
       assert.deepEqual(s.pi.sent, ['acknowledged followup'])

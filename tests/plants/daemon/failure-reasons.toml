@@ -242,7 +242,7 @@ replace = "                let said = true;\n                step.failure = said
 
 [[plant]]
 name = "failure reason: the next message keeps Pi's last failure's words"
-meant = "a_failed_step_keeps_pis_words_for_it_and_the_next_message_drops_them"
+meant = "a_refusal_names_its_quota_and_a_genuine_user_turn_or_the_next_step_clears_it"
 runs = ["failure-reason-pi"]
 
 [[plant.edit]]

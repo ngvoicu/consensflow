@@ -682,7 +682,7 @@ replace = "        if (now_ === 'busy' && !compacting) {\n"
 
 [[plant]]
 name = "members compaction: the extension does not follow a compaction Pi began itself"
-meant = "refuses every delivery as busy while Pi's own compaction runs, and delivers exactly one after it ends (fail)"
+meant = "says busy at the session's start for a Pi not idle"
 runs = ["mc-pi-extension"]
 
 [[plant.edit]]
