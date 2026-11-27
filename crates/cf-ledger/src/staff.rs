@@ -252,6 +252,20 @@ pub(crate) fn set_roles<S: AsRef<str>>(
     handle: &str,
     roles: &[S],
 ) -> Result<ParticipantView, LedgerError> {
+    set_roles_if(store, project_id, handle, roles, None::<&[&str]>)
+}
+
+/// [`set_roles`] that holds only if the member's roles are still `expected`, the roles the writer
+/// last read (T-2405): inside the transaction, so a role another writer gave in between is not
+/// written over from a list made before it. Refused as `roles-changed` (409), nothing written.
+/// `None` is [`set_roles`]: the writer asks for no check.
+pub(crate) fn set_roles_if<S: AsRef<str>, E: AsRef<str>>(
+    store: &mut Store,
+    project_id: i64,
+    handle: &str,
+    roles: &[S],
+    expected: Option<&[E]>,
+) -> Result<ParticipantView, LedgerError> {
     let roles = model::require_roles(roles, || {
         model::printed(Some(&json!(roles
             .iter()
@@ -270,6 +284,19 @@ pub(crate) fn set_roles<S: AsRef<str>>(
             ));
         }
         let held: Vec<String> = serde_json::from_str(&member.roles)?;
+        if let Some(expected) = expected {
+            let same = held.len() == expected.len()
+                && expected
+                    .iter()
+                    .all(|role| held.iter().any(|kept| kept == role.as_ref()));
+            if !same {
+                return Err(LedgerError::refused_with(
+                    "roles-changed",
+                    format!("@{handle}'s roles changed since you looked: look again"),
+                    409,
+                ));
+            }
+        }
         let gained: Vec<&str> = roles
             .iter()
             .copied()

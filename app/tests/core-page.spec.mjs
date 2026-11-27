@@ -616,10 +616,20 @@ async function open(page, given = model(), { ready = true } = {}) {
           )
         return answer({})
       },
-      'member.roles': ({ project, agent, roles }) => {
+      'member.roles': ({ project, agent, roles, expected }) => {
         // A refusal a test names, as the ledger's when another write took the slot first.
         if (data.rolesRefusal !== undefined) return { ok: false, error: data.rolesRefusal }
         const lane = data.boards[project].lanes.find((l) => l.participant.handle === agent)
+        // The daemon holds a write that names the roles it read to them (T-2405).
+        if (
+          expected !== undefined &&
+          [...expected].sort().join() !== [...lane.participant.roles].sort().join()
+        ) {
+          return {
+            ok: false,
+            error: `@${agent}'s roles changed since you looked: look again`,
+          }
+        }
         lane.participant.roles = roles
         return answer({ member: lane.participant })
       },
@@ -24507,7 +24517,12 @@ test('T-2404 Project settings fills the empty slots one after another, gives a m
     ],
     [
       'member.roles',
-      { project: 1, agent: 'claude-fable-5-2-high', roles: ['architect', 'advisor', 'reviewer'] },
+      {
+        project: 1,
+        agent: 'claude-fable-5-2-high',
+        roles: ['architect', 'advisor', 'reviewer'],
+        expected: ['architect'],
+      },
       'undefined',
     ],
     [
@@ -24707,7 +24722,7 @@ test('T-2405 an entry the page cannot seat is left out and written nowhere: an u
   const data = suggesting(model(), {
     about: 'A staff with entries that cannot be seated.',
     members: [
-      { harness: 'claude-code', model: 'claude-opus-5-5', effort: 'medium', tier: 'critical', roles: ['janitor'] },
+      { harness: 'claude-code', model: 'claude-opus-5-5', effort: 'medium', tier: 'critical', roles: ['worker', 'janitor'] },
       { harness: 'emacs', model: 'claude-opus-5-5', effort: 'medium', tier: 'critical', roles: ['worker'] },
       { harness: 'claude-code', model: 'claude-opus-5-5', effort: 'medium', tier: 'huge', roles: ['worker'] },
       { harness: 'claude-code', model: 'claude-unlisted-9', effort: 'medium', tier: 'complex', roles: ['worker'] },
@@ -24720,6 +24735,10 @@ test('T-2405 an entry the page cannot seat is left out and written nowhere: an u
   await expect(panel.locator('.suggest-fills')).toHaveText(
     'It fills 1 empty slot with members on Claude Code.',
   )
+  // No word of the entries it left out: not a harness nor a model it does not know.
+  await expect(panel.locator('.suggest-gap')).toHaveText([
+    'Claude Code here does not list claude-unlisted-9 at medium, so the 1 slot for it is left out.',
+  ])
   await panel.getByRole('button', { name: 'Fill 1 empty slot with the suggested staff' }).click()
   expect(await holdersShown(fresh)).toEqual([['worker:standard', '1']])
 })
@@ -24733,4 +24752,227 @@ test('T-2405 a daemon that says nothing of a suggested staff offers nothing: the
   const fresh = await newProjectOn(page, data)
   await expect(fresh.locator('table.slots')).toBeVisible()
   await expect(suggestion(fresh)).toBeHidden()
+})
+
+// T-2405 round 2: what the page writes from what it read, and from what it was told fresh.
+
+/** The member.add / member.roles writes the page made, as the daemon got them. */
+const staffWrites = (page) =>
+  page.evaluate(() =>
+    window.__calls
+      .filter(
+        ([command, args]) =>
+          command === 'daemon_request' && ['member.add', 'member.roles'].includes(args.operation),
+      )
+      .map(([, { operation, body }]) => {
+        const { read, ...rest } = body
+        return [operation, rest]
+      }),
+  )
+
+const FABLE = {
+  harness: 'claude-code',
+  model: 'claude-fable-5-2',
+  modelName: 'claude-fable-5-2',
+  effort: 'high',
+}
+
+test('T-2405 a role written to a member names the roles the page read, and a member whose roles changed meanwhile is refused in plain words and written nothing', async ({
+  page,
+}) => {
+  const data = suggesting(staffOf(model(), staffLane(3, 'fable', ['architect'], 'critical', FABLE)))
+  data.addJoins = true
+  const settings = await settingsOn(page, data)
+  const panel = suggestion(settings)
+  await expect(panel.locator('.suggest-fills')).toHaveText(
+    'It fills 7 empty slots with members on Claude Code and Codex.',
+  )
+  // Another writer gives the member the integrator slot after the dialog read it.
+  await page.evaluate(() => {
+    const lane = window.__model.boards[1].lanes.find((one) => one.participant.handle === 'fable')
+    lane.participant.roles = ['architect', 'integrator']
+  })
+  await panel.getByRole('button', { name: 'Fill 7 empty slots with the suggested staff' }).click()
+  await expect(panel.getByRole('alert')).toHaveText(
+    "2 slots could not be filled: @fable's roles changed since you looked: look again.",
+  )
+  const writes = await staffWrites(page)
+  expect(writes.filter(([operation]) => operation === 'member.roles')).toEqual([
+    [
+      'member.roles',
+      {
+        project: 1,
+        agent: 'fable',
+        roles: ['architect', 'advisor', 'reviewer'],
+        expected: ['architect'],
+      },
+    ],
+  ])
+  // The role the other writer gave is still there, and the rest was filled.
+  expect(
+    await page.evaluate(
+      () =>
+        window.__model.boards[1].lanes.find((one) => one.participant.handle === 'fable')
+          .participant.roles,
+    ),
+  ).toEqual(['architect', 'integrator'])
+})
+
+test("T-2405 a slot's give it to and its Remove write the roles with the ones the page read", async ({
+  page,
+}) => {
+  const data = staffOf(
+    model(),
+    staffLane(3, 'zeus', ['worker', 'reviewer'], 'standard'),
+    staffLane(4, 'hera', ['tester'], 'standard'),
+  )
+  const settings = await settingsOn(page, data)
+  await settings
+    .locator('[data-slot="reviewer:standard"]')
+    .getByRole('button', { name: /Remove/ })
+    .first()
+    .click()
+  await expect.poll(async () => (await staffWrites(page)).length).toBe(1)
+  expect(await staffWrites(page)).toEqual([
+    [
+      'member.roles',
+      { project: 1, agent: 'zeus', roles: ['worker'], expected: ['worker', 'reviewer'] },
+    ],
+  ])
+})
+
+/** What a daemon answers of a harness whose read failed: no model, and why, marked stale. */
+const failedRead = (why) => ({
+  models: [],
+  readAt: null,
+  freshness: { state: 'stale', why },
+  how: '',
+})
+
+const OPUS = { harness: 'claude-code', model: 'claude-opus-5-5', modelName: 'claude-opus-5-5' }
+
+test('T-2405 a stored catalog the harness could not fetch again offers nothing of that harness, and the part that is fresh is offered', async ({
+  page,
+}) => {
+  const data = suggesting(staffOf(model()))
+  data.addJoins = true
+  data.models.codex.listing = {
+    ...data.models.codex.listing,
+    freshness: { state: 'stale', why: 'the account catalog could not be fetched again' },
+  }
+  const settings = await settingsOn(page, data)
+  const panel = suggestion(settings)
+  await expect(panel.locator('.suggest-fills')).toHaveText(
+    'It fills 4 empty slots with members on Claude Code.',
+  )
+  await expect(panel.locator('.suggest-gap')).toHaveText([
+    "Codex's model list may be out of date (the account catalog could not be fetched again), so the 4 slots it puts on Codex are left out.",
+  ])
+  await panel.getByRole('button', { name: 'Fill 4 empty slots with the suggested staff' }).click()
+  const writes = await staffWrites(page)
+  expect(writes.map(([, body]) => body.harness)).toEqual(['claude-code', 'claude-code'])
+})
+
+test('T-2405 where every read failed, the daemon answering with no model and a reason, nothing is offered, the image designer too', async ({
+  page,
+}) => {
+  const data = suggesting(staffOf(model()))
+  data.models.claude.listing = failedRead('claude answered nothing')
+  data.models.codex.listing = failedRead('codex answered nothing')
+  const settings = await settingsOn(page, data)
+  await expect(settings.locator('table.slots')).toBeVisible()
+  await expect.poll(() => answers(page, 'models.get')).toBeGreaterThanOrEqual(2)
+  await expect(suggestion(settings)).toHaveCount(0)
+  expect(await staffWrites(page)).toEqual([])
+})
+
+test('T-2405 a Refresh that failed leaves no earlier read to fill from, in New project', async ({
+  page,
+}) => {
+  const data = suggesting()
+  data.lastStaff = []
+  const fresh = await newProjectOn(page, data)
+  const panel = suggestion(fresh)
+  await expect(panel.locator('.suggest-fills')).toHaveText(
+    'It fills 8 empty slots with members on Claude Code and Codex.',
+  )
+  await page.evaluate(() => {
+    window.__model.modelsRefusal = { codex: 'codex refused the refresh' }
+  })
+  await fresh.locator('[name="chiefHarness"]').selectOption({ label: 'Codex' })
+  await fresh
+    .getByRole('group', { name: 'The chief' })
+    .getByRole('button', { name: 'Refresh models' })
+    .click()
+  await expect(panel.locator('.suggest-gap')).toHaveText([
+    "Codex's models could not be read (codex refused the refresh), so the 4 slots it puts on Codex are left out.",
+  ])
+  await panel.getByRole('button', { name: 'Fill 4 empty slots with the suggested staff' }).click()
+  expect(await holdersShown(fresh)).toEqual([
+    ['worker:critical', '1'],
+    ['architect:critical', '2'],
+    ['advisor:critical', '2'],
+    ['reviewer:critical', '2'],
+  ])
+})
+
+test('T-2405 a model is offered only at an effort its harness lists for it, and never when it is disabled', async ({
+  page,
+}) => {
+  const data = suggesting(staffOf(model()))
+  data.addJoins = true
+  // Opus lists no medium; Fable lists none at all, so it takes no effort and "high" is not its own.
+  data.models.claude.listing = listed([
+    { id: 'claude-opus-5-5', label: 'Opus 5.5', efforts: ['low', 'high'] },
+    { id: 'claude-fable-5-2', label: 'Fable 5.2', efforts: [] },
+  ])
+  data.models.codex.listing = listed([
+    { id: 'gpt-6-2-astra', label: 'Astra', efforts: SUGGEST_EFFORTS, disabled: true },
+  ])
+  const settings = await settingsOn(page, data)
+  await expect.poll(() => answers(page, 'models.get')).toBeGreaterThanOrEqual(2)
+  // Only the image designer, which needs no model, can still be offered.
+  const panel = suggestion(settings)
+  await expect(panel.locator('.suggest-fills')).toHaveText(
+    'It fills 1 empty slot with members on Codex.',
+  )
+  await expect(panel.locator('.suggest-gap')).toHaveText([
+    'Claude Code here does not list claude-opus-5-5 at medium, so the 1 slot for it is left out.',
+    'Claude Code here does not list claude-fable-5-2 at high, so the 3 slots for it are left out.',
+    'Codex here does not list gpt-6-2-astra at xhigh, so the 3 slots for it are left out.',
+  ])
+  await panel.getByRole('button', { name: 'Fill 1 empty slot with the suggested staff' }).click()
+  expect(await staffWrites(page)).toEqual([['member.add', { project: 1, harness: 'codex', roles: ['designer'] }]])
+})
+
+test('T-2405 a member that runs as a suggested one at another effort, or at another tier, is not given its slots: the suggestion adds its own', async ({
+  page,
+}) => {
+  const data = suggesting(
+    staffOf(
+      model(),
+      staffLane(3, 'opus-high', ['integrator'], 'critical', { ...OPUS, effort: 'high' }),
+      staffLane(4, 'opus-standard', ['integrator'], 'standard', { ...OPUS, effort: 'medium' }),
+    ),
+  )
+  data.addJoins = true
+  const settings = await settingsOn(page, data)
+  const panel = suggestion(settings)
+  await expect(panel.locator('.suggest-fills')).toHaveText(
+    'It fills 8 empty slots with members on Claude Code and Codex.',
+  )
+  await panel.getByRole('button', { name: 'Fill 8 empty slots with the suggested staff' }).click()
+  const writes = await staffWrites(page)
+  expect(writes.filter(([operation]) => operation === 'member.roles')).toEqual([])
+  expect(writes[0]).toEqual([
+    'member.add',
+    {
+      project: 1,
+      harness: 'claude-code',
+      model: 'claude-opus-5-5',
+      effort: 'medium',
+      tier: 'critical',
+      roles: ['worker'],
+    },
+  ])
 })

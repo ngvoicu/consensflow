@@ -461,10 +461,22 @@ pub(super) async fn resolve(
 /// gains is held at the tier it has: it takes no tier, and only Edit changes one.
 pub(super) async fn roles(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
     let roles = parse_roles(body.get("roles"))?;
-    let member =
-        page.ledger
+    let project = body.whole("project")?;
+    let handle = body.text("agent");
+    // `expected`: the member's roles as the page last read them. Sent, the write holds only if they
+    // still are (an older page sends none and writes as before).
+    let member = match body.get("expected") {
+        None | Some(Value::Null) => page
+            .ledger
             .borrow_mut()
-            .set_roles(body.whole("project")?, &body.text("agent"), &roles)?;
+            .set_roles(project, &handle, &roles)?,
+        Some(expected) => {
+            let expected = parse_roles(Some(expected))?;
+            page.ledger
+                .borrow_mut()
+                .set_roles_if(project, &handle, &roles, &expected)?
+        }
+    };
     one("member", member)
 }
 

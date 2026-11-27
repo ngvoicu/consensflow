@@ -8,6 +8,7 @@
 //! offer". Whether each model is still listed by the person's installed harness is the page's
 //! to check when its dialog opens, from the read it makes then (never from here, never kept).
 
+use cf_ledger::model::{parse_effort, require_model_id};
 use cf_ledger::roles;
 use cf_proto::agents::Harness;
 use serde::{Deserialize, Serialize};
@@ -15,10 +16,6 @@ use serde_json::Value;
 
 /// The file, as shipped.
 const SHIPPED: &str = include_str!("suggested-staff.json");
-
-/// The efforts a model can be run at (the page's lists name a subset per model): `null` where a
-/// model lists none.
-const EFFORTS: [&str; 6] = ["minimal", "low", "medium", "high", "xhigh", "max"];
 
 /// The staff as the file writes it, and as the page reads it.
 #[derive(Debug, Deserialize, Serialize)]
@@ -90,14 +87,12 @@ impl Entry {
         if self.roles.iter().any(image) {
             return Err("only the image designer entry holds an image role".to_owned());
         }
-        if self.model.as_deref().is_none_or(str::is_empty) {
-            return Err("a member names no model".to_owned());
-        }
-        if let Some(effort) = &self.effort {
-            if !EFFORTS.contains(&effort.as_str()) {
-                return Err(format!("{effort:?} is no effort"));
-            }
-        }
+        // A model id and an effort are held to the ledger's own rule for one: what Add member
+        // would refuse is not offered.
+        let model = self.model.as_deref().unwrap_or("");
+        require_model_id(model).map_err(|why| why.to_string())?;
+        parse_effort(self.effort.as_deref().map(Value::from).as_ref())
+            .map_err(|why| why.to_string())?;
         let tier = self.tier.as_deref().unwrap_or("");
         for id in &self.roles {
             if !roles::offers(id, tier) {
@@ -143,7 +138,16 @@ impl Suggestion {
 
 /// What `text` says, as the page reads it, or why it cannot be offered.
 pub(super) fn read(text: &str) -> Result<Value, String> {
-    let suggestion: Suggestion = serde_json::from_str(text).map_err(|why| why.to_string())?;
+    let file: Value = serde_json::from_str(text).map_err(|why| why.to_string())?;
+    // Named objects only: the structs below would also take a list in an object's place.
+    let named = file.is_object()
+        && file["members"]
+            .as_array()
+            .is_some_and(|members| members.iter().all(Value::is_object));
+    if !named {
+        return Err("the staff and each member are objects with named fields".to_owned());
+    }
+    let suggestion: Suggestion = serde_json::from_value(file).map_err(|why| why.to_string())?;
     suggestion.check()?;
     serde_json::to_value(&suggestion).map_err(|why| why.to_string())
 }
@@ -154,9 +158,45 @@ fn offered(text: &str) -> Value {
     read(text).unwrap_or(Value::Null)
 }
 
+/// The text of the shipped file: the tests may put another in its place.
+fn shipped_text() -> String {
+    #[cfg(test)]
+    if let Some(text) = seam::text() {
+        return text;
+    }
+    SHIPPED.to_owned()
+}
+
 /// What `harnesses.missing` sends: the shipped staff, or `null`.
 pub(super) fn shipped() -> Value {
-    offered(SHIPPED)
+    offered(&shipped_text())
+}
+
+/// The tests' way to put another file's text in the shipped one's place, on this thread.
+#[cfg(test)]
+pub(super) mod seam {
+    use std::cell::RefCell;
+
+    thread_local! {
+        static TEXT: RefCell<Option<String>> = const { RefCell::new(None) };
+    }
+
+    pub(super) fn text() -> Option<String> {
+        TEXT.with(|cell| cell.borrow().clone())
+    }
+
+    /// `text` as the shipped file on this thread until what this returns is dropped.
+    pub(in crate::page) fn put(text: &str) -> Put {
+        Put(TEXT.with(|cell| cell.replace(Some(text.to_owned()))))
+    }
+
+    pub(in crate::page) struct Put(Option<String>);
+
+    impl Drop for Put {
+        fn drop(&mut self) {
+            TEXT.with(|cell| *cell.borrow_mut() = self.0.take());
+        }
+    }
 }
 
 #[cfg(test)]

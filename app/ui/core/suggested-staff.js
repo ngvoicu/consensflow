@@ -142,7 +142,13 @@ export function planOf(entries, members, readOf) {
     }
     if (here.left) {
       if (empty.length > 0)
-        gaps.push({ entry, left: here.left, why: read.why, slots: empty.length })
+        gaps.push({
+          entry,
+          left: here.left,
+          why: read.why,
+          stale: Boolean(read.stale),
+          slots: empty.length,
+        })
       continue
     }
     for (const slot of slots) if (slot.state === 'kept') kept.push(slot)
@@ -182,7 +188,7 @@ function gapWords(gaps) {
   const byHarness = new Map()
   for (const gap of gaps) {
     if (gap.left === 'unlisted') continue
-    const key = `${gap.left} ${gap.entry.harness}`
+    const key = `${gap.left} ${gap.stale} ${gap.entry.harness}`
     const seen = byHarness.get(key) ?? { ...gap, slots: 0 }
     seen.slots += gap.slots
     byHarness.set(key, seen)
@@ -193,7 +199,9 @@ function gapWords(gaps) {
     said.push(
       gap.left === 'missing'
         ? `${name} is not installed here, ${what}. Install ${name} from Agents, Harnesses to take ${gap.slots === 1 ? 'it' : 'them'} too.`
-        : `${name}'s models could not be read${gap.why ? ` (${gap.why})` : ''}, ${what}.`,
+        : gap.stale
+          ? `${name}'s model list may be out of date${gap.why ? ` (${gap.why})` : ''}, ${what}.`
+          : `${name}'s models could not be read${gap.why ? ` (${gap.why})` : ''}, ${what}.`,
     )
   }
   for (const gap of gaps) {
@@ -313,6 +321,16 @@ export class SuggestedStaff {
         }
       }
     })
+    // A Refresh on its way, or one that failed, leaves no read of that harness to go by: what was
+    // read before it is not what the harness lists now.
+    lists.onRefreshTrouble(
+      (program) => this.#forget(program, { state: 'reading' }),
+      (program, cause) =>
+        this.#forget(program, {
+          state: 'failed',
+          why: cause instanceof Error ? cause.message : String(cause),
+        }),
+    )
   }
 
   /** The dialog opened: what was taken or opened before is forgotten, and each harness it runs on is read. */
@@ -339,7 +357,15 @@ export class SuggestedStaff {
     this.#lists.get(harnessOf(kind)).then(
       (answer) => {
         if (this.#asks.get(kind) !== asked) return
-        this.#reads.set(kind, { state: 'read', models: answer.listing.models, read: answer.read })
+        // A listing that is not the account's own as of now (a catalog it could not fetch again,
+        // or no list where the read failed) authorizes nothing: the harness is left out.
+        const stale = answer.listing.freshness?.state === 'stale' ? answer.listing.freshness : null
+        this.#reads.set(
+          kind,
+          stale
+            ? { state: 'failed', why: stale.why ?? '', stale: true }
+            : { state: 'read', models: answer.listing.models, read: answer.read },
+        )
         this.#changed()
       },
       (cause) => {
@@ -349,6 +375,17 @@ export class SuggestedStaff {
         this.#changed()
       },
     )
+  }
+
+  /** Puts `read` in place of the read of each of this opening's harnesses that is `program`'s. */
+  #forget(program, read) {
+    for (const kind of this.#reads.keys()) {
+      if (harnessOf(kind) !== program || this.#reads.get(kind).state === 'missing') continue
+      this.#asked += 1
+      this.#asks.set(kind, this.#asked)
+      this.#reads.set(kind, read)
+    }
+    this.#changed()
   }
 
   /** A fill is on its way: Fill waits for it. */

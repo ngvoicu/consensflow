@@ -300,6 +300,8 @@ export class ModelLists {
   #came = new Map()
   /** Who is told of a Refresh, with the harness and the picker that asked it. */
   #listeners = new Set()
+  /** Who is told a Refresh began, and that one failed (`onRefreshTrouble`). */
+  #troubles = new Set()
 
   constructor(daemon) {
     this.#daemon = daemon
@@ -322,6 +324,14 @@ export class ModelLists {
   }
 
   /**
+   * `started(harness)` is told when a Refresh of `harness` is asked, and `failed(harness, cause)`
+   * when it came to nothing: what was read before is then no read of the harness's list now.
+   */
+  onRefreshTrouble(started, failed) {
+    this.#troubles.add({ started, failed })
+  }
+
+  /**
    * Asks each of `kinds` (by kind, `claude-code`) that this dialog has no read of, all at
    * once: the reads of the harnesses run side by side, each under its own bound, and a pick
    * of one of them finds its read made or on its way.
@@ -337,12 +347,15 @@ export class ModelLists {
 
   /** The human's Refresh: `harness`'s list read again from the harness itself, for every picker of it. */
   refresh(harness, source = null) {
+    for (const { started } of this.#troubles) started(harness)
     const asked = this.#ask(harness, true)
     asked.then(
       () => {
         for (const listener of this.#listeners) listener(harness, source)
       },
-      () => {},
+      (cause) => {
+        for (const { failed } of this.#troubles) failed(harness, cause)
+      },
     )
     return asked
   }
@@ -2434,6 +2447,8 @@ export class ProjectSettingsDialog {
               project,
               agent: make.to,
               roles: inRoleOrder([...new Set([...roles, ...make.roles])]),
+              // What this dialog last read of the member: the daemon holds the write to it.
+              expected: roles,
             })
           } else {
             // The name the harness gives the model is the daemon's to read from its listing.
@@ -2466,6 +2481,7 @@ export class ProjectSettingsDialog {
         project: this.#project,
         agent: handle,
         roles: inRoleOrder([...roles, role]),
+        expected: roles,
       })
       page.note(`@${handle} is ${roleLabel(role)} now too.`)
     })
@@ -2485,6 +2501,7 @@ export class ProjectSettingsDialog {
         project: this.#project,
         agent: handle,
         roles: roles.filter((held) => held !== role),
+        expected: roles,
       })
     })
   }

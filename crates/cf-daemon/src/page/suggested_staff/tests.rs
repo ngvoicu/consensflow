@@ -3,7 +3,7 @@
 
 use serde_json::{json, Value};
 
-use super::{offered, read, shipped, SHIPPED};
+use super::{offered, read, seam, shipped, SHIPPED};
 
 /// The shipped staff with `change` applied to its JSON.
 fn changed(change: impl FnOnce(&mut Value)) -> String {
@@ -53,8 +53,8 @@ fn the_standard_reviewer_researcher_and_tester_are_one_member_in_three_slots() {
 #[test]
 fn a_file_that_does_not_parse_is_not_offered() {
     refused("{ not json", "key must be");
-    refused("[]", "invalid length");
-    refused(&changed(|f| f["members"] = json!("x")), "invalid type");
+    refused("[]", "named fields");
+    refused(&changed(|f| f["members"] = json!("x")), "named fields");
 }
 
 #[test]
@@ -81,8 +81,8 @@ fn a_role_a_harness_a_tier_or_an_effort_the_code_does_not_know_is_not_offered() 
         "no slot",
     );
     refused(
-        &changed(|f| f["members"][0]["effort"] = json!("ludicrous")),
-        "no effort",
+        &changed(|f| f["members"][0]["effort"] = json!("very high")),
+        "not an effort",
     );
     refused(
         &changed(|f| f["members"][0]["roles"] = json!([])),
@@ -90,7 +90,7 @@ fn a_role_a_harness_a_tier_or_an_effort_the_code_does_not_know_is_not_offered() 
     );
     refused(
         &changed(|f| f["members"][0]["model"] = json!("")),
-        "no model",
+        "not a model id",
     );
 }
 
@@ -167,4 +167,92 @@ fn nothing_is_left_of_the_pages_stand_in() {
     );
     let reader = std::fs::read_to_string(page.join("suggested-staff.js")).unwrap();
     assert!(!reader.contains("STAND_IN"), "the page reads no stand-in");
+}
+
+#[test]
+fn a_model_id_the_ledger_refuses_is_not_offered() {
+    for bad in ["two words", " ", "-flag", "bell\u{7}"] {
+        refused(
+            &changed(|f| f["members"][1]["model"] = json!(bad)),
+            "not a model id",
+        );
+    }
+}
+
+#[test]
+fn a_list_where_a_named_object_belongs_is_not_offered() {
+    let file: Value = serde_json::from_str(SHIPPED).unwrap();
+    // The staff as a list of its fields, and a member as a list of its.
+    refused(
+        &json!([file["about"], file["members"]]).to_string(),
+        "named fields",
+    );
+    refused(
+        &changed(|f| {
+            f["members"][0] = json!([
+                "claude-code",
+                "claude-opus-5-5",
+                "medium",
+                "critical",
+                ["worker"]
+            ]);
+        }),
+        "named fields",
+    );
+}
+
+#[test]
+fn the_image_designer_takes_no_effort_and_a_member_names_a_role_once_and_the_staff_says_what_it_is_for(
+) {
+    refused(
+        &changed(|f| f["members"][6]["effort"] = json!("high")),
+        "Codex's",
+    );
+    refused(
+        &changed(|f| f["members"][3]["roles"] = json!(["architect", "architect"])),
+        "twice",
+    );
+    refused(&changed(|f| f["about"] = json!("  ")), "for");
+}
+
+/// A role is held to the tiers it has a slot at, one by one: a tier that exists for another role
+/// is no tier for it.
+#[test]
+fn a_tier_that_another_role_has_but_this_one_has_not_is_not_offered() {
+    use cf_ledger::roles::{self, seam, Role};
+    static TABLE: [Role; 2] = [
+        Role {
+            tiers: &["standard"],
+            ..roles::WORKER
+        },
+        Role {
+            tiers: &["critical"],
+            ..roles::ADVISOR
+        },
+    ];
+    let staff = |role: &str, tier: &str| {
+        json!({ "about": "a staff", "members": [
+            { "harness": "claude-code", "model": "claude-opus-5-5", "effort": "high", "tier": tier, "roles": [role] }
+        ] })
+        .to_string()
+    };
+    // The worker has a standard slot only, the advisor a critical one only.
+    seam::with_table(&TABLE, || {
+        assert!(read(&staff("worker", "standard")).is_ok());
+        assert!(read(&staff("advisor", "critical")).is_ok());
+        refused(&staff("worker", "critical"), "no slot");
+        refused(&staff("advisor", "standard"), "no slot");
+    });
+}
+
+/// The wiring: what `harnesses.missing` sends is the shipped text as the rule reads it, so a file
+/// that breaks the rule is sent as `null` and never as it stands.
+#[test]
+fn what_harnesses_missing_sends_is_the_file_as_the_rule_reads_it() {
+    let bad = changed(|f| f["members"][0]["roles"] = json!(["janitor"]));
+    let _put = seam::put(&bad);
+    assert_eq!(shipped(), Value::Null);
+    let good = changed(|f| f["about"] = json!("Another staff."));
+    let _again = seam::put(&good);
+    assert_eq!(shipped()["about"], json!("Another staff."));
 }
