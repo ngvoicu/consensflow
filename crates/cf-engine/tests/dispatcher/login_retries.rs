@@ -499,7 +499,7 @@ fn end_state(c: &Context, t: &Tiers<'_>) -> Value {
         "memberOut": outs,
         "participant": participant,
         "humanNotes": crate::fixtures::notes(c, c.id(t.project.id, "human")),
-        "chiefNotes": t.notes("chief").into_iter().filter(|note| !note.contains("tries it again")).collect::<Vec<_>>(),
+        "chiefNotes": t.notes("chief"),
         "task": {
             "state": task.state,
             "heldUntil": task.held_until,
@@ -540,6 +540,24 @@ fn the_hold_at_the_last_try_is_the_hold_of_a_first_refusal_but_for_the_try_note(
         passes(&c, 4);
         end_state(&c, &t)
     };
+    // The tries' own note is the one note the head has more: exactly one, said once, and gone
+    // from the comparison. Every other note, in its order, is the first refusal's.
+    let mut head = head;
+    let notes = head["chiefNotes"].as_array_mut().unwrap();
+    let tries: Vec<usize> = (0..notes.len())
+        .filter(|at| notes[*at].as_str().unwrap().contains("tries it again"))
+        .collect();
+    assert_eq!(tries.len(), 1, "the tries' note, once: {notes:?}");
+    notes.remove(tries[0]);
+    assert!(
+        base["chiefNotes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|note| !note.as_str().unwrap().contains("tries it again")),
+        "a first refusal's hold has no try to tell: {:?}",
+        base["chiefNotes"]
+    );
     for key in base.as_object().unwrap().keys() {
         assert_eq!(base[key], head[key], "{key}");
     }

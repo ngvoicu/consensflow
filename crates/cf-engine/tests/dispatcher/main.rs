@@ -93,6 +93,7 @@ mod later_quota_reset;
 mod launch_stops;
 mod launch_wait;
 mod launched_harness;
+mod login_note_words;
 mod login_retries;
 mod looks;
 mod looks_finished;
