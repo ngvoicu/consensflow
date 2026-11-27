@@ -16,11 +16,28 @@ use std::thread::sleep;
 use std::time::Duration;
 
 use cf_e2e::rig::{Project, Rig};
-use serde_json::json;
+use serde_json::{json, Value};
 
 use crate::a_compact_typed_into_an_idle_chief_held_a_workers_result::tier;
 use crate::resume_of_a_chief_with_no_turn::{after, wait_for_the_chief, windows_of};
 use crate::{config, secs, Outcome};
+
+/// How many of the chief's user's records hold the header of the message `id`: the times it was
+/// given the message (the record's queue rows hold it too, and are no try).
+fn given(rig: &Rig, session: &str, id: i64) -> usize {
+    let marker = format!("[ConsensFlow m-{id} ");
+    rig.transcript(session)
+        .lines()
+        .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+        .filter(|record| record["type"] == "user")
+        .map(|record| {
+            record["message"]["content"]
+                .to_string()
+                .matches(&marker)
+                .count()
+        })
+        .sum()
+}
 
 /// The human types `/recap` into the chief's window, a key at a time.
 fn type_recap(rig: &Rig, project: &Project) -> Outcome {
@@ -82,27 +99,25 @@ fn a_claude_chief_given_a_recap_while_idle_is_handed_its_workers_result_once_aft
         Ok(queued.is_some())
     })?;
     let id = queued.ok_or("no result")?;
-    let marker = format!("[ConsensFlow m-{id} ");
     // Ten seconds of looks before the output: no try.
     sleep(Duration::from_secs(10));
-    let transcript = rig.transcript(&session);
     assert!(
-        !transcript.contains("<local-command-stdout>"),
+        !rig.transcript(&session).contains("<local-command-stdout>"),
         "the output came before the look: the case holds nothing"
     );
     assert_eq!(
-        transcript.matches(&marker).count(),
+        given(&rig, &session, id),
         0,
         "no try before the command's output"
     );
 
     rig.wait_for("the result to be handed to the chief", secs(90), || {
-        Ok(rig.transcript(&session).contains(&marker))
+        Ok(given(&rig, &session, id) > 0)
     })?;
     wait_for_the_chief(&rig, &project)?;
     sleep(Duration::from_secs(5));
     assert_eq!(
-        rig.transcript(&session).matches(&marker).count(),
+        given(&rig, &session, id),
         1,
         "exactly one try after the output"
     );
