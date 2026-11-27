@@ -39,6 +39,8 @@ function fits(entry) {
   if (entry === null || typeof entry !== 'object') return false
   const { roles } = entry
   if (!Array.isArray(roles) || roles.length === 0) return false
+  // (An unknown role has no tiers and is no image role, so the checks below refuse it too; this
+  // says so first.)
   if (!roles.every((role) => roleIds().includes(role))) return false
   if (!(entry.harness in HARNESS_NAMES)) return false
   if (entry.designer) return entry.harness === 'codex' && roles.every(isImageAgentRole)
@@ -177,6 +179,27 @@ export function planOf(entries, members, readOf) {
   const fills = makes.reduce((sum, make) => sum + make.roles.length, 0)
   const harnesses = kindsOf(makes.map((make) => make.entry))
   return { rows, makes, fills, kept, gaps, pending, waiting, harnesses }
+}
+
+/**
+ * Whether `make` still stands on the read that offered it: one that adds a member on a model
+ * names the read of its harness's list (`picked.read`), and `readOf(kind)` is the dialog's current
+ * read of it. A give, and the image designer, name none.
+ */
+export function stillOffered(make, readOf) {
+  const read = make.picked?.read
+  return read == null || readOf(make.entry.harness) === read
+}
+
+/** What a fill says of the makes it left unwritten because a list was read again under it. */
+export function leftWords(makes) {
+  const names = makes.flatMap((make) =>
+    make.roles.map((role) => slotName(role, make.entry.designer ? null : make.entry.tier)),
+  )
+  return {
+    slots: makes.reduce((sum, make) => sum + make.roles.length, 0),
+    words: `a harness's models were read again as it filled, so it left ${together(names)} unwritten: fill again`,
+  }
 }
 
 /** "1 empty slot", "3 empty slots". */
@@ -341,6 +364,7 @@ export class SuggestedStaff {
     this.#taken = 0
     this.#refused = []
     this.#busy = false
+    this.#lists.release()
     this.#plan = null
     for (const kind of kindsOf(entriesOf(suggestion))) {
       if (missing.includes(harnessOf(kind))) this.#reads.set(kind, { state: 'missing' })
@@ -392,11 +416,14 @@ export class SuggestedStaff {
   filling() {
     this.#busy = true
     this.#refused = []
+    // Refresh and Fill never run together: no Refresh while it fills.
+    this.#lists.hold('Filling the suggested staff')
   }
 
   /** A fill is done: `count` slots filled, and each make refused, `{ slots, words }` in the daemon's words. */
   filled(count, refused = []) {
     this.#busy = false
+    this.#lists.release()
     this.#taken += count
     this.#refused = refused
   }

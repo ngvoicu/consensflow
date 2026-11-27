@@ -147,7 +147,9 @@ pub(super) fn read(text: &str) -> Result<Value, String> {
     if !named {
         return Err("the staff and each member are objects with named fields".to_owned());
     }
-    let suggestion: Suggestion = serde_json::from_value(file).map_err(|why| why.to_string())?;
+    // From the text, not from `file`: a name given twice is seen there and refused, which the
+    // `Value` above has already folded into one.
+    let suggestion: Suggestion = serde_json::from_str(text).map_err(|why| why.to_string())?;
     suggestion.check()?;
     serde_json::to_value(&suggestion).map_err(|why| why.to_string())
 }

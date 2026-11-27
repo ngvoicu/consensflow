@@ -256,3 +256,21 @@ fn what_harnesses_missing_sends_is_the_file_as_the_rule_reads_it() {
     let _again = seam::put(&good);
     assert_eq!(shipped()["about"], json!("Another staff."));
 }
+
+/// A name given twice anywhere is a file that offers nothing: the later one must not hide the first.
+#[test]
+fn a_field_given_twice_is_not_offered() {
+    let text = SHIPPED.replacen(
+        "\"harness\": \"claude-code\"",
+        "\"harness\": \"not-a-harness\", \"harness\": \"claude-code\"",
+        1,
+    );
+    assert_ne!(text, SHIPPED);
+    refused(&text, "duplicate field");
+    let file: Value = serde_json::from_str(SHIPPED).unwrap();
+    let text = format!(
+        "{{\"about\": \"x\", \"members\": 42, \"members\": {}}}",
+        file["members"]
+    );
+    refused(&text, "expected a sequence");
+}

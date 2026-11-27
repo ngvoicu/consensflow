@@ -34,7 +34,7 @@ import {
   takenWords,
   together,
 } from './slots.js'
-import { readSuggestion, SuggestedStaff } from './suggested-staff.js'
+import { leftWords, readSuggestion, SuggestedStaff, stillOffered } from './suggested-staff.js'
 
 /**
  * The dialogs that say who works on a project and how: New project (its
@@ -302,6 +302,9 @@ export class ModelLists {
   #listeners = new Set()
   /** Who is told a Refresh began, and that one failed (`onRefreshTrouble`). */
   #troubles = new Set()
+  /** Why no Refresh may be asked now (a fill of the suggested staff is under way), else none. */
+  #held = null
+  #holders = new Set()
 
   constructor(daemon) {
     this.#daemon = daemon
@@ -345,8 +348,35 @@ export class ModelLists {
     return this.#answers.get(harness) ?? this.#ask(harness, false)
   }
 
+  /**
+   * No Refresh while `why` holds (`release` lets go): a fill of the suggested staff writes from
+   * the lists it was offered, so none is read again under it. `listener(why)` is told at once and
+   * at each change, `why` null where none holds.
+   */
+  hold(why) {
+    if (why === this.#held) return
+    this.#held = why
+    for (const listener of this.#holders) listener(why)
+  }
+
+  release() {
+    this.hold(null)
+  }
+
+  /** Keeps `button` off while a hold lasts, with the word why on it. */
+  keepOff(button) {
+    if (!button) return
+    const label = button.textContent
+    this.#holders.add((why) => {
+      button.disabled = why !== null
+      button.textContent = why === null ? label : 'Filling…'
+      button.title = why ?? ''
+    })
+  }
+
   /** The human's Refresh: `harness`'s list read again from the harness itself, for every picker of it. */
   refresh(harness, source = null) {
+    if (this.#held !== null) return Promise.reject(new Error(this.#held))
     for (const { started } of this.#troubles) started(harness)
     const asked = this.#ask(harness, true)
     asked.then(
@@ -684,6 +714,7 @@ class ChiefPicker {
       takenOff: (kind, id) => this.#current?.harness === kind && this.#current?.model === id,
       switchHelp: true,
     })
+    lists.keepOff(form.elements.chiefRefresh)
     form.elements.chiefRefresh?.addEventListener('click', () => {
       if (this.#picker.kind !== '') void this.#picker.show(this.#picker.kind, { refresh: true })
     })
@@ -849,6 +880,7 @@ class MemberPicker {
       changed: () => fillEfforts(this.#effort, this.#picker?.model()),
     })
     this.#role.addEventListener('change', () => this.#fillHarnesses())
+    lists.keepOff(this.#refresh)
     this.#refresh.addEventListener('click', () => void this.refresh())
   }
 
@@ -2439,7 +2471,13 @@ export class ProjectSettingsDialog {
     await page.act(async () => {
       let filled = 0
       const refused = []
-      for (const make of plan.makes) {
+      for (const [at, make] of plan.makes.entries()) {
+        // Each write stands on the read that offered it: where the dialog's read of that harness
+        // is no longer it, nothing more is written, and the slots left are said.
+        if (!stillOffered(make, (kind) => this.#lists.readOf(harnessOf(kind)))) {
+          refused.push(leftWords(plan.makes.slice(at)))
+          break
+        }
         try {
           if (make.kind === 'give') {
             const { roles } = this.#memberNow({ handle: make.to })
