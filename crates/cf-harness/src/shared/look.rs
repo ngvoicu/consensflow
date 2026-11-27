@@ -404,10 +404,10 @@ pub fn licence_paste(
 /// What the lane says while ConsensFlow's own message is in a box no reader reads and the person
 /// has pressed a key in the window (N7): what works, and never "press Enter", which would send
 /// the stopped message as it is.
-pub const PUT_BACK_UNREAD: &str = "ConsensFlow's own message was left in this window's input box and can't be read there. Clear the box and send a message of your own in this window, or close and reopen the window";
+pub(crate) const PUT_BACK_UNREAD: &str = "ConsensFlow's own message was left in this window's input box and can't be read there. Clear the box and send a message of your own in this window, or close and reopen the window";
 
 /// The same where the box reads and keys of the person's came after our put-back (N11).
-pub const PUT_BACK_KEYS: &str = "ConsensFlow's own message was left in this window's input box, and keys of yours came after it, so ConsensFlow can't tell whose words are in the box. Clear the box and send a message of your own in this window, or close and reopen the window";
+pub(crate) const PUT_BACK_KEYS: &str = "ConsensFlow's own message was left in this window's input box, and keys of yours came after it, so ConsensFlow can't tell whose words are in the box. Clear the box and send a message of your own in this window, or close and reopen the window";
 
 /// What an Enter is for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
