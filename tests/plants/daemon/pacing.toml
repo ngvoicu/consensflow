@@ -460,8 +460,8 @@ runs = ["pacing-kit"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/arrival.rs"
-find = '''        if message.recipient_role != "chief" && message.recipient != to {'''
-replace = '''        if message.recipient_role != "chief" && message.recipient != to && false {'''
+find = '''        if !message.recipient_seat().is_chief() && message.recipient != to {'''
+replace = '''        if !message.recipient_seat().is_chief() && message.recipient != to && false {'''
 
 [[plant]]
 name = "pacing review: busy: every busy refusal is logged"

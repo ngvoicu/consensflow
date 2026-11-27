@@ -67,7 +67,7 @@ runs = ["ao-engine-dispatcher"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/windows.rs"
-find = '''advisor_off: !project.advisor_tool && participant.role != "chief",'''
+find = '''advisor_off: !project.advisor_tool && participant.seat().is_member(),'''
 replace = '''advisor_off: !project.advisor_tool,'''
 
 [[plant]]
@@ -77,8 +77,8 @@ runs = ["ao-engine-dispatcher"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/windows.rs"
-find = '''advisor_off: !project.advisor_tool && participant.role != "chief",'''
-replace = '''advisor_off: !project.advisor_tool && participant.role == "chief",'''
+find = '''advisor_off: !project.advisor_tool && participant.seat().is_member(),'''
+replace = '''advisor_off: !project.advisor_tool && !participant.seat().is_member(),'''
 
 [[plant]]
 name = "advisor off: no launch is told to switch it off"
@@ -87,7 +87,7 @@ runs = ["ao-engine-dispatcher"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/windows.rs"
-find = '''advisor_off: !project.advisor_tool && participant.role != "chief",'''
+find = '''advisor_off: !project.advisor_tool && participant.seat().is_member(),'''
 replace = '''advisor_off: false,'''
 
 [[plant]]
@@ -97,8 +97,8 @@ runs = ["ao-engine-dispatcher"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/windows.rs"
-find = '''advisor_off: !project.advisor_tool && participant.role != "chief",'''
-replace = '''advisor_off: participant.role != "chief",'''
+find = '''advisor_off: !project.advisor_tool && participant.seat().is_member(),'''
+replace = '''advisor_off: participant.seat().is_member(),'''
 
 [[plant]]
 name = "advisor off: a project's word is read the wrong way round"
@@ -107,8 +107,8 @@ runs = ["ao-engine-dispatcher"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/windows.rs"
-find = '''advisor_off: !project.advisor_tool && participant.role != "chief",'''
-replace = '''advisor_off: project.advisor_tool && participant.role != "chief",'''
+find = '''advisor_off: !project.advisor_tool && participant.seat().is_member(),'''
+replace = '''advisor_off: project.advisor_tool && participant.seat().is_member(),'''
 
 [[plant]]
 name = "advisor off: the ledger's migration gives every existing project the tool on"
@@ -267,7 +267,7 @@ runs = ["ao-rig"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/windows.rs"
-find = '''advisor_off: !project.advisor_tool && participant.role != "chief",'''
+find = '''advisor_off: !project.advisor_tool && participant.seat().is_member(),'''
 replace = '''advisor_off: false,'''
 
 [[plant]]
@@ -277,7 +277,7 @@ runs = ["ao-rig"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/windows.rs"
-find = '''advisor_off: !project.advisor_tool && participant.role != "chief",'''
+find = '''advisor_off: !project.advisor_tool && participant.seat().is_member(),'''
 replace = '''advisor_off: !project.advisor_tool,'''
 
 [[plant]]
@@ -287,5 +287,5 @@ runs = ["ao-rig"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/windows.rs"
-find = '''advisor_off: !project.advisor_tool && participant.role != "chief",'''
-replace = '''advisor_off: participant.role != "chief",'''
+find = '''advisor_off: !project.advisor_tool && participant.seat().is_member(),'''
+replace = '''advisor_off: participant.seat().is_member(),'''

@@ -14,8 +14,8 @@ meant = "a_tell_queued_before_the_returned_answers_note_is_the_chiefs_action"
 runs = ["question-reminded-ledger"]
 [[plant.edit]]
 file = "crates/cf-ledger/src/waiting_questions.rs"
-find = "              AND a.state IN ('queued','gated','delivering','delivered','read'))\";"
-replace = "              AND a.state IN ('delivered','read'))\";"
+find = "              AND a.state IN ('queued','gated','delivering','delivered','read'))\"\n"
+replace = "              AND a.state IN ('delivered','read'))\"\n"
 
 [[plant]]
 name = "question reminded: acted is counted from the note, not from the close"

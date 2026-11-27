@@ -184,7 +184,7 @@ runs = ["ledger-approval"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/pausing.rs"
-find = 'author.filter(|author| author.role == "chief"),'
+find = 'author.filter(|author| author.seat().coordinates()),'
 replace = 'author.filter(|author| author.role != "nobody"),'
 
 [[plant.edit]]

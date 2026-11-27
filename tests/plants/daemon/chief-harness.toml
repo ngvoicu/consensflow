@@ -1237,8 +1237,8 @@ runs = ["chm-dispatcher"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/dispatcher.rs"
-find = """        if participant.role == "chief" && held_for_no_default(participant) {"""
-replace = """        if participant.role == "chief" && held_for_no_default(participant) && project.id < 0 {"""
+find = """        if participant.seat().coordinates() && held_for_no_default(participant) {"""
+replace = """        if participant.seat().coordinates() && held_for_no_default(participant) && project.id < 0 {"""
 
 [[plant]]
 name = "gone: a harness default that is the gone model is started on, and the chief told it starts"

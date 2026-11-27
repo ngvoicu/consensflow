@@ -1164,7 +1164,7 @@ runs = ["hd-engine"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/dialogs.rs"
-find = '            .filter(|decline| !(decline.members_only && participant.role == "chief"));'
+find = '            .filter(|decline| !(decline.members_only && participant.seat().coordinates()));'
 replace = '            .filter(|_| true);'
 
 [[plant]]

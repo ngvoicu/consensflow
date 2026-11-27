@@ -110,11 +110,11 @@ runs = ["hm-ledger-members"]
 [[plant.edit]]
 file = "crates/cf-ledger/src/staff.rs"
 find = '''
-                 ORDER BY id DESC LIMIT 1",
+                 ORDER BY id DESC LIMIT 1"),
 '''
 replace = '''
                    AND 0
-                 ORDER BY id DESC LIMIT 1",
+                 ORDER BY id DESC LIMIT 1"),
 '''
 
 [[plant]]
@@ -182,7 +182,8 @@ runs = ["hm-daemon-tasks"]
 [[plant.edit]]
 file = "crates/cf-daemon/src/api/routes/tasks.rs"
 find = '''
-        if participant.harness.is_some() && (participant.role == "chief" || participant.name_apart)
+        if participant.harness.is_some()
+            && (participant.seat().coordinates() || participant.name_apart)
 '''
 replace = '''
         if participant.harness.is_some() && false
@@ -415,10 +416,10 @@ runs = ["hm-engine-named"]
 [[plant.edit]]
 file = "crates/cf-engine/src/windows.rs"
 find = '''
-        if participant.role != "chief" && participant.needs_edit {
+        if participant.seat().is_member() && participant.needs_edit {
 '''
 replace = '''
-        if participant.role != "chief" && participant.needs_edit && false {
+        if participant.seat().is_member() && participant.needs_edit && false {
 '''
 
 [[plant]]
@@ -434,8 +435,8 @@ replace = '''  if (false && participant.needsEdit) return ['missing', NEEDS_EDIT
 
 [[plant.edit]]
 file = "app/ui/core/board.js"
-find = '''  if (participant.needsEdit && participant.role !== 'chief') return ['missing', NEEDS_EDIT]'''
-replace = '''  if (false && participant.needsEdit && participant.role !== 'chief') return ['missing', NEEDS_EDIT]'''
+find = '''  if (participant.needsEdit && !coordinates(participant)) return ['missing', NEEDS_EDIT]'''
+replace = '''  if (false && participant.needsEdit && !coordinates(participant)) return ['missing', NEEDS_EDIT]'''
 
 [[plant]]
 name = "harness models: New project drops the chief's effort"
@@ -473,10 +474,10 @@ runs = ["hm-engine-chief-models"]
 [[plant.edit]]
 file = "crates/cf-engine/src/windows.rs"
 find = '''
-        let participant = if participant.role == "chief" && participant.needs_edit {
+        let participant = if participant.seat().coordinates() && participant.needs_edit {
 '''
 replace = '''
-        let participant = if participant.role == "chief" && participant.needs_edit && false {
+        let participant = if participant.seat().coordinates() && participant.needs_edit && false {
 '''
 
 [[plant]]
@@ -528,10 +529,10 @@ prepare = [["node", "app/scripts/bundle-ui.mjs"]]
 [[plant.edit]]
 file = "app/ui/core/board.js"
 find = '''
-  if (participant.needsEdit && participant.role === 'chief') {
+  if (participant.needsEdit && coordinates(participant)) {
 '''
 replace = '''
-  if (false && participant.needsEdit && participant.role === 'chief') {
+  if (false && participant.needsEdit && coordinates(participant)) {
 '''
 
 [[plant]]

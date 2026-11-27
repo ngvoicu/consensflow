@@ -414,8 +414,8 @@ prepare = [["node", "app/scripts/bundle-ui.mjs"]]
 
 [[plant.edit]]
 file = "app/ui/core/board.js"
-find = '''  if (participant.role === 'chief' && board.project?.meeting) {'''
-replace = '''  if (participant.role === 'chief' && board.project?.meeting && false) {'''
+find = '''  if (isChief(participant) && board.project?.meeting) {'''
+replace = '''  if (isChief(participant) && board.project?.meeting && false) {'''
 
 [[plant]]
 name = "meeting page ui: a held strip reads as a message waiting for nothing"

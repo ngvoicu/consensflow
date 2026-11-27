@@ -200,10 +200,10 @@ runs = ["busy-models-engine"]
 [[plant.edit]]
 file = "crates/cf-engine/src/dispatcher.rs"
 find = '''
-        let chief_busy = participant.role == "chief" && busy_turn(&observed);
+        let chief_busy = participant.seat().coordinates() && busy_turn(&observed);
 '''
 replace = '''
-        let chief_busy = participant.role == "chief" && busy_turn(&observed) && false;
+        let chief_busy = participant.seat().coordinates() && busy_turn(&observed) && false;
 '''
 
 [[plant]]

@@ -144,7 +144,7 @@ runs = ["board-task-list"]
 [[plant.edit]]
 file = "crates/cf/src/board/task.rs"
 find = '''
-    js::text(lane.get("role")) != "chief"
+    !cf_proto::seat::Seat::of(&js::text(lane.get("role"))).coordinates()
         && !tasks.is_empty()'''
 replace = '''
     !tasks.is_empty()'''

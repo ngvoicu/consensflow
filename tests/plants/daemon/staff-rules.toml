@@ -234,7 +234,7 @@ runs = ["engine-text-rules"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/roles.rs"
-find = '''    let said = if role == "chief" {'''
+find = '''    let said = if cf_proto::seat::Seat::of(role).coordinates() {'''
 replace = '''    let said = if role != "worker" {'''
 
 [[plant]]

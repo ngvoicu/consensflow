@@ -87,12 +87,17 @@ find = '''
     if task.assignee_id != Some(task.requester_id) {
         return Ok(false);
     }
-    Ok(store.participant_row(task.requester_id)?.role == "chief")'''
+    Ok(store
+        .participant_row(task.requester_id)?
+        .seat()
+        .coordinates())
+'''
 replace = '''
     let Some(assignee) = task.assignee_id else {
         return Ok(false);
     };
-    Ok(store.participant_row(assignee)?.role == "chief")'''
+    Ok(store.participant_row(assignee)?.seat().coordinates())
+'''
 
 [[plant]]
 name = "own steps: cf says the chief's own step's line, not that nothing waits for its decision"

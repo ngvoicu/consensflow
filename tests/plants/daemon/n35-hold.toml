@@ -194,8 +194,8 @@ runs = ["n35-dispatcher"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/turn_retry.rs"
-find = "        if unit == 0 || participant.role == \"chief\" {"
-replace = "        if participant.role == \"chief\" {"
+find = "        if unit == 0 || participant.seat().coordinates() {"
+replace = "        if participant.seat().coordinates() {"
 
 [[plant]]
 name = "n35 hold: the Resume's words into a window whose question is open (the pass)"
@@ -284,8 +284,8 @@ runs = ["n35-dispatcher"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/dispatcher.rs"
-find = "        if self.is_out(&owner) {\n            return Ok(());\n        }\n        if participant.role != \"chief\" {"
-replace = "        if participant.role != \"chief\" {"
+find = "        if self.is_out(&owner) {\n            return Ok(());\n        }\n        if participant.seat().is_member() {"
+replace = "        if participant.seat().is_member() {"
 
 [[plant]]
 name = "n35 hold: a second try's line is the old quota hold's"

@@ -54,7 +54,7 @@ runs = ["own-rules"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/specs.rs"
-find = '''            .filter(|_| !(participant.role == "chief" && project.own_hands));'''
+find = '''            .filter(|_| !(participant.seat().is_chief() && project.own_hands));'''
 replace = '''            .filter(|_| true);'''
 
 [[plant]]

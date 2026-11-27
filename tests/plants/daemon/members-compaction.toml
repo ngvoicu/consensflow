@@ -258,7 +258,7 @@ runs = ["mc-engine-dispatcher"]
 [[plant.edit]]
 file = "crates/cf-engine/src/windows.rs"
 find = '''.compaction
-                .filter(|_| participant.role != "chief")'''
+                .filter(|_| participant.seat().is_member())'''
 replace = '''.compaction
                 .filter(|_| true)'''
 
@@ -270,9 +270,9 @@ runs = ["mc-engine-dispatcher"]
 [[plant.edit]]
 file = "crates/cf-engine/src/windows.rs"
 find = '''.compaction
-                .filter(|_| participant.role != "chief")'''
+                .filter(|_| participant.seat().is_member())'''
 replace = '''.compaction
-                .filter(|_| participant.role == "chief")'''
+                .filter(|_| !participant.seat().is_member())'''
 
 [[plant]]
 name = "members compaction: only a Claude member is given the size, as before Phase 7"
@@ -282,10 +282,10 @@ runs = ["mc-engine-dispatcher"]
 [[plant.edit]]
 file = "crates/cf-engine/src/windows.rs"
 find = '''.compaction
-                .filter(|_| participant.role != "chief")'''
+                .filter(|_| participant.seat().is_member())'''
 replace = '''.compaction
                 .filter(|_| {
-                    participant.role != "chief" && Harness::from_kind(harness) == Some(Harness::Claude)
+                    participant.seat().is_member() && Harness::from_kind(harness) == Some(Harness::Claude)
                 })'''
 
 [[plant]]
@@ -296,7 +296,7 @@ runs = ["mc-engine-dispatcher"]
 [[plant.edit]]
 file = "crates/cf-engine/src/windows.rs"
 find = '''.compaction
-                .filter(|_| participant.role != "chief")'''
+                .filter(|_| participant.seat().is_member())'''
 replace = '''.compaction
                 .filter(|_| false)'''
 
@@ -308,9 +308,9 @@ runs = ["mc-engine-dispatcher"]
 [[plant.edit]]
 file = "crates/cf-engine/src/windows.rs"
 find = '''.compaction
-                .filter(|_| participant.role != "chief")'''
+                .filter(|_| participant.seat().is_member())'''
 replace = '''.compaction
-                .filter(|_| participant.role != "chief" && resume.is_none())'''
+                .filter(|_| participant.seat().is_member() && resume.is_none())'''
 
 # A size the project's row holds under the least the ledger takes now (an earlier build took
 # less) stays in the row and is given to a launch as the least (T-1439): the engine's one line,
@@ -831,10 +831,10 @@ runs = ["mc-rig"]
 [[plant.edit]]
 file = "crates/cf-engine/src/windows.rs"
 find = '''.compaction
-                .filter(|_| participant.role != "chief")'''
+                .filter(|_| participant.seat().is_member())'''
 replace = '''.compaction
                 .filter(|_| {
-                    participant.role != "chief" && Harness::from_kind(harness) == Some(Harness::Claude)
+                    participant.seat().is_member() && Harness::from_kind(harness) == Some(Harness::Claude)
                 })'''
 
 [[plant]]

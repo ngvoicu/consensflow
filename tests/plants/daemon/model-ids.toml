@@ -278,7 +278,8 @@ runs = ["mi-daemon-routes"]
 [[plant.edit]]
 file = "crates/cf-daemon/src/api/routes/tasks.rs"
 find = '''
-        if participant.harness.is_some() && (participant.role == "chief" || participant.name_apart)
+        if participant.harness.is_some()
+            && (participant.seat().coordinates() || participant.name_apart)
 '''
 replace = '''
         if participant.harness.is_some()
@@ -320,10 +321,10 @@ runs = ["mi-ledger-ids"]
 [[plant.edit]]
 file = "crates/cf-ledger/src/views.rs"
 find = '''
-        name_apart: row.role != "human"
+        name_apart: row.seat().is_member()
 '''
 replace = '''
-        name_apart: false && row.role != "human"
+        name_apart: false && row.seat().is_member()
 '''
 
 [[plant]]

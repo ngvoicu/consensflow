@@ -165,8 +165,8 @@ runs = ["engine-text-roles"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/roles.rs"
-find = '    if role != "chief" && !cf_ledger::roles::is_role(role) {'
-replace = '    if role != "chief" && (role == "tester" || !cf_ledger::roles::is_role(role)) {'
+find = '        Some(seat) if seat.is_chief() || seat.is_member() => seat,'
+replace = '        Some(seat) if seat.is_chief() || (seat.is_member() && role != "tester") => seat,'
 
 [[plant]]
 name = "tester: the tester's text says it changes no file, as a reviewer's does, and not that it runs things"

@@ -722,10 +722,10 @@ runs = ["viewer-ui-button"]
 
 [[plant.edit]]
 file = "app/ui/core/terminals.js"
-find = '''            element('span', 'terminal-meta', participant.harness ?? ''),
-            history,
+find = '''          element('span', 'terminal-meta', participant.harness ?? ''),
+          history,
 '''
-replace = '''            element('span', 'terminal-meta', participant.harness ?? ''),
+replace = '''          element('span', 'terminal-meta', participant.harness ?? ''),
 '''
 
 # Drawn as markup without the handler the app's policy refuses: the spec's afterEach holds every

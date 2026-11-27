@@ -3325,7 +3325,7 @@ runs = ["muse-lib"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/muse/adapter.rs"
-find = '''            if launch.role != "chief" {
+find = '''            if launch.seat().is_member() {
                 argv.push(NO_QUESTION_TOOL.to_owned());
             }'''
 replace = '''            let _ = NO_QUESTION_TOOL;'''
@@ -3337,7 +3337,7 @@ runs = ["muse-lib"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/muse/adapter.rs"
-find = '''            if launch.role != "chief" {'''
+find = '''            if launch.seat().is_member() {'''
 replace = '''            if !launch.role.is_empty() {'''
 
 [[plant]]
@@ -3348,7 +3348,7 @@ harnesses = ["muse"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/muse/adapter.rs"
-find = '''            if launch.role != "chief" {
+find = '''            if launch.seat().is_member() {
                 argv.push(NO_QUESTION_TOOL.to_owned());
             }'''
 replace = '''            let _ = NO_QUESTION_TOOL;'''

@@ -165,8 +165,8 @@ runs = ["quota-wait-engine"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/dispatcher.rs"
-find = '''        if participant.role != "chief" && self.refused_unhandled(record) {'''
-replace = '''        if participant.role != "chief" && self.refused_unhandled(record) && false {'''
+find = '''        if participant.seat().is_member() && self.refused_unhandled(record) {'''
+replace = '''        if participant.seat().is_member() && self.refused_unhandled(record) && false {'''
 
 [[plant]]
 name = "quota wait: what the window took before its harness refused it goes into it again"
@@ -380,8 +380,8 @@ runs = ["quota-wait-engine"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/scheduler.rs"
-find = """        if participant.role == "chief" || observed.failed || refused {"""
-replace = """        if participant.role == "chief" {
+find = """        if participant.seat().coordinates() || observed.failed || refused {"""
+replace = """        if participant.seat().coordinates() {
             let _ = refused;"""
 
 # A tell to a held task takes the hold over now (T-1199, T-1220's P1-1), and new deliveries to a

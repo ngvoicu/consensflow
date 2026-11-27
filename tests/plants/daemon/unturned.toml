@@ -118,7 +118,7 @@ replace = '''        let conversation = if participant.role == "chief" {
 
 [[plant.edit]]
 file = "crates/cf-engine/src/windows.rs"
-find = '''        let conversation = if participant.role == "chief" {
+find = '''        let conversation = if participant.seat().coordinates() {
             conversation
         } else {
             let found = self.conversation_to_go_on_with(participant).await?;

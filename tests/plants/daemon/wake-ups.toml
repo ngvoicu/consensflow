@@ -645,11 +645,11 @@ file = "crates/cf-engine/src/dispatcher.rs"
 find = '''        if idle && project.state == "open" {
             // A chief at rest may be due a wake-up: queued here, it is the next
             // message of its queue, delivered by the rules of every message.
-            if participant.role == "chief" {
+            if participant.seat().is_chief() {
                 self.queue_wake_up_if_due(project, participant)?;
             }
             let next = self.next_in_line(record)?;'''
-replace = '''        if participant.role == "chief" {
+replace = '''        if participant.seat().is_chief() {
             self.queue_wake_up_if_due(project, participant)?;
         }
         if idle && project.state == "open" {
@@ -861,11 +861,11 @@ file = "crates/cf-engine/src/dispatcher.rs"
 find = '''        if idle && project.state == "open" {
             // A chief at rest may be due a wake-up: queued here, it is the next
             // message of its queue, delivered by the rules of every message.
-            if participant.role == "chief" {
+            if participant.seat().is_chief() {
                 self.queue_wake_up_if_due(project, participant)?;
             }
             let next = self.next_in_line(record)?;'''
-replace = '''        if participant.role == "chief" {
+replace = '''        if participant.seat().is_chief() {
             self.queue_wake_up_if_due(project, participant)?;
         }
         if idle && project.state == "open" {

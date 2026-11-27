@@ -589,12 +589,12 @@ runs = ["engine-role-change-members"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/role_change/prelude.rs"
-find = '''        if participant.role == "chief" {
+find = '''        if participant.seat().coordinates() {
             self.abandon_launch(project, participant, record, because)
                 .await?;
             return Ok(true);
         }'''
-replace = '''        if participant.role == "chief" || participant.role != "chief" {
+replace = '''        if participant.seat().coordinates() || !participant.seat().coordinates() {
             self.abandon_launch(project, participant, record, because)
                 .await?;
             return Ok(true);

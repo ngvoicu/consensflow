@@ -527,8 +527,8 @@ runs = ["engine-paused-answers"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/delivery.rs"
-find = "        if !again\n            && message.recipient_role == \"chief\""
-replace = "        if false\n            && message.recipient_role == \"chief\""
+find = "        if !again\n            && message.recipient_seat().coordinates()"
+replace = "        if false\n            && message.recipient_seat().coordinates()"
 
 [[plant]]
 name = "answered tell: an older handover mark exempts a new paste"
@@ -537,8 +537,8 @@ runs = ["ledger-receipt"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/delivery.rs"
-find = "        if !again\n            && message.recipient_role == \"chief\""
-replace = "        if !again\n            && !store.db.query_row(\"SELECT handed_at IS NOT NULL FROM message WHERE id = ?\", [message_id], |row| row.get::<_, bool>(0))?\n            && message.recipient_role == \"chief\""
+find = "        if !again\n            && message.recipient_seat().coordinates()"
+replace = "        if !again\n            && !store.db.query_row(\"SELECT handed_at IS NOT NULL FROM message WHERE id = ?\", [message_id], |row| row.get::<_, bool>(0))?\n            && message.recipient_seat().coordinates()"
 
 [[plant]]
 name = "answered tell: Enter checks the pause as if the paste were new"

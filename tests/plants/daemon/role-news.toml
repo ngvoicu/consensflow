@@ -178,7 +178,7 @@ runs = ["rn-dispatcher"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/windows.rs"
-find = "        let told = (participant.role == \"chief\")\n            .then(|| Told::of(project, specs.as_ref().map(ChiefSpecs::setting)));"
+find = "        let told = (participant.seat().coordinates())\n            .then(|| Told::of(project, specs.as_ref().map(ChiefSpecs::setting)));"
 replace = "        let told = true.then(|| Told::of(project, specs.as_ref().map(ChiefSpecs::setting)));"
 
 [[plant]]
@@ -388,8 +388,8 @@ runs = ["rn-page"]
 
 [[plant.edit]]
 file = "app/ui/core/dialogs.js"
-find = "      (lane) => lane.participant.role === 'chief' && lane.pane !== null,"
-replace = "      (lane) => lane.participant.role === 'chief',"
+find = "    return (board?.lanes ?? []).some((lane) => isChief(lane.participant) && lane.pane !== null)"
+replace = "    return (board?.lanes ?? []).some((lane) => isChief(lane.participant))"
 
 [[plant]]
 name = "role news page: the rules for the staff do not say the chief is told now"

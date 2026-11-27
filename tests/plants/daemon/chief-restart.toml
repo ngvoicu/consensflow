@@ -219,8 +219,8 @@ runs = ["engine-dispatcher"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/dispatcher.rs"
-find = '''        let reopens = participant.role == "chief"'''
-replace = '''        let reopens = false && participant.role == "chief"'''
+find = '''        let reopens = participant.seat().coordinates()'''
+replace = '''        let reopens = false && participant.seat().coordinates()'''
 
 [[plant]]
 name = "chief restart: a chief whose window was given up opens again only for what waits for it, on the rig"
@@ -230,8 +230,8 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-engine/src/dispatcher.rs"
-find = '''        let reopens = participant.role == "chief"'''
-replace = '''        let reopens = false && participant.role == "chief"'''
+find = '''        let reopens = participant.seat().coordinates()'''
+replace = '''        let reopens = false && participant.seat().coordinates()'''
 
 [[plant]]
 name = "chief restart: a give-up does not have the chief open again"
