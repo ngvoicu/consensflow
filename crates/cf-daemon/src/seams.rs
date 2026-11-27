@@ -8,7 +8,7 @@ use std::future::Future;
 use std::path::PathBuf;
 use std::rc::Rc;
 
-use cf_base::env::{Env, TERMINAL_ENV};
+use cf_base::env::{Env, GUARD_ROOT, PATH_HELPER_ROOT, TERMINAL_ENV};
 use cf_engine::roles::{role_instructions_for, staff_of, ProjectSpecs};
 use cf_engine::runtime::{Executor, LocalWork, Spawn};
 use cf_engine::seams::{Adapters, LaunchFiles, LaunchIds, PaneEnv, Roles};
@@ -43,6 +43,10 @@ pub struct WindowEnv {
     /// window is told how a command starts in it ([`cf_proto::cf_word::ENV`]), for the
     /// harness it is and the platform, and every `cf` it runs says its own hints so.
     cf: Option<(String, bool)>,
+    /// Whether the person has a `PATH_HELPER_ROOT` of their own, which their windows keep.
+    has_path_helper_root: bool,
+    /// The guard's `PATH_HELPER_ROOT` (`member_guard::mirror`), where the windows are given one.
+    guard_root: Option<String>,
 }
 
 impl WindowEnv {
@@ -58,7 +62,49 @@ impl WindowEnv {
             },
             terminal: terminal_of(env),
             cf: None,
+            // A root that is the guard's is no one's own: a ConsensFlow started from a
+            // window was given the window's.
+            has_path_helper_root: env
+                .os(PATH_HELPER_ROOT)
+                .is_some_and(|root| env.os(GUARD_ROOT) != Some(root)),
+            guard_root: None,
         }
+    }
+
+    /// What the guard adds to every window's environment besides its PATH: the
+    /// `PATH_HELPER_ROOT` it is given and, naming it as the guard's, [`GUARD_ROOT`], where it
+    /// is given one.
+    pub fn guard_env(&self) -> Vec<(String, String)> {
+        self.guard_root
+            .iter()
+            .flat_map(|root| {
+                [PATH_HELPER_ROOT, GUARD_ROOT].map(|name| (name.to_owned(), root.clone()))
+            })
+            .collect()
+    }
+
+    /// The PATH every window starts with.
+    pub fn path(&self) -> &str {
+        &self.path
+    }
+
+    /// These windows given `folder` first on their PATH, before the bundle's: the stand-ins
+    /// of the commands a member's window may not run (`member_guard`).
+    #[must_use]
+    pub fn with_guard(mut self, folder: &std::path::Path) -> Self {
+        let delimiter = if cfg!(windows) { ';' } else { ':' };
+        self.path = format!("{}{delimiter}{}", folder.display(), self.path);
+        self
+    }
+
+    /// These windows given `root` as their `PATH_HELPER_ROOT`, unless the person has one of
+    /// their own, which is theirs.
+    #[must_use]
+    pub fn with_path_helper_root(mut self, root: &std::path::Path) -> Self {
+        if !self.has_path_helper_root {
+            self.guard_root = Some(root.to_string_lossy().into_owned());
+        }
+        self
     }
 
     /// These windows told how a command starts in them: the bundle's `cf`, `pane_cf`, as the
@@ -104,6 +150,10 @@ fn terminal_of(env: &Env) -> Vec<(String, String)> {
 impl PaneEnv for WindowEnv {
     fn env(&self, participant: &ParticipantView, project: &ProjectView) -> Vec<(String, String)> {
         let mut env = self.terminal.clone();
+        // A root the terminal was given that the guard's replaces.
+        if self.guard_root.is_some() {
+            env.retain(|(name, _)| name != PATH_HELPER_ROOT);
+        }
         env.extend([
             ("CONSENSFLOW_URL".to_owned(), self.url.clone()),
             ("CONSENSFLOW_PROJECT".to_owned(), project.id.to_string()),
@@ -113,6 +163,7 @@ impl PaneEnv for WindowEnv {
             ),
         ]);
         env.push(("PATH".to_owned(), self.path.clone()));
+        env.extend(self.guard_env());
         if let Some((pane_cf, windows)) = &self.cf {
             let word = cf_word_of(participant, pane_cf, *windows);
             env.push((CF_ENV.to_owned(), word.as_str().to_owned()));

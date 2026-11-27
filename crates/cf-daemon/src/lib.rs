@@ -39,6 +39,7 @@ pub mod errors;
 pub mod files;
 pub mod host;
 pub mod machine;
+pub mod member_guard;
 pub mod models;
 pub mod page;
 pub mod pass;
