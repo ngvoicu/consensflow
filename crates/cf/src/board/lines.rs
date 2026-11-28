@@ -85,7 +85,7 @@ fn state_with_aside(task: &Value) -> String {
         }
         _ => js::text(task.get("state")).into_owned(),
     };
-    // Its result is queued for the caller: typed into its window when its turn ends.
+    // Its result is still queued for the caller.
     if task.get("resultQueued") == Some(&Value::Bool(true)) {
         format!("{state} · result queued")
     } else {

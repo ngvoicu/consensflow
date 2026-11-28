@@ -34,7 +34,7 @@ pub(super) async fn list(
     let waits = Waits::now(context, caller)?;
     // Nothing waits where nothing is held at the gate and the project is open.
     let held = !board.gated.is_empty() || waits.closed();
-    // The results still queued for the caller, which are typed into its window when its turn ends.
+    // The results still queued for the caller.
     let queued = context
         .ledger
         .borrow()

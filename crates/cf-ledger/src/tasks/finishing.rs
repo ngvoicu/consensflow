@@ -118,8 +118,9 @@ pub(crate) fn left_running(
     }))
 }
 
-/// Whether T-`number`'s result is still queued for `handle`: it was never typed into the
-/// window, and a decision on the task (an accept, a send back, a cancel) now withdraws it.
+/// Whether T-`number`'s result is still queued for `handle`: a decision on the task (an
+/// accept, a send back, a cancel) now withdraws it. Queued is not "never typed": recovery
+/// queues again a paste the window may have taken.
 pub(crate) fn result_queued_for(
     store: &Store,
     project_id: i64,
@@ -137,8 +138,8 @@ pub(crate) fn result_queued_for(
         .exists(params![project_id, number, handle])?)
 }
 
-/// The numbers of the tasks whose result is still queued for `handle`: never typed into its
-/// window, and typed in when its turn ends. What `cf task list` and `cf task get` say of them.
+/// The numbers of the tasks whose result is still queued for `handle`. What `cf task list`
+/// and `cf task get` say of them.
 pub(crate) fn results_queued_for(
     store: &Store,
     project_id: i64,

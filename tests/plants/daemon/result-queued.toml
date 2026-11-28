@@ -1,4 +1,4 @@
-# What a window is told of a result still queued for it, which is typed in when its turn ends:
+# What a window is told of a result still queued for it:
 # `cf task accept`, `reopen` and `cancel` say when they withdrew one (T-2442, the own-hands chief
 # of 2026-11-27 that decided three tasks whose results were never typed into its window), and
 # `cf task get` and `cf task list` say it of the caller's own. One plant takes one rule out; a
@@ -37,11 +37,11 @@ runs = ["rq-ledger"]
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/finishing.rs"
 find = '''          WHERE t.project_id = ?1 AND p.handle = ?2'''
-replace = '''          WHERE t.project_id = ?1 AND p.handle IS NOT NULL'''
+replace = '''          WHERE t.project_id = ?1 AND (p.handle = ?2 OR 1)'''
 
 [[plant]]
 name = "result queued: a decision's route does not read the queued result"
-meant = "a_decision_says_when_the_result_it_withdraws_was_never_typed_into_the_chiefs_window"
+meant = "a_decision_says_when_the_result_it_withdraws_was_still_queued_for_the_chief"
 runs = ["rq-route"]
 
 [[plant.edit]]
@@ -71,12 +71,12 @@ replace = '''        if false {'''
 
 [[plant]]
 name = "result queued: cf's decision says nothing of the withdrawn result"
-meant = "a_decision_says_when_its_result_was_not_delivered_to_this_window"
+meant = "a_decision_says_when_its_result_was_still_queued_for_this_window"
 runs = ["rq-cf"]
 
 [[plant.edit]]
 file = "crates/cf/src/board/task.rs"
-find = '''    format!("\nT-{number}'s result was not delivered to this window; read it with: {cf} task get T-{number}")'''
+find = '''    format!("\nT-{number}'s result was still queued for this window; read it with: {cf} task get T-{number}")'''
 replace = '''    let _ = (number, cf);
     String::new()'''
 
@@ -97,5 +97,90 @@ runs = ["rq-cf"]
 
 [[plant.edit]]
 file = "crates/cf/src/board/task.rs"
-find = '''            "\nIts result is queued for you and is typed in when your turn ends."'''
+find = '''            "\nIts result is still queued for you."'''
 replace = '''            ""'''
+
+[[plant]]
+name = "result queued: the ledger's decision read names any window's results"
+meant = "a_result_still_queued_for_the_chief_is_said_so_before_its_decision_withdraws_it"
+runs = ["rq-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = '''              WHERE t.project_id = ?1 AND t.number = ?2 AND p.handle = ?3'''
+replace = '''              WHERE t.project_id = ?1 AND t.number = ?2 AND (p.handle = ?3 OR 1)'''
+
+[[plant]]
+name = "result queued: a result the chief was given still counts at its decision"
+meant = "a_decision_on_a_result_the_chief_was_given_says_nothing_of_it"
+runs = ["rq-route"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = '''                AND m.kind = 'result' AND m.state = 'queued'",
+        )?
+        .exists('''
+replace = '''                AND m.kind = 'result' AND m.state IN ('queued', 'delivered')",
+        )?
+        .exists('''
+
+[[plant]]
+name = "result queued: a bulk accept says nothing of the queued results"
+meant = "stc_a_bulk_accept_names_exactly_the_tasks_whose_results_were_still_queued"
+runs = ["rq-route"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/routes/tasks.rs"
+find = '''        if result_queued {'''
+replace = '''        if result_queued && action != "accept" {'''
+
+[[plant]]
+name = "result queued: a bulk cancel says nothing of the queued results"
+meant = "stc_a_bulk_cancel_names_exactly_the_tasks_whose_results_were_still_queued"
+runs = ["rq-route"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/routes/tasks.rs"
+find = '''        if result_queued {'''
+replace = '''        if result_queued && action != "cancel" {'''
+
+[[plant]]
+name = "result queued: a bulk accept warns of every task"
+meant = "stc_a_bulk_accept_names_exactly_the_tasks_whose_results_were_still_queued"
+runs = ["rq-route"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/routes/tasks.rs"
+find = '''        if result_queued {'''
+replace = '''        if result_queued || action == "accept" {'''
+
+[[plant]]
+name = "result queued: a bulk cancel warns of every task"
+meant = "stc_a_bulk_cancel_names_exactly_the_tasks_whose_results_were_still_queued"
+runs = ["rq-route"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/routes/tasks.rs"
+find = '''        if result_queued {'''
+replace = '''        if result_queued || action == "cancel" {'''
+
+[[plant]]
+name = "result queued: cf's bulk decision says nothing of the queued results"
+meant = "a_bulk_decision_says_of_exactly_the_tasks_whose_results_were_still_queued"
+runs = ["rq-cf"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/task.rs"
+find = '''        let withdrawn = result.get("resultQueued").map_or_else(String::new, |_| {'''
+replace = '''        let withdrawn = result.get("noSuchKey").map_or_else(String::new, |_| {'''
+
+[[plant]]
+name = "result queued: cf's bulk decision warns of every task"
+meant = "a_bulk_decision_says_of_exactly_the_tasks_whose_results_were_still_queued"
+runs = ["rq-cf"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/task.rs"
+find = '''        let withdrawn = result.get("resultQueued").map_or_else(String::new, |_| {'''
+replace = '''        let withdrawn = Some(()).map_or_else(String::new, |_| {'''
+

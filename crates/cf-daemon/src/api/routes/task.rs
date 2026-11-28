@@ -591,8 +591,7 @@ fn moved(
     Ok(Answer::ok(Value::Object(answer)))
 }
 
-/// Whether T-`number`'s result is still queued for the caller, to be typed into its window when
-/// its turn ends.
+/// Whether T-`number`'s result is still queued for the caller.
 fn ledger_result_queued(context: &Context, caller: &Caller, number: i64) -> Result<bool, Failure> {
     Ok(context.ledger.borrow().result_queued_for(
         caller.project.id,

@@ -639,10 +639,10 @@ fn decide_many(
             .get("dropped")
             .and_then(Value::as_array)
             .map_or_else(String::new, |dropped| went_with_it(dropped));
-        let unreceived = result.get("resultQueued").map_or_else(String::new, |_| {
-            result_not_delivered(number, &board.cf().to_string())
+        let withdrawn = result.get("resultQueued").map_or_else(String::new, |_| {
+            result_still_queued(number, &board.cf().to_string())
         });
-        lines.push(format!("{}{running}{dropped}{unreceived}", task_line(task)));
+        lines.push(format!("{}{running}{dropped}{withdrawn}", task_line(task)));
     }
     Ok(Said::new(answer.into_value(), lines.join("\n")))
 }
@@ -823,7 +823,7 @@ fn get(number: u64, rest: &[String], board: &Board) -> Result<Said, Failure> {
             None => thread,
         };
         let queued = if task.get("resultQueued") == Some(&Value::Bool(true)) {
-            "\nIts result is queued for you and is typed in when your turn ends."
+            "\nIts result is still queued for you."
         } else {
             ""
         };
@@ -996,11 +996,11 @@ fn moved(
         "accept" => format!("{}{running}", task_line(&task)),
         _ => format!("{}{dropped}", task_line(&task)),
     };
-    let unreceived = match answer.value().get("resultQueued") {
-        Some(_) => result_not_delivered(number, &board.cf().to_string()),
+    let withdrawn = match answer.value().get("resultQueued") {
+        Some(_) => result_still_queued(number, &board.cf().to_string()),
         None => String::new(),
     };
-    Ok(Said::new(task, format!("{said}{sent}{unreceived}")))
+    Ok(Said::new(task, format!("{said}{sent}{withdrawn}")))
 }
 
 /// The members of the tier a task went to when nobody held the one asked, as `: @anubis`.
@@ -1137,10 +1137,11 @@ fn new_title(words: &Split) -> Result<Option<String>, Failure> {
     }
 }
 
-/// What a decision on a task says when its result was still queued for the caller: it was
-/// never typed into this window, the decision withdrew it, and `cf task get` has it.
-fn result_not_delivered(number: u64, cf: &str) -> String {
-    format!("\nT-{number}'s result was not delivered to this window; read it with: {cf} task get T-{number}")
+/// What a decision on a task says when its result was still queued for the caller: the
+/// decision withdrew it, and `cf task get` has it. It does not say the window never had it:
+/// after a restart, recovery queues again a paste the window may have taken.
+fn result_still_queued(number: u64, cf: &str) -> String {
+    format!("\nT-{number}'s result was still queued for this window; read it with: {cf} task get T-{number}")
 }
 
 /// What an accept says of the background work the task's window was counted running when
@@ -2324,13 +2325,13 @@ and 2 idle sessions (`cf task list --all`)";
             .unwrap()
             .text;
         assert!(
-            got.contains("\nIts result is queued for you and is typed in when your turn ends.\n"),
+            got.contains("\nIts result is still queued for you.\n"),
             "{got}"
         );
     }
 
     #[test]
-    fn a_decision_says_when_its_result_was_not_delivered_to_this_window() {
+    fn a_decision_says_when_its_result_was_still_queued_for_this_window() {
         let said = |verb: &str, state: &str, queued: bool| {
             let mut answer = json!({ "task": card(3, state, Some("zeus")) });
             if queued {
@@ -2358,11 +2359,54 @@ and 2 idle sessions (`cf task list --all`)";
             ("reopen", "working"),
         ] {
             let plain = said(verb, state, false);
-            assert!(!plain.contains("not delivered"), "{verb}: {plain}");
+            assert!(!plain.contains("still queued"), "{verb}: {plain}");
             assert_eq!(
                 said(verb, state, true),
-                format!("{plain}\nT-3's result was not delivered to this window; read it with: cf task get T-3"),
+                format!("{plain}\nT-3's result was still queued for this window; read it with: cf task get T-3"),
                 "{verb}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_bulk_decision_says_of_exactly_the_tasks_whose_results_were_still_queued() {
+        for (verb, state) in [("accept", "accepted"), ("cancel", "cancelled")] {
+            let results: Vec<Value> = [(3, false), (4, true), (5, false), (6, true)]
+                .iter()
+                .map(|&(number, queued)| {
+                    let mut result = json!({ "task": card(number, state, Some("zeus")) });
+                    if queued {
+                        result["resultQueued"] = json!(true);
+                    }
+                    result
+                })
+                .collect();
+            let api = scripted(vec![reply(200, json!({ "tasks": results }))]);
+            let words: Vec<String> = [verb, "T-3", "T-4", "T-5", "T-6"]
+                .iter()
+                .map(|word| (*word).to_owned())
+                .collect();
+            let given: Vec<OsString> = words.iter().map(OsString::from).collect();
+            let said = command(
+                &words,
+                &given,
+                &Board::new(Some(&api.url), "tok"),
+                &mut "".as_bytes(),
+            )
+            .ok()
+            .map(|said| said.text)
+            .unwrap();
+            let warned: Vec<&str> = said
+                .lines()
+                .filter(|line| line.contains("still queued"))
+                .collect();
+            assert_eq!(
+                warned,
+                [
+                    "T-4's result was still queued for this window; read it with: cf task get T-4",
+                    "T-6's result was still queued for this window; read it with: cf task get T-6",
+                ],
+                "{verb}: {said}"
             );
         }
     }

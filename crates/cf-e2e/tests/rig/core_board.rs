@@ -215,7 +215,7 @@ fn a_task_no_lane_has_stays_on_the_board_and_in_cf_task_list_called_off_paused_o
     let last = chief_said()?.pop().unwrap_or_default();
     assert!(
         Regex::new(
-            r"^Waiting for a member\nT-4 \[open\] blocked by T-1 .*\nWith no member\nT-1 \[done\] @worker-\* ← @chief: .*$"
+            r"^Waiting for a member\nT-4 \[open\] blocked by T-1 .*\nWith no member\nT-1 \[done(?: · [^\]]*)?\] @worker-\* ← @chief: .*$"
         )?
         .is_match(&last),
         "{last}"

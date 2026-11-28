@@ -153,8 +153,8 @@ impl Ledger {
         tasks::left_running(&self.store, project_id, number)
     }
 
-    /// Whether T-`number`'s result is still queued for `handle`, never typed into its window:
-    /// the decision about to be made withdraws it.
+    /// Whether T-`number`'s result is still queued for `handle`: the decision about to be made
+    /// withdraws it.
     pub fn result_queued_for(
         &self,
         project_id: i64,

@@ -1587,10 +1587,14 @@ async fn an_accept_says_how_many_jobs_and_agents_the_finish_counted_running() {
 }
 
 #[tokio::test]
-async fn a_decision_says_when_the_result_it_withdraws_was_never_typed_into_the_chiefs_window() {
+async fn a_decision_says_when_the_result_it_withdraws_was_still_queued_for_the_chief() {
     // The field report of 2026-11-27: a chief in one long turn accepted tasks whose results
     // were still queued for it, and nothing said so.
-    for (action, state) in [("accept", "accepted"), ("reopen", "queued")] {
+    for (action, state) in [
+        ("accept", "accepted"),
+        ("reopen", "queued"),
+        ("cancel", "cancelled"),
+    ] {
         let scene = scene();
         let number = working_task(&scene);
         scene
@@ -1614,25 +1618,39 @@ async fn a_decision_says_when_the_result_it_withdraws_was_never_typed_into_the_c
         );
         assert_eq!(said.1["task"]["state"], state, "{action}");
     }
-    // A result the chief was given is not said to be withdrawn.
-    let scene = scene();
-    let number = working_task(&scene);
-    let result = scene
-        .context
-        .ledger
-        .borrow_mut()
-        .record_result(scene.project.id, number, "Parser done")
-        .unwrap()
-        .message
-        .unwrap();
-    {
-        let mut ledger = scene.context.ledger.borrow_mut();
-        ledger.begin_delivery(result.id).unwrap();
-        ledger.confirm_delivery(result.id, None).unwrap();
+}
+
+#[tokio::test]
+async fn a_decision_on_a_result_the_chief_was_given_says_nothing_of_it() {
+    for action in ["accept", "reopen", "cancel"] {
+        let scene = scene();
+        let number = working_task(&scene);
+        let result = scene
+            .context
+            .ledger
+            .borrow_mut()
+            .record_result(scene.project.id, number, "Parser done")
+            .unwrap()
+            .message
+            .unwrap();
+        {
+            let mut ledger = scene.context.ledger.borrow_mut();
+            ledger.begin_delivery(result.id).unwrap();
+            ledger.confirm_delivery(result.id, None).unwrap();
+        }
+        let body = if action == "reopen" {
+            r#"{"body":"More"}"#
+        } else {
+            "{}"
+        };
+        let said = post(&scene, &scene.chief, &format!("{number}/{action}"), body).await;
+        assert_eq!(said.0, 200, "{action}: {:?}", said.1);
+        assert!(
+            said.1.get("resultQueued").is_none(),
+            "{action}: {:?}",
+            said.1
+        );
     }
-    let said = post(&scene, &scene.chief, &format!("{number}/accept"), "{}").await;
-    assert_eq!(said.0, 200, "{:?}", said.1);
-    assert!(said.1.get("resultQueued").is_none(), "{:?}", said.1);
 }
 
 #[tokio::test]
