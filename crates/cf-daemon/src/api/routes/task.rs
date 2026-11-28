@@ -503,6 +503,11 @@ fn moved(
     let mut dropped = Vec::new();
     let mut running = (0, 0);
     let mut told_withdrawn: Vec<i64> = Vec::new();
+    // Read before the decision, which withdraws a result still queued for the caller.
+    let result_queued = matches!(
+        action,
+        TaskAction::Accept | TaskAction::Cancel | TaskAction::Reopen
+    ) && ledger.result_queued_for(project, number, by)?;
     let moved = match action {
         TaskAction::Accept => {
             // Read before the accept, whose close of the window ends what it still runs.
@@ -569,6 +574,9 @@ fn moved(
     }
     if !dropped.is_empty() {
         answer.insert("dropped".to_owned(), json!(dropped));
+    }
+    if result_queued {
+        answer.insert("resultQueued".to_owned(), json!(true));
     }
     if running != (0, 0) {
         answer.insert(

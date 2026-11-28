@@ -118,6 +118,25 @@ pub(crate) fn left_running(
     }))
 }
 
+/// Whether T-`number`'s result is still queued for `handle`: it was never typed into the
+/// window, and a decision on the task (an accept, a send back, a cancel) now withdraws it.
+pub(crate) fn result_queued_for(
+    store: &Store,
+    project_id: i64,
+    number: i64,
+    handle: &str,
+) -> Result<bool, LedgerError> {
+    Ok(store
+        .db
+        .prepare(
+            "SELECT 1 FROM message m JOIN task t ON t.id = m.task_id
+               JOIN participant p ON p.id = m.recipient_id
+              WHERE t.project_id = ?1 AND t.number = ?2 AND p.handle = ?3
+                AND m.kind = 'result' AND m.state = 'queued'",
+        )?
+        .exists(params![project_id, number, handle])?)
+}
+
 /// The states a task can be finished at the word of the chief or the human.
 const FINISHABLE_TASK_STATES: [&str; 3] = ["working", "waiting", "paused"];
 

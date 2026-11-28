@@ -400,17 +400,21 @@ fn decide(
         } else {
             Vec::new()
         };
-        warnings.push((running, dropped));
+        let result_queued = ledger.result_queued_for(caller.project.id, number, by)?;
+        warnings.push((running, dropped, result_queued));
     }
     let moved = ledger.decide_tasks(caller.project.id, &numbers, by, action, words)?;
     drop(ledger);
     (context.kick)();
     let mut tasks = Vec::new();
-    for (task, (running, dropped)) in moved.iter().zip(warnings) {
+    for (task, (running, dropped, result_queued)) in moved.iter().zip(warnings) {
         let mut result = Map::new();
         result.insert("task".into(), value(&TaskSummary::from(task))?);
         if let Some((jobs, agents)) = running.filter(|count| *count != (0, 0)) {
             result.insert("running".into(), json!({"jobs":jobs,"agents":agents}));
+        }
+        if result_queued {
+            result.insert("resultQueued".into(), json!(true));
         }
         if !dropped.is_empty() {
             result.insert("dropped".into(), json!(dropped));

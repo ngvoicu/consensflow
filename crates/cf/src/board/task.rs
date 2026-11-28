@@ -639,7 +639,10 @@ fn decide_many(
             .get("dropped")
             .and_then(Value::as_array)
             .map_or_else(String::new, |dropped| went_with_it(dropped));
-        lines.push(format!("{}{running}{dropped}", task_line(task)));
+        let unreceived = result.get("resultQueued").map_or_else(String::new, |_| {
+            result_not_delivered(number, &board.cf().to_string())
+        });
+        lines.push(format!("{}{running}{dropped}{unreceived}", task_line(task)));
     }
     Ok(Said::new(answer.into_value(), lines.join("\n")))
 }
@@ -988,7 +991,11 @@ fn moved(
         "accept" => format!("{}{running}", task_line(&task)),
         _ => format!("{}{dropped}", task_line(&task)),
     };
-    Ok(Said::new(task, format!("{said}{sent}")))
+    let unreceived = match answer.value().get("resultQueued") {
+        Some(_) => result_not_delivered(number, &board.cf().to_string()),
+        None => String::new(),
+    };
+    Ok(Said::new(task, format!("{said}{sent}{unreceived}")))
 }
 
 /// The members of the tier a task went to when nobody held the one asked, as `: @anubis`.
@@ -1123,6 +1130,12 @@ fn new_title(words: &Split) -> Result<Option<String>, Failure> {
             "{TITLE} takes the new title: {TITLE} \"…\""
         ))),
     }
+}
+
+/// What a decision on a task says when its result was still queued for the caller: it was
+/// never typed into this window, the decision withdrew it, and `cf task get` has it.
+fn result_not_delivered(number: u64, cf: &str) -> String {
+    format!("\nT-{number}'s result was not delivered to this window; read it with: {cf} task get T-{number}")
 }
 
 /// What an accept says of the background work the task's window was counted running when
@@ -2272,6 +2285,44 @@ and 2 idle sessions (`cf task list --all`)";
             accepted(json!({ "jobs": 0, "agents": 2 })),
             format!("{line}\nT-3's window was running 2 background agents or workflows when it was finished; accepting closes the window and ends them.")
         );
+    }
+
+    #[test]
+    fn a_decision_says_when_its_result_was_not_delivered_to_this_window() {
+        let said = |verb: &str, state: &str, queued: bool| {
+            let mut answer = json!({ "task": card(3, state, Some("zeus")) });
+            if queued {
+                answer["resultQueued"] = json!(true);
+            }
+            let api = scripted(vec![reply(200, answer)]);
+            let mut words = vec![verb.to_owned(), "T-3".to_owned()];
+            if verb == "reopen" {
+                words.push("More".to_owned());
+            }
+            let given: Vec<OsString> = words.iter().map(OsString::from).collect();
+            command(
+                &words,
+                &given,
+                &Board::new(Some(&api.url), "tok"),
+                &mut "".as_bytes(),
+            )
+            .ok()
+            .map(|said| said.text)
+            .unwrap()
+        };
+        for (verb, state) in [
+            ("accept", "accepted"),
+            ("cancel", "cancelled"),
+            ("reopen", "working"),
+        ] {
+            let plain = said(verb, state, false);
+            assert!(!plain.contains("not delivered"), "{verb}: {plain}");
+            assert_eq!(
+                said(verb, state, true),
+                format!("{plain}\nT-3's result was not delivered to this window; read it with: cf task get T-3"),
+                "{verb}"
+            );
+        }
     }
 
     /// What `cf task edit words…` posted and printed, the board answering with `answer`.
