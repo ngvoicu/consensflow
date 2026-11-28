@@ -91,6 +91,8 @@ fn rows(db: &Connection, table: &str) -> Vec<Vec<String>> {
         .filter(|column: &String| table != "project" || column != "own_hands")
         // An account hold's closed form (0048) is not in the ledger this one is made to be.
         .filter(|column: &String| table != "participant" || column != "out_form")
+        // Nor is a task's added-by (0049).
+        .filter(|column: &String| table != "task" || column != "added_by_id")
         // The count of a task's tries in a row (0047) is not in the ledger this one is made to be.
         .filter(|column: &String| {
             table != "task"
@@ -257,6 +259,7 @@ fn a_ledger_a_build_before_the_new_roles_left_with_members_and_tasks_of_the_five
         .iter()
         .filter(|(name, _)| {
             !backup_triggers.contains(&name.as_str())
+                && name != "lead"
                 && ![
                     "task_plan_key",
                     "question_reminder",
@@ -283,7 +286,12 @@ fn a_ledger_a_build_before_the_new_roles_left_with_members_and_tasks_of_the_five
         .map(|(name, sql)| {
             (
                 name.clone(),
-                sql.replace(", 'frontend', 'architect', 'researcher', 'integrator'", "")
+                sql.replace(", 'lead'", "")
+                    .replace(
+                        ", added_by_id INTEGER\n  CONSTRAINT task_added_by_fk REFERENCES participant (id) ON DELETE SET NULL",
+                        "",
+                    )
+                    .replace(", 'frontend', 'architect', 'researcher', 'integrator'", "")
                     .replace(", own_hands INTEGER NOT NULL DEFAULT 0", "")
                     .replace(
                         ", turn_retries INTEGER NOT NULL DEFAULT 0 CHECK (turn_retries BETWEEN 0 AND 2)",

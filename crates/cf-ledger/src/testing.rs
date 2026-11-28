@@ -391,6 +391,7 @@ pub fn hold_apart_what_node_never_had_in_its_schema(dump: &mut Value) {
             && entry["name"] != "question_reminder_sent"
             && entry["name"] != "question_reminder_by_message"
             && entry["name"] != "turn_retry"
+            && entry["name"] != "lead"
             && entry["name"] != "turn_retry_by_task"
             && entry["name"] != "turn_retry_by_message"
             && entry["name"] != "turn_retry_message_moved"
