@@ -39,18 +39,46 @@ fn given(rig: &Rig, session: &str, id: i64) -> usize {
         .sum()
 }
 
-/// The human types `/recap` into the chief's window, a key at a time.
+/// The human types `/recap` into the chief's window, a key at a time, as the page types: the
+/// host counts them as the person's (`pane.typed`), so nothing of ConsensFlow's is pasted
+/// over them. Typed as the daemon's keys (`pane.input`), a note due at the chief's rest went in
+/// between `/recap` and its Enter and was sent with it (CI runs 46103990194, 46118208589).
 fn type_recap(rig: &Rig, project: &Project) -> Outcome {
     let pane = project.lane("chief")?["pane"].clone();
     for keys in [&b"/recap"[..], &b"\r"[..]] {
-        let typed = rig.host(
-            "pane.input",
-            json!({ "id": pane["id"], "generation": pane["generation"], "bytes": keys }),
-        )?;
-        assert_eq!(typed["ok"], true, "{typed}");
+        rig.types(&pane, keys)?;
         sleep(Duration::from_millis(600));
     }
     Ok(())
+}
+
+/// What a wait on the chief that gave up saw: the last user's rows of its record (where `/recap`
+/// went, alone or with something else) and the end of its window's screen.
+fn what_the_chief_shows(rig: &Rig, project: &Project, session: &str) -> String {
+    let transcript = rig.transcript(session);
+    let rows: Vec<String> = transcript
+        .lines()
+        .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+        .filter(|record| record["type"] == "user")
+        .map(|record| {
+            record["message"]["content"]
+                .to_string()
+                .chars()
+                .take(160)
+                .collect()
+        })
+        .collect();
+    let screen = project
+        .lane("chief")
+        .ok()
+        .and_then(|lane| lane["pane"]["id"].as_str().map(|id| rig.screen(id)))
+        .unwrap_or_default();
+    let tail: Vec<&str> = screen.lines().rev().take(8).collect();
+    format!(
+        "the chief's record, its last user's rows: {:?}\nthe chief's screen, its last lines: {:?}",
+        &rows[rows.len().saturating_sub(3)..],
+        tail.into_iter().rev().collect::<Vec<_>>()
+    )
 }
 
 #[test]
@@ -79,6 +107,12 @@ fn a_claude_chief_given_a_recap_while_idle_is_handed_its_workers_result_once_aft
     type_recap(&rig, &project)?;
     rig.wait_for("the chief's record to hold the echo", secs(30), || {
         Ok(rig.transcript(&session).contains("<command-name>/recap"))
+    })
+    .map_err(|failed| {
+        format!(
+            "{failed}\n{}",
+            what_the_chief_shows(&rig, &project, &session)
+        )
     })?;
     assert!(
         !rig.transcript(&session).contains("<local-command-stdout>"),

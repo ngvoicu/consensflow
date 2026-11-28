@@ -7,6 +7,7 @@
 //! before its deletion said `node v<version>`. A suite that asked for the
 //! native one refuses what is not ([`assert_started`]).
 
+use std::path::Path;
 use std::sync::OnceLock;
 
 use regex::Regex;
@@ -155,6 +156,16 @@ pub fn assert_started_in(mut read: impl FnMut() -> Result<String>, pid: u32) -> 
     }
 }
 
+/// The text of the daemon's log at `path`, empty while there is no file yet: the daemon writes
+/// its log on a thread of its own and never waits for the file (T-2232), so its handle line can
+/// come before `daemon.log` is made. Any other failure to read it is the error.
+pub fn read_log(path: &Path) -> Result<String> {
+    match crate::door::reads::read_to_string(path) {
+        Err(failed) if failed.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
+        read => read.map_err(Error::file("read", path)),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -262,5 +273,28 @@ mod tests {
             none,
             "the native daemon was asked for, and its log holds no start line of pid 99"
         );
+    }
+
+    /// The daemon writes its log on a thread of its own and never waits for the file (T-2232),
+    /// so its handle line can come before `daemon.log` is made (CI run 46118208589, Windows):
+    /// a log not made yet is waited for as one without its start line, not refused.
+    #[test]
+    fn a_log_not_made_yet_is_waited_for_until_its_start_line() {
+        let home = tempfile::tempdir().unwrap();
+        let log = home.path().join("daemon.log");
+        let writer = {
+            let log = log.clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_millis(300));
+                std::fs::write(
+                    &log,
+                    "2026-11-28T06:57:17.000Z info start pid 12 rust 3.0.7 home /h\n",
+                )
+                .unwrap();
+            })
+        };
+        let started = assert_started_in(|| read_log(&log), 12);
+        writer.join().unwrap();
+        assert_eq!(started.unwrap().kind, Kind::Native);
     }
 }
