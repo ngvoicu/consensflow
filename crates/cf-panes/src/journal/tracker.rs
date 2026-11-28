@@ -9,6 +9,7 @@
 
 use super::modes::Modes;
 use super::parser::{Action, Parser};
+use crate::validation::MAX_TERMINAL_DIMENSION;
 
 /// A scroll region the program set that xterm may have taken: the first and last row from 1 as
 /// it wrote them (`usize::MAX` for no last row: the screen's), and the offset at which the
@@ -24,11 +25,6 @@ pub(crate) struct Region {
     pub(crate) top: usize,
     pub(crate) bottom: usize,
 }
-
-/// The rows at which a setting is not taken whatever the screen: a top this far down is
-/// refused by every screen the page can make (rows are a `u16`, and a window's sizes are
-/// bounded far below it), so it is not kept.
-pub(crate) const MAX_TOP: usize = 1024;
 
 impl Region {
     /// The region xterm holds after these settings (of one screen, since its margins were last
@@ -158,9 +154,10 @@ fn csi(
                 [top, bottom, ..] => (*top, if *bottom == 0 { usize::MAX } else { *bottom }),
             };
             let top = top.max(1);
-            // One whose top is not above its bottom is refused at every screen. One whose top is
-            // as far down as `MAX_TOP` is refused at every screen a page makes.
-            if top < bottom && top < MAX_TOP {
+            // One whose top is not above its bottom is refused at every screen, and one whose top
+            // is the height of the tallest screen the host accepts or more at every screen a page
+            // makes. So a screen keeps at most one setting for each row below that height.
+            if top < bottom && top < usize::from(MAX_TERMINAL_DIMENSION) {
                 let shown = tracked.shown();
                 if top == 1 && bottom == usize::MAX {
                     // The whole screen: taken at every screen of two rows or more, and a screen

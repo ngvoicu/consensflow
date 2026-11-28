@@ -149,6 +149,7 @@ fn a_ledger_from_before_migration_0032_opens_and_its_items_read_as_they_did() {
     drop(ledger);
     {
         let db = rusqlite::Connection::open(dir.path().join("consensflow.db")).expect("the file");
+        cf_ledger::testing::undo_migration_0048(&db).expect("0048 undone");
         cf_ledger::testing::undo_migration_0047(&db).unwrap();
         cf_ledger::testing::undo_migration_0046(&db).expect("closed waits undone");
         cf_ledger::testing::undo_migration_0044(&db).expect("holding bounds undone");

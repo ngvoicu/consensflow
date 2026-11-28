@@ -348,6 +348,12 @@ const LEAVES_OUT: &[(&str, &[Class], &str)] = &[
 /// waiver that matches nothing fails the test.
 const WAIVERS: &[(&str, &str, Class, &str)] = &[
     (
+        "src/files.rs",
+        "a_real_path_is_as_given_on_windows_whose_real_paths_are_verbatim_ones",
+        Class::Write,
+        "a test of the real path makes a folder and a link to it in a folder of its own, so that the path as given is never the real one: the link is the case, and what it makes goes with its folder",
+    ),
+    (
         "src/process.rs",
         "command_on",
         Class::Start,

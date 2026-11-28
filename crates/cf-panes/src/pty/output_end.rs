@@ -69,9 +69,10 @@ const PROOF_BOUND: Duration = Duration::from_secs(30);
 /// to read by, on Unix: its own descriptor, held for as long as the output is read.
 #[cfg(unix)]
 pub(super) type Terminal = std::os::fd::OwnedFd;
-/// Nothing, elsewhere: the pseudoconsole's output ends only for good.
-#[cfg(not(unix))]
-pub(super) struct Terminal;
+/// On Windows, a handle of the pseudoconsole's output of its own, which is waited on and
+/// asked; none where there is no terminal to ask (a test's own reader).
+#[cfg(windows)]
+pub(super) type Terminal = Option<super::conpty::Watch>;
 
 /// What a read of a window's output gave.
 pub(super) enum Got {
@@ -88,7 +89,6 @@ pub(super) type Gone = Box<dyn Fn(bool) -> bool + Send>;
 /// A window's output, as the host reads it until it has ended for good.
 pub(super) struct Output {
     reader: Box<dyn Read + Send>,
-    #[cfg_attr(not(unix), allow(dead_code))]
     terminal: Terminal,
     #[cfg_attr(not(unix), allow(dead_code))]
     gone: Gone,
@@ -150,9 +150,13 @@ impl Output {
     }
 
     /// The next of the output, into `bytes`: what the pseudoconsole passes on, until its
-    /// output ends, which is for good.
-    #[cfg(not(unix))]
+    /// output ends, which is for good. Waits first, taking nothing, so that the read the
+    /// output is taken by cannot wait.
+    #[cfg(windows)]
     pub(super) fn read(&mut self, bytes: &mut [u8]) -> Got {
+        if let Some(terminal) = &self.terminal {
+            terminal.wait();
+        }
         match self.reader.read(bytes) {
             Ok(count) if count > 0 => Got::Bytes(count),
             _ => Got::End,
@@ -170,6 +174,24 @@ impl Output {
         }
         gone
     }
+}
+
+/// Whether `terminal` holds bytes not yet read: asked with no wait. A terminal that nothing
+/// holds answers that it does (`poll` says it readable), and so does one that cannot be asked:
+/// either is behind. `FIONREAD` is not used: on macOS it answers 0 on the master with bytes
+/// waiting.
+#[cfg(unix)]
+pub(super) fn holds_bytes(terminal: &Terminal) -> bool {
+    use std::os::fd::AsRawFd;
+
+    let mut asked = libc::pollfd {
+        fd: terminal.as_raw_fd(),
+        events: libc::POLLIN,
+        revents: 0,
+    };
+    // SAFETY: one structure, writable, for a descriptor the caller holds open.
+    let answered = unsafe { libc::poll(&mut asked, 1, 0) };
+    answered != 0
 }
 
 /// Whether `terminal` has something to read (or has ended), waiting up to `wait` for it.

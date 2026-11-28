@@ -42,7 +42,7 @@ fn a_waiting_task_finished_withdraws_its_open_question_and_the_chief_cannot_answ
     assert_eq!(w.message(question).state, "cancelled");
     assert_eq!(
         w.message(question).reason.as_deref(),
-        Some("T-1 was finished")
+        Some("T-1 gave its result with it unanswered")
     );
     assert_eq!(answering(&mut w, question), Some("question-withdrawn"));
     // The chief's list of what waits for it has none.
@@ -269,6 +269,7 @@ fn migration_keeps_an_old_ledgers_delivered_question_and_its_receipt_time() {
         .clone()
         .expect("the question was received");
     w.edit(|db| {
+        cf_ledger::testing::undo_migration_0048(db).expect("0048 undone");
         cf_ledger::testing::undo_migration_0047(db).unwrap();
         cf_ledger::testing::undo_migration_0046(db).expect("closed waits undone");
         cf_ledger::testing::undo_migration_0044(db).expect("holding bounds undone");

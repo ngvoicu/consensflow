@@ -1,0 +1,136 @@
+# A window's turn ends with words while a question of its task is open (T-2197). The engine
+# never takes such a turn as the task's result: the task waits, its questions stay open, and the
+# requester is told the words once (`report_turn_on_open_question`, `crates/cf-engine/src/turn_end.rs`;
+# the ledger's `questions_to_report`, `crates/cf-ledger/src/messages/receipt.rs`). `cf task finish`
+# takes them and closes and names each open question (`crates/cf-ledger/src/tasks/finishing.rs`).
+#
+# Every name holds `open question result`, so `npm run plants:daemon -- "open question result"`
+# runs them all.
+
+[run]
+oqr-dispatcher = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "open_question_result::", "open_question_invariant::"]
+
+[[plant]]
+name = "open question result: the engine takes a waiting task's turn as its result"
+meant = "the_field_report_is_told_once_and_finish_takes_it_as_the_result"
+runs = ["oqr-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = '''task.filter(|thread| thread.task.state == "working" && !waiting)'''
+replace = '''task.filter(|thread| (thread.task.state == "working" || thread.task.state == "waiting") && !waiting)'''
+
+[[plant]]
+name = "open question result: a turn is told though no message came after the question"
+meant = "a_turn_that_asks_again_after_an_answer_and_ends_on_it_is_not_told"
+runs = ["oqr-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/receipt.rs"
+find = '''    if pasted < asked {'''
+replace = '''    if false && pasted < asked {'''
+
+[[plant]]
+name = "open question result: a turn is told again for the same paste"
+meant = "a_second_look_at_the_same_turn_tells_nothing_more"
+runs = ["oqr-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/receipt.rs"
+find = '''    if reported {'''
+replace = '''    if false && reported {'''
+
+[[plant]]
+name = "open question result: a turn with no words is told"
+meant = "a_turn_with_no_words_is_not_told_and_not_taken"
+runs = ["oqr-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = '''        if !has_words(&answers.final_run) || pending_after_look(observed, watching).total() > 0 {'''
+replace = '''        if pending_after_look(observed, watching).total() > 0 {'''
+
+[[plant]]
+name = "open question result: a turn with jobs still running is told"
+meant = "a_turn_held_for_background_jobs_is_told_when_it_ends"
+runs = ["oqr-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = '''        if !has_words(&answers.final_run) || pending_after_look(observed, watching).total() > 0 {'''
+replace = '''        if !has_words(&answers.final_run) {'''
+
+[[plant]]
+name = "open question result: the note names no question"
+meant = "the_field_report_is_told_once_and_finish_takes_it_as_the_result"
+runs = ["oqr-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = '''{TURN_ON_OPEN_QUESTION}{names} still open'''
+replace = '''{TURN_ON_OPEN_QUESTION} still open'''
+
+[[plant]]
+name = "open question result: finish leaves the questions open"
+meant = "field_second_answer_then_result_has_one_confirmed_paste"
+runs = ["oqr-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = '''            close_by_the_result(store, &task, &open)?;'''
+replace = '''            let _ = &open;'''
+
+[[plant]]
+name = "open question result: the result does not name the questions it closes"
+meant = "a_report_after_resume_words_is_told_naming_both_questions"
+runs = ["oqr-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = '''(ConsensFlow: m-{question} was left unanswered'''
+replace = '''(ConsensFlow: a question was left unanswered'''
+
+[[plant]]
+name = "open question result: a done task's refusal points elsewhere"
+meant = "the_field_report_is_told_once_and_finish_takes_it_as_the_result"
+runs = ["oqr-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages.rs"
+find = '''            "To send words to its window, reopen the task: `cf task reopen T-{number} \"…\"`."
+        ),'''
+replace = '''            "To send words to its window, use `cf tell T-{number}`."
+        ),'''
+
+[[plant]]
+name = "open question result: a later turn is taken for the one already told"
+meant = "two_separate_turns_without_a_paste_between_are_each_told_once"
+runs = ["oqr-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/receipt.rs"
+find = '''AND json_extract(e.data, '$.report') = ?4'''
+replace = '''AND ?4 = ?4'''
+
+[[plant]]
+name = "open question result: the note offers Finish on another conversation's words"
+meant = "a_note_from_a_fresh_conversation_does_not_offer_finish"
+runs = ["oqr-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = '''            .is_some();
+        let how = if finishable {'''
+replace = '''            .is_some()
+            || true;
+        let how = if finishable {'''
+
+[[plant]]
+name = "open question result: any note of the worker counts as the report's note"
+meant = "an_ordinary_note_quoting_the_phrase_does_not_consume_the_report"
+runs = ["oqr-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/receipt.rs"
+find = '''AND json_extract(e.data, '$.report') = ?4'''
+replace = '''AND (json_extract(e.data, '$.report') = ?4 OR json_extract(e.data, '$.kind') = 'note')'''

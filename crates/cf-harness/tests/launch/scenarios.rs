@@ -179,7 +179,24 @@ struct Played {
     /// The name a recorded status file's name stands for now: Node read every file of the folder,
     /// the product reads the one each Claude writes, `<pid>.json` (P22-1, round 3).
     status_files: HashMap<String, String>,
+    /// Whether the scenario's harness is Devin.
+    devin: bool,
     _dir: TempDir,
+}
+
+/// `given`, a recorded answer of a Devin window's snapshot, with its empty box drawn where
+/// it draws no screen of its own and counts nothing of the person's.
+fn at_its_box(given: &Value) -> Value {
+    let mut given = given.clone();
+    // One that counts the person's keys stays unread, as it was held for them.
+    if given.get("ok") == Some(&json!(true))
+        && given.get("bottom").is_none()
+        && given.get("unsent") != Some(&json!(true))
+    {
+        let rule = "─".repeat(40);
+        given["bottom"] = json!([format!("{rule} (normal) ─"), "❭", rule]);
+    }
+    given
 }
 
 /// A scenario's answer to a host request: at once, failing, or held.
@@ -440,6 +457,9 @@ fn admission(admission: &Admission) -> Value {
         Admission::Admitted { queued: true } => json!({ "admitted": true, "queued": true }),
         Admission::Refused { reason } => json!({ "admitted": false, "reason": reason }),
         Admission::Busy { reason } => json!({ "admitted": false, "busy": true, "reason": reason }),
+        Admission::LookAgain { reason } => {
+            json!({ "admitted": false, "lookAgain": true, "reason": reason })
+        }
         Admission::Uncertain { reason } => json!({ "admitted": null, "reason": reason }),
     }
 }
@@ -537,12 +557,20 @@ fn script(played: &mut Played, step: &Value) {
         played.fakes.loopback.serve(route, answers);
     }
     script_children(played, step);
+    let devin = played.devin;
     for (op, answers) in step["answers"].as_object().into_iter().flatten() {
         let answers: Vec<Answer> = answers
             .as_array()
             .unwrap()
             .iter()
-            .map(|given| answer(&played.names, given))
+            .map(|given| match given {
+                // Recorded before looks: a Devin window whose answer draws nothing is one at
+                // rest at its empty box, where Devin is given `/bypass` (N17).
+                given if devin && op == "pane.snapshot" => {
+                    answer(&played.names, &at_its_box(given))
+                }
+                given => answer(&played.names, given),
+            })
             .collect();
         played.host.answer(op, answers);
     }
@@ -576,7 +604,20 @@ fn begin_asking(played: &mut Played, id: usize, step: &Value) {
         });
     } else if let Some(text) = text(&step["deliver"]) {
         played.driver.begin(id, async move {
-            let outcome = window.deliver(&*host, &pane, &text).await;
+            // The goldens were recorded before looks: a paste goes in on a licence that stands
+            // for the look the scripted host's silence implies (and carries no more than the
+            // paste did then: the request below drops what a look added).
+            let licence = cf_harness::PasteLicence::Go {
+                at: cf_harness::At {
+                    seen: "0000000000000000".to_owned(),
+                    typed: 0,
+                },
+                read_empty: None,
+                clear_first: None,
+            };
+            let outcome = window
+                .deliver_on(&*host, &pane, &text, Some(&licence))
+                .await;
             (settled(outcome, |outcome| admission(&outcome)), None)
         });
     } else if step.get("started").is_some() {
@@ -1034,7 +1075,17 @@ fn record(played: &mut Played, index: usize, step: &Value) -> Value {
         .host
         .take_asked()
         .into_iter()
-        .map(|(op, body)| json!({ "op": op, "body": body }))
+        .map(|(op, mut body)| {
+            if let Some(body) = body.as_object_mut().filter(|_| op == "pane.write_paste") {
+                body.remove("at");
+                body.remove("typed");
+            }
+            // A look asks for the screen's last lines: the recording asked for none.
+            if let Some(body) = body.as_object_mut().filter(|_| op == "pane.snapshot") {
+                body.remove("bottom");
+            }
+            json!({ "op": op, "body": body })
+        })
         .collect();
     fields.insert("requests".to_owned(), json!(asked));
     let fetches: Vec<Value> = played
@@ -1193,6 +1244,7 @@ pub(crate) fn play(scenario: &Value) -> Vec<Value> {
     let services = fakes.services(&env_vars, &root);
     let adapter = adapter(scenario["harness"].as_str().unwrap(), &services);
     let mut played = Played {
+        devin: scenario["harness"] == "devin",
         status_files: HashMap::new(),
         _dir: dir,
         _other: other,

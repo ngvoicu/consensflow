@@ -77,6 +77,7 @@
 //! pseudoconsole does.
 
 use cf_e2e::devin_store::{self, Message};
+use cf_e2e::handed::of_message;
 use cf_e2e::live::trace::at_ms;
 use cf_e2e::rig::{Config, Project, Rig};
 use cf_e2e::Error;
@@ -199,11 +200,12 @@ const SECOND: Asked = Asked {
 /// the chief's agent runs it.
 fn a_project(rig: &Rig) -> cf_e2e::Result<(Project<'_>, String)> {
     write_roster(rig)?;
-    let project = Project::open(rig, "chief", json!({}))?;
-    let added = project.add_member("worker")?;
-    let tier = added["member"]["tier"]
+    // The worker is on the staff as the project opens: a role gained while the chief runs is
+    // told it in a note, one more turn than the case counts.
+    let project = Project::open_with_staff(rig, "chief", None, &[("worker", "worker")])?;
+    let tier = cf_e2e::rig::member_body(rig, "worker", None)?["tier"]
         .as_str()
-        .ok_or_else(|| Error::Daemon(format!("the worker has no tier: {added}")))?
+        .ok_or_else(|| Error::Daemon("the worker has no tier".to_owned()))?
         .to_owned();
     Ok((project, tier))
 }
@@ -268,14 +270,6 @@ fn until_both_are_in(rig: &Rig, project: &Project, pasted: [usize; 2]) -> cf_e2e
         }))
     })?;
     Ok(ids)
-}
-
-/// The daemon's events of `kind` about the message `id`.
-fn of_message<'a>(events: &'a [Value], kind: &str, id: i64) -> Vec<&'a Value> {
-    events
-        .iter()
-        .filter(|event| event["kind"] == kind && event["data"]["message"] == id)
-        .collect()
 }
 
 /// When the daemon's first event of `kind` about the message `id` was written, in

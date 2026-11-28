@@ -189,7 +189,7 @@ runs = ["smoke-evidence"]
 [[plant.edit]]
 file = "tools/xtask/src/updater_smoke/evidence/holder.rs"
 find = '''
-        attempt.out.is_empty(),
+        attempt.out.is_empty() || is_a_refusal_line(&attempt.out),
 '''
 replace = '''
         true,

@@ -32,6 +32,96 @@ pub fn default_root(env: &Env) -> Option<PathBuf> {
     Some(PathBuf::from(path::join(&[&home, ".consensflow"])))
 }
 
+/// How the daemon's process ends when ConsensFlow cannot save to its ledger, whether it
+/// was running or refused to start: the app reads it at the end of the process, before it
+/// decides anything, and does not start the daemon again.
+pub const CANNOT_SAVE_EXIT: i32 = 74;
+
+/// What the person is told when ConsensFlow cannot save to its ledger, `ledger` being the
+/// file, said by its full path (a relative `CONSENSFLOW_HOME` is made whole against the
+/// folder the process is in). One message for the daemon that says it, the app that shows
+/// it, and every start that is refused for it.
+pub fn cannot_save_words(ledger: &std::path::Path) -> String {
+    let whole = std::path::absolute(ledger).unwrap_or_else(|_| ledger.to_path_buf());
+    format!(
+        "Work has stopped because ConsensFlow can't save to its ledger at {}. The disk may be \
+         full, failing or disconnected, or you may have lost write permission. Quit ConsensFlow. \
+         Once you've restored access to that ledger, reopen ConsensFlow. Check the board before \
+         retrying an unconfirmed change, because it may already be there. Choose Resume for each \
+         project so its members continue from their saved records.",
+        whole.display()
+    )
+}
+
+/// What the person is told when a home that holds a board it was used for has no ledger
+/// (or an empty, unreadable or dangling one): the words of a ledger that cannot save, and
+/// how to start a new board on purpose.
+pub fn lost_ledger_words(ledger: &std::path::Path) -> String {
+    let whole = std::path::absolute(ledger).unwrap_or_else(|_| ledger.to_path_buf());
+    let home = whole.parent().unwrap_or(&whole);
+    format!(
+        "{} ConsensFlow has run in this home before, and it doesn't open it with an empty board. \
+         If you meant to start a new board, move {} away, or point ConsensFlow at a new folder \
+         (CONSENSFLOW_HOME), and open it again.",
+        cannot_save_words(ledger),
+        home.display()
+    )
+}
+
+/// What the person is told when ConsensFlow cannot write the file that says a home has a
+/// board: the start is refused, for a home that would not be known to have one could open
+/// empty at the next start.
+pub fn marker_words(marker: &std::path::Path) -> String {
+    let whole = std::path::absolute(marker).unwrap_or_else(|_| marker.to_path_buf());
+    format!(
+        "ConsensFlow can't write {}, the file that says this home has a board, so it has not \
+         started. The disk may be full, failing or disconnected, or you may have lost write \
+         permission. Restore access to it, then open ConsensFlow again. No saved work was changed.",
+        whole.display()
+    )
+}
+
+/// What the person is told when the home can't be listed or looked into: ConsensFlow can't
+/// tell whether a board is kept there, so it has not started, and has changed nothing.
+pub fn unread_home_words(home: &std::path::Path) -> String {
+    let whole = std::path::absolute(home).unwrap_or_else(|_| home.to_path_buf());
+    format!(
+        "ConsensFlow can't read its folder {}, so it can't tell whether a board is kept there, \
+         and it has not started. You may have lost permission to that folder, or its disk may \
+         be failing or disconnected. Restore your access to it, then open ConsensFlow again. \
+         Nothing in it was changed.",
+        whole.display()
+    )
+}
+
+/// What the person is told when a first ledger can't be made or put at its name: the start
+/// is refused, and its retry is a first start again.
+pub fn first_ledger_words(ledger: &std::path::Path) -> String {
+    let whole = std::path::absolute(ledger).unwrap_or_else(|_| ledger.to_path_buf());
+    format!(
+        "ConsensFlow can't make its ledger at {}, so it has not started. The disk may be full, \
+         failing or disconnected, or you may not have write permission there. Once you can \
+         write to that folder, open ConsensFlow again.",
+        whole.display()
+    )
+}
+
+/// What the app says of a daemon that ended with [`CANNOT_SAVE_EXIT`] before its handle and
+/// said nothing of why: it names the ledger and every cause that status can have, and claims
+/// none. The app opens no ledger; the daemon is its one judge.
+pub fn unsaid_words(ledger: &std::path::Path) -> String {
+    let whole = std::path::absolute(ledger).unwrap_or_else(|_| ledger.to_path_buf());
+    format!(
+        "ConsensFlow stopped because it can't use its ledger at {}, and it couldn't say why. The \
+         disk may be full, failing or disconnected, you may have lost permission to it, or the \
+         ledger may be missing or damaged. Quit ConsensFlow. Once that ledger is back and can be \
+         written to, reopen ConsensFlow. Check the board before retrying an unconfirmed change, \
+         because it may already be there. Choose Resume for each project so its members continue \
+         from their saved records.",
+        whole.display()
+    )
+}
+
 /// The variable as text when it is set to something, a byte that is no UTF-8
 /// as U+FFFD.
 fn named(env: &Env, name: &str) -> Option<String> {

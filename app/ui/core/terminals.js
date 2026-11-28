@@ -1,4 +1,4 @@
-import { button, element, iconButton, redraw } from '../dom.js'
+import { button, element, icon, iconButton, redraw } from '../dom.js'
 import { EmulatorRegistry, paneKey } from '../term.js'
 import { TerminalLink } from '../terminal-link.js'
 import { ICONS, identity, lamp, laneName, laneOrder, laneStatus, tryAgain } from './board.js'
@@ -6,6 +6,13 @@ import { DockStrip } from './dock-strip.js'
 
 /** A session in `#showing`: its project's id and its handle. */
 const showingKey = (project, handle) => `${project}:${handle}`
+/** Scissors: what a window printed first was cut from its history. */
+const CUT = [
+  'M8.5 7a2.5 2.5 0 1 1-5 0 2.5 2.5 0 0 1 5 0Z',
+  'M8.5 17a2.5 2.5 0 1 1-5 0 2.5 2.5 0 0 1 5 0Z',
+  'M8.1 8.4 20 17',
+  'M8.1 15.6 20 7',
+]
 
 /** What a window's chip in the dock's map says: the chief, a session by its name, a member by its handle. */
 const chipLabel = (participant) =>
@@ -101,13 +108,14 @@ export class TerminalsView {
    * terminal alone, and Show terminal brings a session's back.
    */
   #showing = new Set()
-  /** The host's notices of typing that may be missing, one row for each, above the dock. */
+  /** The host's notices of typing that may be missing, one row for each, under the command bar. */
   #noticeList
 
   constructor(
     stage,
     {
       map = null,
+      notices,
       invoke,
       pageId,
       report,
@@ -122,11 +130,7 @@ export class TerminalsView {
     },
   ) {
     this.#stage = stage
-    this.#noticeList = element('ul', 'input-notices')
-    this.#noticeList.setAttribute('aria-label', 'Typing that may not have arrived')
-    this.#noticeList.setAttribute('role', 'status')
-    this.#noticeList.hidden = true
-    stage.parentElement?.insertBefore(this.#noticeList, stage)
+    this.#noticeList = notices
     this.#onChange = onChange
     this.#onSwitchChief = onSwitchChief
     this.#onHistory = onHistory
@@ -146,6 +150,9 @@ export class TerminalsView {
       registry: this.#registry,
       report,
       pageId,
+      onTruncated: (pane) => this.#truncated(pane),
+      // A window the person sees is one whose card is in the dock.
+      shown: (pane) => this.#cards.get(paneKey(pane))?.card.parentElement === this.#stage,
       notices: { draw: (owed) => this.#drawNotices(owed) },
       // Until this document's epoch is acknowledged, the terminals are visibly read-only.
       onGate: (open) => {
@@ -217,7 +224,14 @@ export class TerminalsView {
         row.dataset.notice = String(notice.id)
         row.dataset.state = notice.kind === 'window' && notice.closed ? 'closed' : 'open'
         if (notice.kind === 'window') row.dataset.generation = String(notice.generation)
-        row.firstElementChild.textContent = this.#noticeWords(notice)
+        // The window it is about first, picked out: its words are the notice's, whole.
+        const words = this.#noticeWords(notice)
+        const called = notice.kind === 'window' ? (notice.name ?? `Window ${notice.window}`) : ''
+        const named = called !== '' && words.startsWith(called)
+        row.firstElementChild.replaceChildren(
+          ...(named ? [element('strong', 'input-notice-window', called)] : []),
+          named ? words.slice(called.length) : words,
+        )
       }
     }
     this.#noticeList.hidden = this.#noticeList.children.length === 0
@@ -254,7 +268,7 @@ export class TerminalsView {
       row = element('li', 'input-notice')
       row.dataset.window = window
       const words = element('span', 'input-notice-text')
-      const dismiss = button('Dismiss', 'input-notice-dismiss', () => {
+      const dismiss = button('Dismiss', 'quiet-button input-notice-dismiss', () => {
         const id = Number(row.dataset.notice)
         row.remove()
         this.#noticeList.hidden = this.#noticeList.children.length === 0
@@ -281,6 +295,21 @@ export class TerminalsView {
     } catch (cause) {
       this.#report(cause)
     }
+  }
+
+  /** The page's output subscription stands: the windows may be drawn again from their history. */
+  subscribed() {
+    this.#link.subscribed()
+  }
+
+  /** The page has read its board since its subscription: the windows not shown may follow. */
+  refreshed() {
+    this.#link.refreshed()
+  }
+
+  /** Whether the page's output subscription stands. */
+  get isSubscribed() {
+    return this.#link.isSubscribed
   }
 
   /** Bytes from the pane host; a pane the board has not drawn yet still gets them. */
@@ -444,6 +473,12 @@ export class TerminalsView {
    * nothing.
    */
   render(board, { focused }) {
+    this.#draw(board, focused)
+    // A card that came into the dock is drawn from its history at once.
+    this.#link.schedule()
+  }
+
+  #draw(board, focused) {
     const project = board?.project.id ?? null
     const ordered = board?.project.state === 'open' ? laneOrder(board.lanes) : []
     for (const lane of ordered) {
@@ -615,6 +650,8 @@ export class TerminalsView {
       }
       this.#cards.set(key, entry)
       this.#registry.ensure(pane, host)
+      // A page that reloaded gets the window's history before anything live.
+      this.#link.begin(pane)
     }
     if (placed !== null) {
       const { lane, board } = placed
@@ -637,6 +674,25 @@ export class TerminalsView {
       entry.session = lane.participant.member !== null
     }
     return entry
+  }
+
+  /**
+   * The window's history begins after what it printed first (the host keeps the last of it): a
+   * band across the top of the window says that, and where what it shows begins. It takes the
+   * room of no row: the terminal fits under it.
+   */
+  #truncated(pane) {
+    const host = this.#cards.get(paneKey(pane))?.host
+    if (host === undefined || host.querySelector('.terminal-truncated') !== null) return
+    host.dataset.truncated = 'true'
+    const notice = element('div', 'terminal-truncated')
+    notice.setAttribute('role', 'note')
+    notice.append(
+      icon(CUT),
+      element('span', 'terminal-truncated-what', 'Earlier output was not kept: '),
+      element('span', 'terminal-truncated-where', 'history starts at the top of the scrollback'),
+    )
+    host.prepend(notice)
   }
 
   /** The chief's card while its window is down: its head, and no terminal. */

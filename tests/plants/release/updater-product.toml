@@ -77,13 +77,15 @@ requires = ["app/src-tauri/target/updater-smoke/flip/ConsensFlow.app"]
 [[plant.edit]]
 file = "crates/cf-daemon/src/start.rs"
 find = '''
-    log.info(&format!(
-        "start pid {} rust {VERSION} home {}",
-        std::process::id(),
-        home.display()
-    ));
+                if within {
+                    log.info_within(&line, SETTLE);
+                } else {
+                    log.info(&line);
+                }
 '''
-replace = ""
+replace = '''
+                let _ = (line, within);
+'''
 
 # The ledger's check: one holder, and what it holds.
 [[plant]]
@@ -97,8 +99,9 @@ requires = ["app/src-tauri/target/updater-smoke/flip/ConsensFlow.app"]
 file = "crates/cf-ledger/src/ledger.rs"
 find = '''
         db.execute_batch("PRAGMA locking_mode = EXCLUSIVE")?;
-'''
-replace = ""
+        // In exclusive mode the first lock is kept until the connection closes; taking it'''
+replace = '''
+        // In exclusive mode the first lock is kept until the connection closes; taking it'''
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/ledger.rs"
@@ -117,9 +120,11 @@ requires = ["app/src-tauri/target/updater-smoke/flip/ConsensFlow.app"]
 [[plant.edit]]
 file = "crates/cf-ledger/src/ledger.rs"
 find = '''
+        ))?;
         migrate(&db, &MIGRATIONS)
     })();'''
 replace = '''
+        ))?;
         migrate(&db, &MIGRATIONS)?;
         db.execute_batch("DELETE FROM event")?;
         Ok(())
@@ -286,11 +291,11 @@ requires = ["app/src-tauri/target/updater-smoke/flip/ConsensFlow.app"]
 [[plant.edit]]
 file = "crates/cf-daemon/src/start.rs"
 find = '''
-        "start pid {} rust {VERSION} home {}",
-        std::process::id(),'''
+                    "start pid {} rust {VERSION} home {}",
+                    std::process::id(),'''
 replace = '''
-        "start pid {} rust 0.0.0 home {}",
-        std::process::id(),'''
+                    "start pid {} rust 0.0.0 home {}",
+                    std::process::id(),'''
 
 # A ledger kept by hand is looked at whole: a value the update's daemon rewrites that no migration
 # says to, on a ledger of the flip release's schema and of the bridge's (T-1338).
@@ -304,9 +309,11 @@ requires = ["app/src-tauri/target/updater-smoke/flip/ConsensFlow.app"]
 [[plant.edit]]
 file = "crates/cf-ledger/src/ledger.rs"
 find = '''
+        ))?;
         migrate(&db, &MIGRATIONS)
     })();'''
 replace = '''
+        ))?;
         migrate(&db, &MIGRATIONS)?;
         db.execute_batch("UPDATE project SET created_at = ''")?;
         Ok(())
@@ -322,9 +329,11 @@ requires = ["app/src-tauri/target/updater-smoke/bridge/ConsensFlow.app"]
 [[plant.edit]]
 file = "crates/cf-ledger/src/ledger.rs"
 find = '''
+        ))?;
         migrate(&db, &MIGRATIONS)
     })();'''
 replace = '''
+        ))?;
         migrate(&db, &MIGRATIONS)?;
         db.execute_batch("UPDATE project SET created_at = ''")?;
         Ok(())
@@ -342,9 +351,11 @@ requires = ["app/src-tauri/target/updater-smoke/flip/ConsensFlow.app"]
 [[plant.edit]]
 file = "crates/cf-ledger/src/ledger.rs"
 find = '''
+        ))?;
         migrate(&db, &MIGRATIONS)
     })();'''
 replace = '''
+        ))?;
         migrate(&db, &MIGRATIONS)?;
         db.execute_batch("UPDATE project SET name = ''")?;
         Ok(())
@@ -360,9 +371,11 @@ requires = ["app/src-tauri/target/updater-smoke/bridge/ConsensFlow.app"]
 [[plant.edit]]
 file = "crates/cf-ledger/src/ledger.rs"
 find = '''
+        ))?;
         migrate(&db, &MIGRATIONS)
     })();'''
 replace = '''
+        ))?;
         migrate(&db, &MIGRATIONS)?;
         db.execute_batch("UPDATE project SET name = ''")?;
         Ok(())

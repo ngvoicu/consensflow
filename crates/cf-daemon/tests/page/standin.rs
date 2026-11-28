@@ -451,6 +451,11 @@ impl Engine for Standin {
         Ok(self.recorded("holding", vec![json!(participant)]) == true)
     }
 
+    /// Not recorded: the goldens were recorded before it, and it is asked of every lane.
+    fn holding_unproven(&self, _: i64) -> Result<bool, EngineError> {
+        Ok(false)
+    }
+
     fn hidden(&self, participant: i64) -> bool {
         self.recorded("hidden", vec![json!(participant)]) == true
     }

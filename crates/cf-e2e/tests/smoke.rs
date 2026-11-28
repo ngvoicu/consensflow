@@ -392,7 +392,8 @@ fn drive(
     // 6. A second packaged `cf ui` on the app's home is a second ConsensFlow, and
     //    the ledger's exclusive lock refuses it. Exit 1 alone could be a
     //    dependency the bundle lacks, so it is the ledger's own words that must
-    //    be on stderr, and no handle line on stdout.
+    //    be on stderr, and no handle line on stdout: the refusal's line is said in its
+    //    place.
     let second = machine
         .command(&bundle.cf)
         .args(["ui", "--json", "--no-open"])
@@ -405,8 +406,9 @@ fn drive(
         "the second cf ui was refused, but not for the ledger's lock: {}",
         second.stderr
     );
-    assert_eq!(
-        second.stdout, "",
+    let refused: serde_json::Value = serde_json::from_str(&second.stdout)?;
+    assert!(
+        refused["refused"]["exit"] == 1 && refused.get("url").is_none(),
         "the second cf ui printed a handle line: {}",
         second.stdout
     );

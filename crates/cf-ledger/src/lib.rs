@@ -32,6 +32,7 @@ mod projects;
 mod questions;
 mod queue;
 pub mod roles;
+mod rollback;
 mod saved_agents;
 mod schema;
 mod specs;
@@ -64,12 +65,15 @@ pub use conversations::{
 pub use holding::{QuestionStamp, WindowHolding};
 #[cfg(feature = "test-support")]
 pub use ledger::Watcher;
-pub use ledger::{open_ledger, Event, Ledger, Options};
+pub use ledger::{
+    hold_ledger, make_ledger, open_existing_ledger, open_ledger, Event, Held, Ledger, Options,
+};
 pub use meeting::{CHIEF_CUT, HANDOFF_TITLE, LEAD_HANDOFF_TITLE, SWITCH_ASKED};
 pub use messages::{
-    continuation, continuation_in, continuation_tasks, cut_turn, cut_turn_unquoted, is_busy_note,
-    is_told, sent_at_work, told_at_work, waiting_for_the_reopen, GivenUp, HandOver, NewNote,
-    NewQuestion, Read, MAY_STILL_RUN, MOVED_QUESTION, NOT_PROVEN_GONE, WITHDRAWN_AFTER_HANDED,
+    continuation, continuation_in, continuation_tasks, cut_turn, cut_turn_unquoted,
+    gave_result_reason, is_busy_note, is_told, sent_at_work, told_at_work, waiting_for_the_reopen,
+    GivenUp, HandOver, NewNote, NewQuestion, Read, MAY_STILL_RUN, MOVED_QUESTION, NOT_PROVEN_GONE,
+    TURN_ON_OPEN_QUESTION, WITHDRAWN_AFTER_HANDED,
 };
 pub use model::LedgerError;
 pub use page_reads::PAGE_BYTES;
@@ -80,6 +84,8 @@ pub use projects::{
     STAFF_RULES_MAX_LINES,
 };
 pub use queue::{OVER, SHOWN};
+#[cfg(feature = "test-support")]
+pub use rollback::refuse_next_rollback;
 pub use schema::{migrate, MIGRATIONS, SCHEMA_VERSION};
 pub use specs::SpecsChange;
 pub use staff::MemberEdit;

@@ -12,7 +12,7 @@ pub const MAX_INPUT_BYTES: usize = 64 * 1024;
 pub const MAX_PAGE_INPUT_BYTES: usize = 4 * 1024 * 1024;
 /// A request, or a body, no window can take.
 pub(crate) const INVALID_BODY: &str = "invalid-body";
-const MAX_TERMINAL_DIMENSION: u16 = 4096;
+pub(crate) const MAX_TERMINAL_DIMENSION: u16 = 4096;
 
 pub fn pane_key(id: &str, generation: u64) -> Result<PaneKey, String> {
     validate_text(id, "pane id")?;

@@ -38,6 +38,7 @@ pub(super) async fn get(page: &Page) -> Result<Fields, Said> {
 /// and `variant` as text or `null` to name none again; a part it leaves out is
 /// as it was. Each is checked as a project's own is, and a refusal keeps none.
 pub(super) async fn set(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
+    page.halted()?;
     let app = settings(page)?.set_app_specs(body.json())?;
     answered(&app, &cf_harness::bundled_specmint())
 }

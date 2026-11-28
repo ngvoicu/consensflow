@@ -53,6 +53,7 @@ use crate::records::Options;
 use crate::seams::{Loopback, Services, Time};
 use crate::shared::admission::admission;
 use crate::shared::left_open::LeftOpen;
+use crate::shared::look::{Look, PasteLicence};
 use crate::shared::record_state::{record_state, switched_to, unnamed};
 use crate::shared::resumable::transcript_kept;
 use crate::shared::{compacting, specmint, window_args};
@@ -534,10 +535,15 @@ impl Window for CodexWindow {
 
     /// A message waits until the broker can take one and the window shows its
     /// own thread.
-    fn ready<'a>(
+    fn harness(&self) -> Harness {
+        Harness::Codex
+    }
+
+    fn ready_on<'a>(
         &'a self,
         _host: &'a dyn PaneHost,
         _pane: &'a Pane,
+        _look: Option<&'a Look>,
     ) -> Work<'a, Result<Readiness, String>> {
         Box::pin(async move {
             Ok(match self.shown().await {
@@ -553,11 +559,12 @@ impl Window for CodexWindow {
         })
     }
 
-    fn deliver<'a>(
+    fn deliver_on<'a>(
         &'a self,
         host: &'a dyn PaneHost,
         pane: &'a Pane,
         text: &'a str,
+        _licence: Option<&'a PasteLicence>,
     ) -> Work<'a, Result<Admission, String>> {
         Box::pin(async move {
             let thread = self.thread.borrow().clone();

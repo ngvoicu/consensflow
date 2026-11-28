@@ -20,6 +20,7 @@ mod window;
 
 pub use adapter::MuseAdapter;
 pub(crate) use screen::read as read_input_box;
+pub(crate) use screen::shows_prompt;
 pub(crate) use screen::words as input_box_words;
 pub use session_hook::{
     blocks, hook_output, parts, session_hook, FILLER, MARK, MOST_PARTS, OUTPUT_LIMIT,

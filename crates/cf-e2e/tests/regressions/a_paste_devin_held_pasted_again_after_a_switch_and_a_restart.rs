@@ -102,12 +102,10 @@ fn a_rig_in_the_gap() -> Config {
     }
 }
 
-/// The daemon's events of `kind` about the message `id`.
+/// How many of the daemon's events of `kind` there are about the message `id`; a hand-over
+/// refused before anything was written is no paste ([`cf_e2e::handed`]).
 fn of_message(events: &[Value], kind: &str, id: i64) -> usize {
-    events
-        .iter()
-        .filter(|event| event["kind"] == kind && event["data"]["message"] == id)
-        .count()
+    cf_e2e::handed::of_message(events, kind, id).len()
 }
 
 /// The worker's result, once the daemon has made it: its message's id.
@@ -133,11 +131,12 @@ struct Pasted {
 /// switches it to a new conversation, the result still on its way.
 fn pasted_and_switched(rig: &Rig) -> cf_e2e::Result<Pasted> {
     write_roster(rig)?;
-    let project = Project::open(rig, "chief", json!({}))?;
-    let added = project.add_member("worker")?;
-    let tier = added["member"]["tier"]
+    // The worker is on the staff as the project opens: a role gained while the chief runs is
+    // told it in a note, one more turn than the case counts.
+    let project = Project::open_with_staff(rig, "chief", None, &[("worker", "worker")])?;
+    let tier = cf_e2e::rig::member_body(rig, "worker", None)?["tier"]
         .as_str()
-        .ok_or_else(|| Error::Daemon(format!("the worker has no tier: {added}")))?
+        .ok_or_else(|| Error::Daemon("the worker has no tier".to_owned()))?
         .to_owned();
     rig.tell_within(
         project.id(),

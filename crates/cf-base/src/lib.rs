@@ -20,6 +20,7 @@ pub mod fixture;
 pub mod home;
 pub mod js;
 pub mod json;
+pub mod member_guard;
 pub mod path;
 pub mod refusal;
 pub mod role_read;

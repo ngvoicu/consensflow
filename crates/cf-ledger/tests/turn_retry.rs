@@ -754,7 +754,7 @@ fn dump(raw: &rusqlite::Connection) -> Vec<(String, Vec<String>)> {
         .filter(|table| table != "turn_retry")
         .map(|table| {
             let columns: Vec<String> = raw
-                .prepare(&format!("SELECT name FROM pragma_table_info('{table}') WHERE name NOT IN ('turn_retries', 'retry_hold', 'turn_retry_at') ORDER BY cid"))
+                .prepare(&format!("SELECT name FROM pragma_table_info('{table}') WHERE name NOT IN ('turn_retries', 'retry_hold', 'turn_retry_at', 'out_form') ORDER BY cid"))
                 .expect("columns")
                 .query_map([], |row| row.get(0))
                 .expect("names")
@@ -793,12 +793,13 @@ fn the_migration_keeps_every_row_and_every_older_task_reads_zero() {
         .expect("told");
     ledger.close().expect("closed");
     let file = dir.path().join("ledger.db");
-    // As a build before 0047 left it: no count, no table, the version before.
+    // As a build before 0047 left it (0048 undone first): no count, no table, the version before.
     let raw = rusqlite::Connection::open(&file).expect("raw");
+    cf_ledger::testing::undo_migration_0048(&raw).expect("0048 undone");
     cf_ledger::testing::undo_migration_0047(&raw).expect("0047 undone");
     raw.execute_batch(&format!(
         "PRAGMA user_version = {}",
-        cf_ledger::SCHEMA_VERSION - 1
+        cf_ledger::SCHEMA_VERSION - 2
     ))
     .expect("version");
     let before = dump(&raw);

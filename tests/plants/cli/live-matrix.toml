@@ -582,9 +582,21 @@ runs = ["matrix-draft-kept"]
 builds = true
 
 [[plant.edit]]
-file = "crates/cf-harness/src/claude/adapter.rs"
-find = """                    Unsent::Held => Readiness::Held(Held::Unsent),"""
-replace = """                    Unsent::Held => Readiness::Ready,"""
+file = "crates/cf-harness/src/shared/look.rs"
+find = """    let over_count = look.unsent();"""
+replace = """    let over_count = false;"""
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/look.rs"
+find = """    if !over_count && !stale && reads == BoxReading::Holds {"""
+replace = """    if false {"""
+
+[[plant.edit]]
+file = "crates/cf-panes/src/arbiter/state.rs"
+find = """        typed == self.typed
+            && match by {"""
+replace = """        true || typed == self.typed
+            && match by {"""
 
 [[plant]]
 name = "live matrix: field fix out: a paste goes again inside a stall of the pane host's (3.0.5 under load)"
@@ -614,9 +626,13 @@ runs = ["matrix-late-record"]
 builds = true
 
 [[plant.edit]]
-file = "crates/cf-engine/src/arrival.rs"
-find = "            .is_some_and(|quiet| (quiet as f64) < ENTER_AGAIN_QUIET_MS);"
-replace = "            .is_some_and(|quiet| (quiet as f64) < 0.0);"
+file = "crates/cf-harness/src/shared/look.rs"
+find = """        .is_some_and(|quiet| quiet < SCREEN_QUIET_FOR_ENTER_MS)
+    {
+        return AfterWait::Printing;"""
+replace = """        .is_some_and(|quiet| quiet < 0)
+    {
+        return AfterWait::Printing;"""
 
 [[plant]]
 name = "live matrix: the stand-in that holds a result back draws nothing meanwhile (a lost paste, not the field's)"

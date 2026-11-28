@@ -59,7 +59,7 @@ impl Job {
         match &self.0.work {
             InputWork::Typed(part) | InputWork::Reply(part) | InputWork::Write(part) => part,
             InputWork::Paste { body, .. } => body,
-            InputWork::Claim => &[],
+            InputWork::Claim | InputWork::Enter(_) => &[],
         }
     }
 
@@ -261,7 +261,7 @@ impl Rig {
                     bytes.extend_from_slice(part)
                 }
                 InputWork::Paste { body, .. } => bytes.extend_from_slice(body),
-                InputWork::Claim => {}
+                InputWork::Claim | InputWork::Enter(_) => {}
             }
             let InputJob {
                 response, outcome, ..

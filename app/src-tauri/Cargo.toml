@@ -64,6 +64,7 @@ webview2-com = "0.39.1"
 [dev-dependencies]
 cf-base = { workspace = true, features = ["test-support"] }
 cf-panes = { workspace = true, features = ["test-support"] }
+cf-bridge = { workspace = true, features = ["test-support"] }
 # Detection as the daemon the app starts runs it, in the tests of the daemon's PATH.
 cf-harness.workspace = true
 portable-pty.workspace = true

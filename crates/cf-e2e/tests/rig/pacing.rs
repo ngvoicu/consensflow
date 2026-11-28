@@ -25,11 +25,11 @@ fn write_roster(rig: &Rig) -> cf_e2e::Result {
     rig.stand_ins(&roster)
 }
 
-/// The daemon's events of `kind` for the message `id`.
+/// The daemon's events of `kind` for the message `id`; a hand-over refused before anything was
+/// written is no paste ([`cf_e2e::handed`]).
 fn of(events: &[Value], kind: &str, id: i64) -> Vec<Value> {
-    events
-        .iter()
-        .filter(|event| event["kind"] == kind && event["data"]["message"] == id)
+    cf_e2e::handed::of_message(events, kind, id)
+        .into_iter()
         .cloned()
         .collect()
 }

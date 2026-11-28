@@ -9,6 +9,7 @@ pub mod agents;
 pub mod bridge;
 pub mod cf_word;
 pub mod codex;
+pub mod hold;
 pub mod ledger;
 pub mod models;
 pub mod page;

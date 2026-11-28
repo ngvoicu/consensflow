@@ -21,6 +21,11 @@ use crate::contract::Dialog;
 #[path = "base_claude_trust.rs"]
 mod base_claude_trust;
 
+// The release head's Muse screen reader, likewise: the live one reads the host's byte counts now.
+#[allow(dead_code)]
+#[path = "base_muse_screen.rs"]
+mod base_muse_screen;
+
 /// `shared/input_box.rs`'s `is_rule` at `5b7acff7f`: a rule drawn across the screen.
 fn is_rule(line: &str) -> bool {
     let line = line.trim();
@@ -286,8 +291,7 @@ const OFFER_CLOSES_AFTER_S: u32 = 30;
 /// and for Claude Code's window the seconds its offers close after (the default `Window::dialog` is the
 /// first two; Claude's override adds the last).
 ///
-/// Claude's prompt reader is a frozen copy of the release head's. Muse's current
-/// reader is borrowed and pinned below; Codex, Devin and Pi use the pinned default
+/// Claude's and Muse's prompt readers are frozen copies of the release head's. Codex, Devin and Pi use the pinned default
 /// (false). The shared helpers used by the frozen Claude reader are pinned too.
 pub fn base_window_dialog(
     harness: cf_proto::agents::Harness,
@@ -301,6 +305,8 @@ pub fn base_window_dialog(
         Dialog {
             prompt_below: if harness == cf_proto::agents::Harness::Claude {
                 base_claude_trust::shows_prompt(&shown.below)
+            } else if harness == cf_proto::agents::Harness::Muse {
+                base_muse_screen::shows_prompt(&shown.below)
             } else {
                 window.shows_prompt(&shown.below)
             },
@@ -414,9 +420,9 @@ mod tests {
                 0xfdb8b9364f366d29,
             ),
             (
-                "muse/window.rs",
-                include_str!("../muse/window.rs"),
-                0x7b1ce00732909c9b,
+                "testing/base_muse_screen.rs",
+                include_str!("base_muse_screen.rs"),
+                0xb0319107b3697847,
             ),
             (
                 "muse/screen.rs",

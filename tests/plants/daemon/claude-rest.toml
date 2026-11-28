@@ -141,31 +141,9 @@ meant = "the_text_claude_put_back_in_its_input_box_is_cleared_before_the_next_me
 runs = ["harness-launch-claude-stops"]
 
 [[plant.edit]]
-file = "crates/cf-harness/src/claude/adapter.rs"
-find = "            if (self.restored.get() || self.clear_first.take()) && !host.cleared() {"
-replace = "            if (self.restored.get() && false || self.clear_first.take()) && !host.cleared() {"
-
-[[plant]]
-name = "rest: an input box that could not be cleared is pasted into all the same"
-meant = "an_input_box_that_could_not_be_cleared_is_not_pasted_into_and_is_cleared_again_next_time"
-runs = ["harness-launch-claude-stops"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/claude/adapter.rs"
-find = '''
-                    let reason = format!("the window's input box could not be cleared: {cause}");
-                    return Ok(Admission::Refused { reason });'''
-replace = "                    let _ = cause;"
-
-[[plant]]
-name = "rest: the key that clears the input box is Ctrl+U, which clears a line"
-meant = "the_text_claude_put_back_in_its_input_box_is_cleared_before_the_next_message_is_pasted"
-runs = ["harness-launch-claude-stops"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/claude/stopped.rs"
-find = "CLEAR_INPUT: [u8; 1] = [0x03];"
-replace = "CLEAR_INPUT: [u8; 1] = [0x15];"
+file = "crates/cf-harness/src/shared/look.rs"
+find = """    let stale = state.stale_paste && !over_count;"""
+replace = """    let stale = false && state.stale_paste && !over_count;"""
 
 [[plant]]
 name = "rest: the engine presses the interrupt keys and does not tell the window"

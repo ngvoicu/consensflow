@@ -76,7 +76,11 @@ fn a_write_up_the_turn_ended_with_while_the_question_was_out_is_in_the_result_be
     )?;
     let question = the_question(&rig, &project)?;
     let id = question["id"].as_i64().ok_or("the question has no id")?;
-    assert_eq!(project.task(1)?["state"], "waiting");
+    // The task reads `waiting` once its brief is received and the question is bound to it: a
+    // question that reaches the board first leaves it `queued` for a moment.
+    rig.wait_for("the task to wait for the answer", secs(60), || {
+        Ok(project.task(1)?["state"] == "waiting")
+    })?;
     let worker = worker_of(&project)?;
     rig.tell(project.id(), &format!("CF answer m-{id} :: Noted."))?;
     rig.wait_for("the answer to be on the board", secs(60), || {

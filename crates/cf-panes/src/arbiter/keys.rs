@@ -36,6 +36,8 @@ impl Classes {
 pub(super) struct Keys {
     pub(super) unsent: usize,
     pub(super) keyed: bool,
+    /// Whether the write added a character to what is unsent (typed, pasted, Ctrl+V, Ctrl+J).
+    pub(super) added: bool,
     pub(super) classes: Classes,
 }
 
@@ -65,6 +67,7 @@ pub(super) fn keys_of(unsent: usize, bytes: &[u8], segments: &[Segment]) -> Keys
     let mut keys = Keys {
         unsent,
         keyed: false,
+        added: false,
         classes: Classes::default(),
     };
     for segment in segments {
@@ -73,6 +76,7 @@ pub(super) fn keys_of(unsent: usize, bytes: &[u8], segments: &[Segment]) -> Keys
             Segment::Pasted(characters) => {
                 keys.classes.with("paste");
                 keys.keyed = true;
+                keys.added |= *characters > 0;
                 keys.unsent += characters;
             }
         }
@@ -85,6 +89,7 @@ pub(super) fn keys_of(unsent: usize, bytes: &[u8], segments: &[Segment]) -> Keys
 fn typed_keys(keys: &mut Keys, bytes: &[u8]) {
     let mut unsent = keys.unsent;
     let mut keyed = keys.keyed;
+    let mut added = keys.added;
     let mut classes = keys.classes;
     let mut at = 0;
     while at < bytes.len() {
@@ -119,6 +124,7 @@ fn typed_keys(keys: &mut Keys, bytes: &[u8]) {
             // Shift+Enter as one, T-1336), where Enter, a carriage return, sends it.
             b'\n' => {
                 classes.with("text");
+                added = true;
                 unsent += 1;
             }
             0x03 => {
@@ -135,6 +141,7 @@ fn typed_keys(keys: &mut Keys, bytes: &[u8]) {
             }
             0x16 => {
                 classes.with("control");
+                added = true;
                 unsent += 1;
             }
             0x1b => {
@@ -150,6 +157,7 @@ fn typed_keys(keys: &mut Keys, bytes: &[u8]) {
             byte if byte < 0x20 => classes.with("control"),
             byte if byte & 0xC0 != 0x80 => {
                 classes.with("text");
+                added = true;
                 unsent += 1;
             }
             _ => {}
@@ -159,6 +167,7 @@ fn typed_keys(keys: &mut Keys, bytes: &[u8]) {
     *keys = Keys {
         unsent,
         keyed,
+        added,
         classes,
     };
 }

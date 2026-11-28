@@ -108,6 +108,11 @@ pub use slots::{
 };
 pub use staff_rules::undo_migration_0026;
 
+/// Remove an account hold's closed form when a fixture reconstructs a ledger before 0048.
+pub fn undo_migration_0048(db: &rusqlite::Connection) -> rusqlite::Result<()> {
+    db.execute_batch("ALTER TABLE participant DROP COLUMN out_form")
+}
+
 /// Remove the turn-retry table and the task's count of tries when a fixture reconstructs a ledger before 0047.
 pub fn undo_migration_0047(db: &rusqlite::Connection) -> rusqlite::Result<()> {
     db.execute_batch(
@@ -254,6 +259,7 @@ pub fn hold_apart_what_node_never_writes(tables: &mut Map<String, Value>) {
             ("participant", "backup_of"),
             ("participant", "vacation_since"),
             ("participant", "out_kind"),
+            ("participant", "out_form"),
             ("task", "turn_retries"),
             ("task", "retry_hold"),
             ("task", "turn_retry_at"),
@@ -380,6 +386,7 @@ pub fn hold_apart_what_node_never_had_in_its_schema(dump: &mut Value) {
                     .replace(former_handles::COLUMN_LINES, "")
                     .replace(", backup_of INTEGER REFERENCES participant(id)", "")
                     .replace(", vacation_since TEXT", "")
+                    .replace(", out_form TEXT", "")
                     .replace(", out_kind TEXT\n  CHECK (out_kind IS NULL OR out_kind IN ('quota', 'account', 'busy', 'moved'))", "");
             }
             Some("task") => {
@@ -617,7 +624,7 @@ mod tests {
             .unwrap()["sql"]
             .as_str()
             .unwrap();
-        for name in ["backup_of", "vacation_since", "out_kind"] {
+        for name in ["backup_of", "vacation_since", "out_kind", "out_form"] {
             assert!(
                 !participant.contains(name),
                 "{name} remained in {participant}"

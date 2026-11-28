@@ -1,5 +1,7 @@
 //! The ledger's staff and their sessions, as its callers hold them.
 
+use cf_proto::hold::HoldForm;
+
 use super::Ledger;
 use crate::{
     staff, Candidate, HoldKind, LedgerError, MemberEdit, MemberView, NewMember, ParticipantView,
@@ -90,7 +92,33 @@ impl Ledger {
         reason: &str,
         kind: HoldKind,
     ) -> Result<ParticipantView, LedgerError> {
-        staff::mark_out_kind(&mut self.store, participant, until, reason, Some(kind))
+        staff::mark_out_kind(
+            &mut self.store,
+            participant,
+            until,
+            reason,
+            Some(kind),
+            None,
+        )
+    }
+
+    /// Mark a member out for an account's refusal, with the closed form of the refusal kept
+    /// with the hold for the board to say (T-2353).
+    pub fn mark_out_with_form(
+        &mut self,
+        participant: i64,
+        until: &str,
+        reason: &str,
+        form: Option<HoldForm>,
+    ) -> Result<ParticipantView, LedgerError> {
+        staff::mark_out_kind(
+            &mut self.store,
+            participant,
+            until,
+            reason,
+            Some(HoldKind::Account),
+            form,
+        )
     }
 
     /// A member joins the staff, named by its model, or one that left on the same
