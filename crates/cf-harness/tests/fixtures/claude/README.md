@@ -230,3 +230,21 @@ typed `!echo hi` and an empty Enter, Claude Code 2.1.332), scrubbed the same way
   own turn on them: an `assistant` record (`end_turn`, "The command ran and printed `hi`."),
   `stop_hook_summary` and `turn_duration`. A model IS called. No `system` record.
 - An empty Enter wrote no record at all (the screen drew something), so it has no file.
+
+Kept 2026-11-27 from a chief's own conversation on this project's board (T-2388; Claude Code
+2.1.332, the 68 rows from the last tool call of a turn to the end of a typed `/recap`, in the record's
+own order). Only the shape is the record's: every text is `TEXT`, every id and every time is made
+up (the same id wherever it occurs, so the parent links and the tool pairs hold; every time on the
+date 2026-01-15, at the hour and the distances of the record), `sessionId` `$SESSION`, `cwd`
+`TEXT`. The bookkeeping rows between the conversation's (`frame-link`, `api-request`,
+`last-prompt`, `mode` and others) are reduced to their type, ids and time.
+
+- `typed-recap-after-a-compaction.jsonl` — the last turn's end (an `assistant` `end_turn`,
+  `stop_hook_summary`, `turn_duration`); six minutes after, a system `away_summary`; 55 minutes
+  after the end, a compaction at rest (system `compact_boundary` with a null `parentUuid` and a
+  `logicalParentUuid`, a `user` summary `isCompactSummary` and `isVisibleInTranscriptOnly`, twelve
+  `attachment` rows, a system `informational`); nine minutes later the typed `/recap`: a `user`
+  `isMeta` row `rowSource` "harness" (`<local-command-caveat>`), its child, a `user` row
+  `rowSource` "local" (`<command-name>/recap</command-name>…`, stamped 3 s before the other two),
+  and that row's child, a system `local_command` whose content is `<local-command-stdout>`.
+  No `assistant` row follows: no model was called.
