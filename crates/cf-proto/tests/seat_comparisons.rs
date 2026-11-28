@@ -41,6 +41,12 @@ const ALLOWED: &[(&str, usize, &str)] = &[
         "step 5: the decider",
     ),
     ("crates/cf-engine/src/stalls.rs", 1, "step 5: the decider"),
+    // `add_lead` writes the role it makes and counts the leads present against the limit.
+    (
+        "crates/cf-ledger/src/leads.rs",
+        2,
+        "own: the lead's own module makes and counts the role",
+    ),
     // The meeting and the wake-up calls are the chief's alone.
     (
         "crates/cf-ledger/src/meeting.rs",
