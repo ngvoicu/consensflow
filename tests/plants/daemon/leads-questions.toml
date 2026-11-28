@@ -52,13 +52,13 @@ find = "    let exposed = !matches!(asked.state.as_str(), \"queued\" | \"gated\"
 replace = "    let exposed = false && !matches!(asked.state.as_str(), \"queued\" | \"gated\")\n"
 
 [[plant]]
-name = "leads questions: the new decider of a read question is not told its words"
+name = "leads questions: the reader of a read question is told its words, not the new decider"
 meant = "a_hand_over_called_off_moves_an_unread_question_to_the_leads_and_leaves_a_read_one_with_its_reader"
 runs = [["cargo", "test", "--offline", "-p", "cf-daemon", "--test", "lead_questions"]]
 [[plant.edit]]
 file = "crates/cf-ledger/src/holding.rs"
-find = "    crate::messages::note(\n        store,\n        asked.project_id,\n"
-replace = "    let _ = (\n        store,\n        asked.project_id,\n"
+find = "            to: decider.handle,\n            body,\n"
+replace = "            to: asked.recipient.clone(),\n            body,\n"
 
 [[plant]]
 name = "leads questions: last words are read for the chief alone on a lead's task"
