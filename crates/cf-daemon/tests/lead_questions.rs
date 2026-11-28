@@ -138,10 +138,10 @@ fn stored(body: &Value) -> Option<i64> {
     body["message"]["task"].as_i64()
 }
 
-/// Questions in a project with a lead (the leads design, section 3; step 4 of the build): a
-/// member's question goes to the decider of the task its window holds, on every path into
-/// `POST /api/questions` (`cf ask` on all five harnesses, and the question tool of Claude Code,
-/// Devin and Codex, whose doors post here with options).
+// Questions in a project with a lead (the leads design, section 3; step 4 of the build): a
+// member's question goes to the decider of the task its window holds, on every path into
+// `POST /api/questions` (`cf ask` on all five harnesses, and the question tool of Claude Code,
+// Devin and Codex, whose doors post here with options).
 
 fn with_a_lead(w: &mut World) -> String {
     w.ledger
