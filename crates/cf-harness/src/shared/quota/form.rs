@@ -55,22 +55,36 @@ static CODE_WORDS: LazyLock<Vec<(&'static str, Regex)>> = LazyLock::new(|| {
     .collect()
 });
 
+/// Which of `billing` or `login` a reader's reason leads with, and the words after the lead:
+/// ConsensFlow's own fixed lead, never the harness's text. None for a reason that is no account's
+/// refusal.
+fn refusal_lead(because: &str) -> Option<(&'static str, &str)> {
+    if let Some(rest) = because.strip_prefix("its billing was refused") {
+        Some(("billing", rest))
+    } else if let Some(rest) = because.strip_prefix("its login was refused") {
+        Some(("login", rest))
+    } else if because == MUSE_NO_ALLOWANCE {
+        Some(("billing", ""))
+    } else if because == MUSE_LOGIN_REFUSED {
+        Some(("login", ""))
+    } else {
+        None
+    }
+}
+
+/// Whether an account hold's reason is a refused login (and not billing): read from the reason's
+/// own lead, as [`hold_form`] reads its kind, never from the words of the harness. The engine
+/// tries such a refusal again before it holds the member.
+pub fn login_refused(because: &str) -> bool {
+    refusal_lead(because).is_some_and(|(kind, _)| kind == "login")
+}
+
 /// The form of an account hold whose reader's reason is `because`: its kind from the reason's
 /// own lead (`its billing was refused`, `its login was refused`, and Muse's two fixed
 /// sentences), the status from the status the words open on, the code from the first of the
 /// kind's list the words name. None for a reason that is no account's refusal.
 pub fn hold_form(because: &str) -> Option<HoldForm> {
-    let (kind, words) = if let Some(rest) = because.strip_prefix("its billing was refused") {
-        ("billing", rest)
-    } else if let Some(rest) = because.strip_prefix("its login was refused") {
-        ("login", rest)
-    } else if because == MUSE_NO_ALLOWANCE {
-        ("billing", "")
-    } else if because == MUSE_LOGIN_REFUSED {
-        ("login", "")
-    } else {
-        return None;
-    };
+    let (kind, words) = refusal_lead(because)?;
     let words = words.strip_prefix(": ").unwrap_or(words);
     let status = REFUSED
         .captures(words)

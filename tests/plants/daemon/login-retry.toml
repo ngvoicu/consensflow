@@ -1,0 +1,198 @@
+# A login a harness refused is a failed turn first (T-2367): tried again by the same tries and on
+# the same count as any failed turn, and the member held for its account only where the last try is
+# refused for login too. Every name holds `login retry`, so `cargo xtask plants daemon "login retry"`
+# runs them all.
+#
+# Not planted: the chief's own window (`participant.role == "chief"`): a chief has no task to hold,
+# so it is guarded three ways (`login_tried_again`, `failed_end`, and no task to find); its case is
+# a test only.
+
+[run]
+login-dispatcher = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "login_retries"]
+login-words = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "login_note_words"]
+login-human = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "unavailable_accounts"]
+login-ledger = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "an_older_build_wrote"]
+login-model = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "n35_model::"]
+login-harness = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "a_refused_login_is_told_from_billing"]
+
+[[plant]]
+name = "login retry: a login refusal is held at once"
+meant = "a_login_refused_once_holds_nobody_and_the_task_goes_on_after_its_try"
+runs = ["login-dispatcher", "login-model"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_retry.rs"
+find = "        if participant.role == \"chief\" || !login_refused(because) {"
+replace = "        if participant.role == \"chief\" || true {"
+
+[[plant]]
+name = "login retry: a billing refusal is tried again"
+meant = "a_billing_refusal_holds_the_member_at_once_with_no_try"
+runs = ["login-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_retry.rs"
+find = "        if participant.role == \"chief\" || !login_refused(because) {"
+replace = "        if participant.role == \"chief\" {"
+
+[[plant]]
+name = "login retry: the last try's refusal fails the task and holds no member"
+meant = "a_login_refused_at_every_try_holds_the_member_for_its_account_and_the_task_reaches_its_backup"
+runs = ["login-dispatcher", "login-model"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_retry.rs"
+find = "            Tried::Fails(_) => Ok(false),"
+replace = "            Tried::Fails(said) => {\n                self.fail_task(project, participant.id, &thread.task, &said, \"login\")?;\n                Ok(true)\n            }"
+
+[[plant]]
+name = "login retry: the refusal is not marked as acted on"
+meant = "a_login_refused_once_holds_nobody_and_the_task_goes_on_after_its_try"
+runs = ["login-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_retry.rs"
+find = "                self.handled(record);\n                record.held.borrow_mut().reset();\n                let delivering"
+replace = "                record.held.borrow_mut().reset();\n                let delivering"
+
+[[plant]]
+name = "login retry: a billing reason reads as a login"
+meant = "a_refused_login_is_told_from_billing_by_the_reader_s_own_lead_and_never_by_its_words"
+runs = ["login-harness"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/quota/form.rs"
+find = "    refusal_lead(because).is_some_and(|(kind, _)| kind == \"login\")"
+replace = "    refusal_lead(because).is_some()"
+
+[[plant]]
+name = "login retry: the other windows of the member are stopped"
+meant = "the_other_window_of_a_member_goes_on_while_one_is_tried_again"
+runs = ["login-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_retry.rs"
+find = "                    )?;\n                }\n                Ok(true)"
+replace = "                    )?;\n                }\n                let _ = self.seams.ledger.borrow_mut().hold_task(project.id, 2, \"9999-12-31T23:59:59.999Z\", \"plant\");\n                Ok(true)"
+
+[[plant]]
+name = "login retry: a task waiting on its question is tried"
+meant = "a_task_waiting_on_its_question_is_held_at_once_not_tried"
+runs = ["login-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_retry.rs"
+find = ".filter(|thread| matches!(thread.task.state.as_str(), \"queued\" | \"working\"));"
+replace = ".filter(|thread| matches!(thread.task.state.as_str(), \"queued\" | \"working\" | \"waiting\"));"
+
+[[plant]]
+name = "login retry: the press does not start the tries again"
+meant = "a_person_s_try_again_now_starts_the_tries_again_so_the_next_failure_gets_its_two"
+runs = ["login-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff/quota.rs"
+find = "        if by_person {\n            store.db.execute("
+replace = "        if false {\n            store.db.execute("
+
+[[plant]]
+name = "login retry: an edit that lifts the hold does not start the tries again"
+meant = "an_edit_that_lifts_the_hold_starts_the_tries_again_too"
+runs = ["login-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff.rs"
+find = "quota::mark_back_by(store, member.id, \"by @human\", true)?;"
+replace = "quota::mark_back_by(store, member.id, \"by @human\", false)?;"
+
+[[plant]]
+name = "login retry: a task in its retry hold is left under the held member"
+meant = "a_task_in_its_retry_hold_when_its_member_is_held_says_it_waits_for_the_login"
+runs = ["login-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = "                .end_retry_holds_for_account(owner.id, &until)?;"
+replace = "                .end_retry_holds_for_account(-1, &until)?;"
+
+[[plant]]
+name = "login retry: the hold at the last try differs from a first refusal's"
+meant = "the_hold_at_the_last_try_is_the_hold_of_a_first_refusal_but_for_the_try_note"
+runs = ["login-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_retry.rs"
+find = "            Tried::Fails(_) => Ok(false),"
+replace = "            Tried::Fails(_) => {\n                let member = participant.member_id.unwrap_or(participant.id);\n                let until = cf_base::time::iso(self.now() + 60_000);\n                self.seams.ledger.borrow_mut().mark_out_with_kind(member, &until, \"plant\", cf_ledger::HoldKind::Quota)?;\n                Ok(false)\n            }"
+
+# The model alone: a login refusal drawn as a step holds the member at once, or fails the task at
+# the last try.
+[[plant]]
+name = "login retry: a login refusal is held at once, found by the model"
+meant = "no_schedule_of_steps_charges_a_third_numbered_retry_or_fails_a_task_early"
+runs = ["login-model"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_retry.rs"
+find = "        if participant.role == \"chief\" || !login_refused(because) {"
+replace = "        if participant.role == \"chief\" || true {"
+
+[[plant]]
+name = "login retry: the last try's refusal fails the task, found by the model"
+meant = "no_schedule_of_steps_charges_a_third_numbered_retry_or_fails_a_task_early"
+runs = ["login-model"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_retry.rs"
+find = "            Tried::Fails(_) => Ok(false),"
+replace = "            Tried::Fails(said) => {\n                self.fail_task(project, participant.id, &thread.task, &said, \"login\")?;\n                Ok(true)\n            }"
+
+[[plant]]
+name = "login retry: a task held from its retry is told no closed form"
+meant = "a_task_held_from_its_retry_with_its_member_is_told_in_the_hold_s_own_words"
+runs = ["login-words"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = "                    &handle,\n                    cf_harness::records::hold_form(because),"
+replace = "                    &handle,\n                    None,"
+
+[[plant]]
+name = "login retry: the raw reason passed to the human's note again"
+meant = "holds_the_task_with_its_window_for_no_reset_and_tells_the_requester_and_the_human_once"
+runs = ["login-human"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = "                cf_harness::records::hold_form(because)\n                    .map_or_else(String::new, |form| format!(\": {}\", form.words())),"
+replace = "                format!(\": {because}\"),"
+
+[[plant]]
+name = "login retry: an older build's hold note is no hold note"
+meant = "a_hold_note_an_older_build_wrote_is_still_told_to_go_on"
+runs = ["login-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/holds.rs"
+find = "        && [TAIL, OLD_TAIL, TAIL_UNAVAILABLE, TAIL_MOVED]"
+replace = "        && [TAIL, OLD_TAIL, TAIL_MOVED]"
+
+[[plant]]
+name = "login retry: an older build's hold note is another hold"
+meant = "a_hold_note_an_older_build_wrote_is_the_same_hold_as_the_new_words"
+runs = ["login-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/holds.rs"
+find = "    } else if rest.ends_with(TAIL_UNAVAILABLE) {"
+replace = "    } else if rest.ends_with(TAIL_UNAVAILABLE) && !rest.contains(\"its login was refused:\") {"
+
+[[plant]]
+name = "login retry: an older branch's nested hold note is another hold"
+meant = "a_hold_note_an_older_build_wrote_is_the_same_hold_as_the_new_words"
+runs = ["login-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/holds.rs"
+find = "    } else if rest.ends_with(TAIL_UNAVAILABLE) {"
+replace = "    } else if rest.ends_with(TAIL_UNAVAILABLE) && !rest.contains(\": its account is unavailable (its login was refused (\") {"

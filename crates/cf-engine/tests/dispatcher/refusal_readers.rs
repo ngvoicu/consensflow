@@ -47,8 +47,11 @@ fn outcome(kind: &str, records: &[Value]) -> (String, bool) {
     let Reading::Known(read) = &*reading else {
         panic!("record unreadable: {reading:?}")
     };
+    // What a reader makes of a record is held at its first refusal here: the tries a refused
+    // login gets first (`login_retries`) are not this case's point.
     let c = Context::made(Made {
         harnesses: vec!["claude-code", "pi", "codex"],
+        turn_retry_ms: 0,
         ..Made::default()
     });
     let project = c

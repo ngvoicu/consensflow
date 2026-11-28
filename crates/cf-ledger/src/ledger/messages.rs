@@ -529,16 +529,17 @@ impl Ledger {
     }
 
     /// ConsensFlow tells `to` that T-`number` is held with `handle` because its
-    /// account is unavailable for `because` (MUS-23): no reset, only the human's word.
+    /// account is unavailable (MUS-23): no reset, only the human's word. What it was is said
+    /// from the closed `form` alone (T-2367).
     pub fn note_hold_unavailable(
         &mut self,
         project_id: i64,
         to: &str,
         number: i64,
         handle: &str,
-        because: &str,
+        form: Option<cf_proto::hold::HoldForm>,
     ) -> Result<MessageView, LedgerError> {
-        messages::note_hold_unavailable(&mut self.store, project_id, to, number, handle, because)
+        messages::note_hold_unavailable(&mut self.store, project_id, to, number, handle, form)
     }
 
     /// ConsensFlow tells `to` that T-`number` is held with `handle` because its model was busy,

@@ -43,6 +43,7 @@ mod projects;
 mod sessions;
 mod specs;
 mod staff;
+mod suggested_staff;
 mod tasks;
 mod viewer;
 mod wake_ups;

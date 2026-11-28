@@ -538,8 +538,10 @@ runs = ["lm-page"]
 [[plant.edit]]
 file = "app/ui/core/dialogs.js"
 find = '''    readEveryHarness(this.#lists, missing)
+    this.#suggest.start(missing)
     this.#gone = new Map()'''
 replace = '''    this.#lists.clear()
+    this.#suggest.start(missing)
     this.#gone = new Map()'''
 
 [[plant]]

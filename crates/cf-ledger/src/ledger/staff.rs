@@ -153,6 +153,18 @@ impl Ledger {
         staff::set_roles(&mut self.store, project_id, handle, roles)
     }
 
+    /// [`Ledger::set_roles`] that is refused (`roles-changed`) when the member's roles are no
+    /// longer `expected`, the ones the writer read: the check and the write are one transaction.
+    pub fn set_roles_if<S: AsRef<str>, E: AsRef<str>>(
+        &mut self,
+        project_id: i64,
+        handle: &str,
+        roles: &[S],
+        expected: &[E],
+    ) -> Result<ParticipantView, LedgerError> {
+        staff::set_roles_if(&mut self.store, project_id, handle, roles, Some(expected))
+    }
+
     /// A member leaves the staff, its open tasks cancelled.
     pub fn remove_member(
         &mut self,
@@ -223,5 +235,15 @@ impl Ledger {
         because: &str,
     ) -> Result<ParticipantView, LedgerError> {
         staff::mark_back(&mut self.store, participant_id, because)
+    }
+
+    /// A person's Try again now (or an edit that lifts the hold): the member is back as in
+    /// [`Ledger::mark_back`], and the tries of every task its windows hold start again.
+    pub fn mark_back_by_person(
+        &mut self,
+        participant_id: i64,
+        because: &str,
+    ) -> Result<ParticipantView, LedgerError> {
+        staff::mark_back_by(&mut self.store, participant_id, because, true)
     }
 }

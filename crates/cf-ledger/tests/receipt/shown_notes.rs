@@ -5,6 +5,7 @@
 
 use cf_ledger::{MessageView, NewNote, NewTask, SHOWN};
 use cf_proto::cf_word::CfWord;
+use cf_proto::hold::HoldForm;
 use serde_json::json;
 
 use crate::fixture::{frozen_world, world, World};
@@ -56,13 +57,19 @@ enum Hold {
     Moved,
 }
 
+/// What the refusal was, as the engine keeps it of an account hold: a login, its status and its
+/// provider's error type, each a literal of the closed form.
+fn signed_out() -> Option<HoldForm> {
+    HoldForm::checked("login", Some(401), Some("authentication_error"))
+}
+
 /// ConsensFlow's note of `hold` of T-`number` to the chief, as the engine writes it.
 fn note_of(w: &mut World, hold: Hold, number: i64, session: &str, until: &str) -> MessageView {
     let ledger = &mut w.ledger;
     match hold {
         Hold::Quota => ledger.note_hold(w.project, "chief", number, session, until),
         Hold::Unavailable => {
-            ledger.note_hold_unavailable(w.project, "chief", number, session, "signed out")
+            ledger.note_hold_unavailable(w.project, "chief", number, session, signed_out())
         }
         Hold::Moved => ledger.note_hold_moved(
             w.project,
@@ -80,7 +87,7 @@ fn said_of(hold: Hold, session: &str) -> String {
     match hold {
         Hold::Quota => format!("waits with @{session}: out of quota until {UNTIL}"),
         Hold::Unavailable => format!(
-            "waits with @{session}: its account is unavailable (signed out) until the human says it works"
+            "waits with @{session}: its login was refused (401, authentication_error) until the human says it works"
         ),
         Hold::Moved => format!(
             "waits with @{session}: its harness moved it from Opus to Sonnet, until the human says it may go on"
@@ -1763,4 +1770,72 @@ fn a_shown_note_read_in_the_inbox_is_no_role_read() {
         aside(&w, task).as_deref(),
         Some("in the background: 1 command")
     );
+}
+
+/// The notes of an account hold as the builds before wrote them: the reader's whole reason in
+/// the parenthesis of "its account is unavailable" (main's), and the closed form inside it (a
+/// branch's, never a release's).
+fn old_form_notes(task: i64, session: &str) -> [String; 2] {
+    [
+        format!("T-{task} waits with @{session}: its account is unavailable (its login was refused: 401 authentication_error: token expired), and nothing resets that; it goes on when the human says the account works again."),
+        format!("T-{task} waits with @{session}: its account is unavailable (its login was refused (401, authentication_error)), and nothing resets that; it goes on when the human says the account works again."),
+    ]
+}
+
+/// A world with T-1 held, and the older build's hold note `older` (an index of
+/// [`old_form_notes`]) given to the chief and delivered, as it was before the upgrade.
+fn upgraded(older: usize) -> (World, i64, String) {
+    let mut w = world();
+    let (task, session) = with_zeus(&mut w);
+    w.hold(task);
+    let body = old_form_notes(task, &session)[older].clone();
+    let old = w
+        .ledger
+        .note(
+            w.project,
+            &NewNote {
+                from: None,
+                to: "chief".into(),
+                body: body.clone(),
+                task: Some(task),
+            },
+        )
+        .expect("the older note, kept as it was");
+    assert_eq!(w.message(old.id).body, body);
+    w.deliver(old.id);
+    (w, task, session)
+}
+
+#[test]
+fn a_hold_note_an_older_build_wrote_is_still_told_to_go_on() {
+    for older in 0..2 {
+        // The only hold note there is is the older one, and no repeat in new words stands
+        // between it and the correction: the task going on corrects it, once.
+        let (mut w, task, _session) = upgraded(older);
+        w.daemon_resumes(task);
+        w.went_on(task);
+        assert_eq!(
+            aside(&w, task).as_deref(),
+            Some("goes on: its account has quota again."),
+            "form {older}: an older hold note is a hold note"
+        );
+        let told = w
+            .ledger
+            .inbox(w.id("chief"), 100)
+            .expect("the inbox")
+            .iter()
+            .filter(|message| message.body == "T-1 goes on: its account has quota again.")
+            .count();
+        assert_eq!(told, 1, "form {older}: corrected once");
+    }
+}
+
+#[test]
+fn a_hold_note_an_older_build_wrote_is_the_same_hold_as_the_new_words() {
+    for older in 0..2 {
+        // A fresh ledger: nothing has gone on, so only the identity of the hold decides.
+        let (mut w, task, session) = upgraded(older);
+        let again = note_of(&mut w, Hold::Unavailable, task, &session, UNTIL);
+        assert_eq!(again.state, "read", "form {older}: {:?}", again.body);
+    }
 }

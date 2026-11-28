@@ -621,6 +621,9 @@ fn take_turn(records: &mut Records, pid: u32, window: &Window, text: &str) -> Re
     if let Some((model, effort)) = model_switch(text) {
         return switch_model(records, pid, model, effort);
     }
+    if is_recap(text) {
+        return recap(records, pid);
+    }
     if is_compact(text) {
         // Its time, which an Escape cuts short.
         let compacting = || {
@@ -716,6 +719,46 @@ fn switch_model(
     }
     records.runs_on(Some(model), effort);
     Ok(())
+}
+
+/// Whether `text`, sent, is `/recap` alone: a command Claude Code 2.1.332 added.
+fn is_recap(text: &str) -> bool {
+    text.trim() == "/recap"
+}
+
+/// A `/recap` typed at an idle prompt, as Claude Code 2.1.332 writes it (the record of
+/// 2026-11-27, `typed-recap-after-a-compaction.jsonl`): the words before a command, the command
+/// as a user's record, and what it printed as the system's (`local_command`), each the child of
+/// the one before. No model is asked. Claude's status says `idle` all through: what it says while
+/// a local command runs is not known, and an idle one is the case the window's own wait is for.
+fn recap(records: &mut Records, pid: u32) -> Result<(), String> {
+    let failed = |cause: io::Error| cause.to_string();
+    records.status(pid, "idle").map_err(failed)?;
+    let printed = json!({
+        "type": "system", "subtype": "local_command", "isSidechain": false,
+        "isMeta": false, "level": "info",
+        "content": "<local-command-stdout>A recap of the conversation.</local-command-stdout>",
+    });
+    for (at, mut record) in [
+        user(CAVEAT, json!({ "isMeta": true, "rowSource": "harness" })),
+        user(
+            "<command-name>/recap</command-name>\n            <command-message>recap</command-message>\n            <command-args></command-args>",
+            json!({ "rowSource": "local" }),
+        ),
+        printed,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        // The echo and its output are separate steps, `CF_TEST_RECAP_MS` apart (the field's took
+        // 3 s), so that a case can look at the window between them.
+        if at == 2 {
+            wait_as_told("CF_TEST_RECAP_MS");
+        }
+        record["parentUuid"] = json!(records.last_uuid(pid));
+        records.append(pid, record).map_err(failed)?;
+    }
+    records.status(pid, "idle").map_err(failed)
 }
 
 /// Whether `text`, sent, is `/compact`: alone, or with words after it, whatever

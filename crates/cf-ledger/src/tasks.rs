@@ -39,13 +39,13 @@ pub(crate) use outage::{no_longer_failed, no_longer_waiting, show_closed, tell_c
 pub use outage::{window_closed, SAME_ERROR_WITHIN_MS};
 pub(crate) use own_steps::withdrawn_late;
 pub(crate) use pausing::{
-    clear_hold, go_on_in_window, held_for_context, held_tasks_due, hold_for_context, hold_task,
-    hold_task_for_retry, pause_again, pause_failed_project_resume, pause_task, pause_task_naming,
-    pause_with_project, paused_by_consensflow, paused_task, relaunch_stalled, rest_while_resumed,
-    resume_held_task, resume_task, resume_with_project, resume_words, resume_words_not_in,
-    shut_tracked_doors, stop_asked_by, stop_of, take_over_pause, task_in_hand, task_relaunched,
-    tell_it_goes_on, told_since_paused, turned_away_for_a_question, unmark_pause, was_relaunched,
-    work_while_resumed,
+    clear_hold, end_retry_holds_for_account, go_on_in_window, held_for_context, held_tasks_due,
+    hold_for_context, hold_task, hold_task_for_retry, pause_again, pause_failed_project_resume,
+    pause_task, pause_task_naming, pause_with_project, paused_by_consensflow, paused_task,
+    relaunch_stalled, rest_while_resumed, resume_held_task, resume_task, resume_with_project,
+    resume_words, resume_words_not_in, shut_tracked_doors, stop_asked_by, stop_of, take_over_pause,
+    task_in_hand, task_relaunched, tell_it_goes_on, told_since_paused, turned_away_for_a_question,
+    unmark_pause, was_relaunched, work_while_resumed,
 };
 pub use pausing::{resumed_in_vain, NEVER_BEGAN};
 pub(crate) use plan::{create_plan, decide_tasks, replayed_plan};

@@ -363,8 +363,8 @@ fn the_staff_a_replacement_holds_whole_and_read_in_one_piece_is_as_large_as_the_
     let whole = |note: &MessageView, cf: &CfWord| goes_whole(note, &[], cf);
     let one = |note: &MessageView, cf: &CfWord| read_in_one(note, cf);
     for (cf, pins) in [
-        (a_mac(), [Some(162), Some(184), Some(26), Some(49)]),
-        (a_windows(), [Some(159), Some(181), Some(23), Some(46)]),
+        (a_mac(), [Some(160), Some(182), Some(24), Some(47)]),
+        (a_windows(), [Some(157), Some(179), Some(21), Some(44)]),
     ] {
         assert!(
             one(
@@ -415,9 +415,9 @@ fn the_staff_a_replacement_holds_whole_and_read_in_one_piece_is_as_large_as_the_
     };
     if !PATH_ONCE {
         assert_eq!(
-            [parts(26), parts(27), parts(297), parts(298)],
+            [parts(24), parts(25), parts(297), parts(298)],
             [1, 2, 2, 3],
-            "docs: one piece through 26 rows, 2 parts through 297, 3 at 298"
+            "docs: one piece through 24 rows, 2 parts through 297, 3 at 298"
         );
     }
 }
@@ -1246,7 +1246,7 @@ fn the_parts_of_a_muse_chiefs_role_begin_at_a_paragraph_or_a_heading_and_never_i
     // Reviews; a staff of workers and reviewers adds their paragraphs and the table.
     const REVIEWS: &str = "## Reviews";
     const UNHELD: &str = "Nobody on your staff is a frontend designer, an architect, a";
-    const BOTH: &str = "Then decide both: reopen the work with what must change, or ";
+    const BOTH: &str = "A second review checks the fixes: give it the earlier findin";
     let cases: [Case; 4] = [
         ("a Mac, no staff", a_mac(), 0, false, None, &[REVIEWS]),
         (

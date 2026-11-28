@@ -1217,9 +1217,13 @@ impl Dispatcher {
         }
         let because = unwell.because();
         let body = match unwell {
+            // What it was is said from the closed form alone: no word of the harness's.
             Unwell::Account(_) => format!(
-                "@{}'s account is unavailable: {because}. Nothing is sent to it until you say it works again: press Try again now on @{} once it does.",
-                participant.handle, owner.handle
+                "@{}'s account is unavailable{}. Nothing is sent to it until you say it works again: press Try again now on @{} once it does.",
+                participant.handle,
+                cf_harness::records::hold_form(because)
+                    .map_or_else(String::new, |form| format!(": {}", form.words())),
+                owner.handle
             ),
             Unwell::Moved(_) => format!(
                 "@{}: {because}. Nothing is sent to it until you say it may go on: put it back on the model you chose, or accept this one, then press Try again now on @{}.",
@@ -1397,10 +1401,18 @@ impl Dispatcher {
                 } => self.answered_since(&other, observed) && self.tried_anew(other.id, &until),
             };
             if back {
-                self.seams
-                    .ledger
-                    .borrow_mut()
-                    .mark_back(other.id, &because)?;
+                // The human's press is a person's action on every task of those it brings back.
+                if matches!(news, News::Human) {
+                    self.seams
+                        .ledger
+                        .borrow_mut()
+                        .mark_back_by_person(other.id, &because)?;
+                } else {
+                    self.seams
+                        .ledger
+                        .borrow_mut()
+                        .mark_back(other.id, &because)?;
+                }
                 brought = true;
             }
         }
@@ -1568,7 +1580,7 @@ impl Dispatcher {
                         &task.requester,
                         task.number,
                         &participant.handle,
-                        because,
+                        cf_harness::records::hold_form(because),
                     )?,
                     Unwell::Moved(because) => ledger.note_hold_moved(
                         project.id,

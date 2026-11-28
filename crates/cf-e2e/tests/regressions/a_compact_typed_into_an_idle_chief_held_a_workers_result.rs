@@ -45,15 +45,13 @@ pub(crate) fn tier(added: &Value) -> &str {
 const COMPACT: &[u8] = b"/compact";
 const ENTER: &[u8] = b"\r";
 
-/// The human types `/compact` into the chief's window, a key at a time.
+/// The human types `/compact` into the chief's window, a key at a time, as the page types: the
+/// host counts them as the person's (`pane.typed`), so nothing of ConsensFlow's is pasted
+/// over them.
 fn type_compact(rig: &Rig, project: &Project) -> Outcome {
     let pane = project.lane("chief")?["pane"].clone();
     for keys in [COMPACT, ENTER] {
-        let typed = rig.host(
-            "pane.input",
-            json!({ "id": pane["id"], "generation": pane["generation"], "bytes": keys }),
-        )?;
-        assert_eq!(typed["ok"], true, "{typed}");
+        rig.types(&pane, keys)?;
         sleep(Duration::from_millis(600));
     }
     Ok(())

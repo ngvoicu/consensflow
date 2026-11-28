@@ -18,12 +18,17 @@ use super::Page;
 /// `harnesses.missing`: the harnesses not installed here, which the pickers leave out; and
 /// the staff's roles in their order, which the pickers offer and the board names
 /// (`cf_ledger::roles`): the page reads both as it starts and whenever a picker opens, and
-/// holds no list of roles of its own.
+/// holds no list of roles of its own; and the suggested staff the release ships
+/// (`suggested_staff`), or `null` where it cannot be offered.
 pub(super) async fn missing(page: &Page) -> Result<Fields, Said> {
     let missing = missing_harnesses(&page.env);
     let mut fields = Fields::new();
     fields.insert("missing".to_owned(), serde_json::to_value(&missing)?);
     fields.insert("roles".to_owned(), cf_ledger::roles::page_view());
+    fields.insert(
+        "suggestedStaff".to_owned(),
+        super::suggested_staff::shipped(),
+    );
     Ok(fields)
 }
 
@@ -269,6 +274,12 @@ pub(super) fn tier_of(value: Option<&Value>) -> Result<WorkTier, Said> {
     }
 }
 
+/// Whether an image designer may run on `harness`: Codex draws, no other does. The one place
+/// the staff pages ask it (the suggested staff's entries too).
+pub(super) fn draws_images(harness: Harness) -> bool {
+    harness == Harness::Codex
+}
+
 /// The harness (by its kind, `claude-code`, as the harness select says it), the model, the
 /// effort and the tier `body` names, each checked: the harness one ConsensFlow opens windows
 /// of, and Codex for an image designer, which draws with Codex's image tool; the model one
@@ -287,7 +298,7 @@ async fn picked<S: AsRef<str>>(
     let kind = body.text("harness").into_owned();
     let harness = Harness::from_kind(&kind)
         .ok_or_else(|| Said(format!("{kind} is no harness ConsensFlow runs")))?;
-    if designer && harness != Harness::Codex {
+    if designer && !draws_images(harness) {
         return Err(Said::from("an image designer draws on Codex"));
     }
     if adapter {
@@ -456,10 +467,22 @@ pub(super) async fn resolve(
 /// gains is held at the tier it has: it takes no tier, and only Edit changes one.
 pub(super) async fn roles(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
     let roles = parse_roles(body.get("roles"))?;
-    let member =
-        page.ledger
+    let project = body.whole("project")?;
+    let handle = body.text("agent");
+    // `expected`: the member's roles as the page last read them. Sent, the write holds only if they
+    // still are (an older page sends none and writes as before).
+    let member = match body.get("expected") {
+        None | Some(Value::Null) => page
+            .ledger
             .borrow_mut()
-            .set_roles(body.whole("project")?, &body.text("agent"), &roles)?;
+            .set_roles(project, &handle, &roles)?,
+        Some(expected) => {
+            let expected = parse_roles(Some(expected))?;
+            page.ledger
+                .borrow_mut()
+                .set_roles_if(project, &handle, &roles, &expected)?
+        }
+    };
     one("member", member)
 }
 
