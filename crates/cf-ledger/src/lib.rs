@@ -20,6 +20,7 @@ mod conversations;
 mod deciders;
 pub mod handles;
 mod holding;
+#[cfg(feature = "test-support")]
 mod leads;
 mod ledger;
 mod meeting;
@@ -65,6 +66,7 @@ pub use conversations::{
     ID_SHOWN, NATIVE_SESSION_MAX, TRANSCRIPT_ITEM_MAX,
 };
 pub use holding::{QuestionStamp, WindowHolding};
+#[cfg(feature = "test-support")]
 pub use leads::{NewLead, MOST_LEADS};
 #[cfg(feature = "test-support")]
 pub use ledger::Watcher;

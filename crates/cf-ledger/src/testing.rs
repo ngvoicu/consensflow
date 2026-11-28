@@ -113,12 +113,19 @@ pub use staff_rules::undo_migration_0026;
 /// without `'lead'` in its role check, every row, index and trigger kept. A lead's row stops it
 /// (its role no longer passes the check), as it should: no ledger from before has one.
 pub fn undo_migration_0049(db: &rusqlite::Connection) -> rusqlite::Result<()> {
-    let migration = crate::MIGRATIONS[48];
+    let migration = crate::MIGRATIONS
+        .iter()
+        .find(|sql| sql.contains("CREATE TABLE lead ("))
+        .copied()
+        .unwrap_or_default();
     let rebuild = migration
         .split("CREATE TABLE lead")
         .next()
         .unwrap_or(migration);
-    let narrow = rebuild.replace("'integrator', 'lead')", "'integrator')");
+    // The role check and the two words the backup triggers refuse go back to the predecessor's.
+    let narrow = rebuild
+        .replace("'integrator', 'lead')", "'integrator')")
+        .replace("('human', 'chief', 'lead')", "('human', 'chief')");
     assert_ne!(narrow, rebuild, "0049 widens the role check");
     db.execute_batch("PRAGMA foreign_keys = OFF")?;
     let undone = db.execute_batch(&format!(
