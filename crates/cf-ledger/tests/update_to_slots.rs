@@ -39,7 +39,7 @@ fn rows(db: &Connection, table: &str, skip: &[&str]) -> Vec<Vec<String>> {
 
 /// The columns the later migration of the turn retries gives every task: this update does not
 /// write them, and a ledger opened by this build gains them.
-const TRIES: [&str; 3] = ["turn_retries", "retry_hold", "turn_retry_at"];
+const TRIES: [&str; 4] = ["turn_retries", "retry_hold", "turn_retry_at", "added_by_id"];
 
 /// What the update must leave exactly as it was: every task, message, need and conversation,
 /// and every participant but its tier (assignee, `member_id`, `backup_of` included) and the closed

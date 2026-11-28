@@ -82,6 +82,18 @@ pub struct ParticipantView {
     pub member: Option<String>,
     /// A session's own name, after its member's handle.
     pub session: Option<String>,
+    /// What a lead leads and whether it works with its own hands. Said only of a lead, so
+    /// that every other participant reads as it always did.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lead: Option<LeadView>,
+}
+
+/// What a lead leads, and whether it works with its own hands.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LeadView {
+    pub scope: String,
+    pub own_hands: bool,
 }
 
 impl ParticipantView {
@@ -494,6 +506,10 @@ pub struct TaskView {
     /// task fails. None where none is.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub retry: Option<TaskRetry>,
+    /// Who added the task, where its requester has changed since. None where it never did,
+    /// which is every task a project with no lead holds, so those read as they always did.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub added_by: Option<String>,
 }
 
 /// A retry on its way for a task's window.
@@ -888,6 +904,7 @@ mod tests {
             member_id: Some(1),
             member: Some("zeus".into()),
             session: Some("amber-pine".into()),
+            lead: None,
         };
         assert_eq!(
             serde_json::to_string(&view).unwrap(),
@@ -928,6 +945,7 @@ mod tests {
             member_id: None,
             member: None,
             session: None,
+            lead: None,
         };
         assert_eq!(
             serde_json::to_string(&chief).unwrap(),

@@ -1,0 +1,236 @@
+# Leads step 2 (T-2432): the ledger's role `lead`, its migration (0049), the reads of `lead` and
+# `added_by`, and `add_lead`: each plant is a bug the test it names was written for.
+
+[[plant]]
+name = "leads ledger: the limit lets a fourth lead in"
+meant = "a_fourth_lead_is_refused_in_the_contracts_words_and_nothing_is_written"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "leads_ledger", "a_fourth_lead_is_refused_in_the_contracts_words_and_nothing_is_written"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/leads.rs"
+find = "        if present >= MOST_LEADS {"
+replace = "        if present > MOST_LEADS {"
+
+[[plant]]
+name = "leads ledger: the limit counts the leads that left"
+meant = "a_fourth_lead_is_refused_in_the_contracts_words_and_nothing_is_written"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "leads_ledger", "a_fourth_lead_is_refused_in_the_contracts_words_and_nothing_is_written"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/leads.rs"
+find = "WHERE project_id = ? AND role = 'lead' AND left_at IS NULL\""
+replace = "WHERE project_id = ? AND role = 'lead'\""
+
+[[plant]]
+name = "leads ledger: the handle forgets a lead that left"
+meant = "the_handle_is_the_lowest_lead_n_that_was_never_any_participants"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "leads_ledger", "the_handle_is_the_lowest_lead_n_that_was_never_any_participants"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/leads.rs"
+find = "               WHERE p.project_id = ?1\n"
+replace = "               WHERE p.project_id = ?1 AND p.left_at IS NULL\n"
+
+[[plant]]
+name = "leads ledger: the handle forgets the names a participant went by"
+meant = "the_handle_is_the_lowest_lead_n_that_was_never_any_participants"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "leads_ledger", "the_handle_is_the_lowest_lead_n_that_was_never_any_participants"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/leads.rs"
+find = "OR EXISTS (SELECT 1 FROM json_each(p.former_handles) f WHERE f.value = ?2)))"
+replace = "OR 0))"
+
+[[plant]]
+name = "leads ledger: the handle is taken from every project"
+meant = "another_project_has_its_own_lead_1"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "leads_ledger", "another_project_has_its_own_lead_1"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/leads.rs"
+find = "               WHERE p.project_id = ?1\n"
+replace = "               WHERE ?1 = ?1\n"
+
+[[plant]]
+name = "leads ledger: a lead's own hands are never stored"
+meant = "a_lead_is_made_with_its_handle_what_it_leads_and_its_own_hands"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "leads_ledger", "a_lead_is_made_with_its_handle_what_it_leads_and_its_own_hands"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/leads.rs"
+find = "params![added.id, lead.scope, i64::from(lead.own_hands)]"
+replace = "params![added.id, lead.scope, 0]"
+
+[[plant]]
+name = "leads ledger: a model's name is kept without its model"
+meant = "a_models_name_goes_with_a_model_only"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "leads_ledger", "a_models_name_goes_with_a_model_only"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/leads.rs"
+find = "model_name: lead.model.as_ref().and(lead.model_name.as_deref()),"
+replace = "model_name: lead.model_name.as_deref(),"
+
+[[plant]]
+name = "leads ledger: a blank scope reaches the table's check"
+meant = "a_blank_scope_or_an_unknown_harness_is_refused_and_nothing_is_written"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "leads_ledger", "a_blank_scope_or_an_unknown_harness_is_refused_and_nothing_is_written"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/leads.rs"
+find = "if lead.scope.trim().is_empty() {"
+replace = "if false {"
+
+[[plant]]
+name = "leads ledger: an unknown harness is made claude-code"
+meant = "a_blank_scope_or_an_unknown_harness_is_refused_and_nothing_is_written"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "leads_ledger", "a_blank_scope_or_an_unknown_harness_is_refused_and_nothing_is_written"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/leads.rs"
+find = "let harness = model::require_harness(&lead.harness)?;"
+replace = "let harness = model::require_harness(&lead.harness).unwrap_or(\"claude-code\");"
+
+[[plant]]
+name = "leads ledger: a lead's adding is not logged"
+meant = "a_lead_is_made_with_its_handle_what_it_leads_and_its_own_hands"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "leads_ledger", "a_lead_is_made_with_its_handle_what_it_leads_and_its_own_hands"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/leads.rs"
+find = "            \"lead.added\","
+replace = "            \"lead.added-not\","
+
+[[plant]]
+name = "leads ledger: a lead reads its own hands as off"
+meant = "a_lead_is_made_with_its_handle_what_it_leads_and_its_own_hands"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "leads_ledger", "a_lead_is_made_with_its_handle_what_it_leads_and_its_own_hands"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/views.rs"
+find = "own_hands: row.lead_own_hands == Some(1),"
+replace = "own_hands: false,"
+
+[[plant]]
+name = "leads ledger: every participant reads as a lead"
+meant = "a_lead_is_made_with_its_handle_what_it_leads_and_its_own_hands"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "leads_ledger", "a_lead_is_made_with_its_handle_what_it_leads_and_its_own_hands"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/views.rs"
+find = "            .lead_scope\n            .clone()\n            .map("
+replace = "            .lead_scope\n            .clone()\n            .or(Some(String::new()))\n            .map("
+
+[[plant]]
+name = "leads ledger: every task says it was added by its requester"
+meant = "a_project_with_no_lead_says_nothing_of_one_in_any_view"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "leads_ledger", "a_project_with_no_lead_says_nothing_of_one_in_any_view"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/views.rs"
+find = "         ab.handle AS added_by,"
+replace = "         q.handle AS added_by,"
+
+[[plant]]
+name = "leads ledger: the migration loses a departed seat"
+meant = "the_migration_keeps_every_row_every_id_and_every_sequence_of_a_populated_ledger"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "leads_ledger", "the_migration_keeps_every_row_every_id_and_every_sequence_of_a_populated_ledger"]]
+[[plant.edit]]
+file = "crates/cf-ledger/migrations/0049.sql"
+find = "  FROM participant_rows;\nDROP TABLE participant_rows;"
+replace = "  FROM participant_rows WHERE left_at IS NULL;\nDROP TABLE participant_rows;"
+
+[[plant]]
+name = "leads ledger: the migration leaves the sequences to the rows"
+meant = "the_migration_keeps_every_row_every_id_and_every_sequence_of_a_populated_ledger"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "leads_ledger", "the_migration_keeps_every_row_every_id_and_every_sequence_of_a_populated_ledger"]]
+[[plant.edit]]
+file = "crates/cf-ledger/migrations/0049.sql"
+find = "INSERT INTO sqlite_sequence (name, seq) SELECT name, seq FROM sequence_rows ORDER BY at;"
+replace = "-- the sequences are not put back"
+
+[[plant]]
+name = "leads ledger: the migration drops a participant index"
+meant = "the_migration_keeps_each_index_and_each_trigger_as_the_predecessor_held_it"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "leads_ledger", "the_migration_keeps_each_index_and_each_trigger_as_the_predecessor_held_it"]]
+[[plant.edit]]
+file = "crates/cf-ledger/migrations/0049.sql"
+find = "CREATE INDEX participant_member_index ON participant (member_id, left_at);"
+replace = "-- no member index"
+
+[[plant]]
+name = "leads ledger: the migration's insert trigger never fires"
+meant = "each_of_the_three_backup_triggers_still_refuses_what_it_refused"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "leads_ledger", "each_of_the_three_backup_triggers_still_refuses_what_it_refused"]]
+[[plant.edit]]
+file = "crates/cf-ledger/migrations/0049.sql"
+find = "CREATE TRIGGER participant_backup_insert BEFORE INSERT ON participant\nWHEN NEW.backup_of IS NOT NULL"
+replace = "CREATE TRIGGER participant_backup_insert BEFORE INSERT ON participant\nWHEN 0"
+
+[[plant]]
+name = "leads ledger: the migration's update trigger never fires"
+meant = "each_of_the_three_backup_triggers_still_refuses_what_it_refused"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "leads_ledger", "each_of_the_three_backup_triggers_still_refuses_what_it_refused"]]
+[[plant.edit]]
+file = "crates/cf-ledger/migrations/0049.sql"
+find = "CREATE TRIGGER participant_backup_update\nBEFORE UPDATE OF backup_of, left_at, member_id, role, project_id ON participant\nWHEN NEW.backup_of IS NOT NULL"
+replace = "CREATE TRIGGER participant_backup_update\nBEFORE UPDATE OF backup_of, left_at, member_id, role, project_id ON participant\nWHEN 0"
+
+[[plant]]
+name = "leads ledger: the migration's owner trigger never fires"
+meant = "each_of_the_three_backup_triggers_still_refuses_what_it_refused"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "leads_ledger", "each_of_the_three_backup_triggers_still_refuses_what_it_refused"]]
+[[plant.edit]]
+file = "crates/cf-ledger/migrations/0049.sql"
+find = "BEFORE UPDATE OF backup_of, left_at, member_id, role, project_id ON participant\nWHEN EXISTS (SELECT 1 FROM participant child WHERE child.backup_of = OLD.id)"
+replace = "BEFORE UPDATE OF backup_of, left_at, member_id, role, project_id ON participant\nWHEN 0 AND EXISTS (SELECT 1 FROM participant child WHERE child.backup_of = OLD.id)"
+
+[[plant]]
+name = "leads ledger: the migration leaves the role check as it was"
+meant = "the_role_check_takes_lead_and_no_other_new_word_and_the_lead_table_holds_its_own_checks"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "leads_ledger", "the_role_check_takes_lead_and_no_other_new_word_and_the_lead_table_holds_its_own_checks"]]
+[[plant.edit]]
+file = "crates/cf-ledger/migrations/0049.sql"
+find = "'integrator', 'lead')),"
+replace = "'integrator')),"
+
+[[plant]]
+name = "leads ledger: a lead's scope may be blank"
+meant = "the_role_check_takes_lead_and_no_other_new_word_and_the_lead_table_holds_its_own_checks"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "leads_ledger", "the_role_check_takes_lead_and_no_other_new_word_and_the_lead_table_holds_its_own_checks"]]
+[[plant.edit]]
+file = "crates/cf-ledger/migrations/0049.sql"
+find = "CHECK (length(trim(scope)) > 0)"
+replace = "CHECK (length(scope) > 0)"
+
+[[plant]]
+name = "leads ledger: a lead's own hands may be any number"
+meant = "the_role_check_takes_lead_and_no_other_new_word_and_the_lead_table_holds_its_own_checks"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "leads_ledger", "the_role_check_takes_lead_and_no_other_new_word_and_the_lead_table_holds_its_own_checks"]]
+[[plant.edit]]
+file = "crates/cf-ledger/migrations/0049.sql"
+find = "CHECK (own_hands IN (0, 1))"
+replace = "CHECK (own_hands >= 0)"
+
+[[plant]]
+name = "leads ledger: the migration writes an added-by to every task"
+meant = "the_migration_writes_no_lead_and_no_added_by"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "leads_ledger", "the_migration_writes_no_lead_and_no_added_by"]]
+[[plant.edit]]
+file = "crates/cf-ledger/migrations/0049.sql"
+find = "  CONSTRAINT task_added_by_fk REFERENCES participant (id) ON DELETE SET NULL;"
+replace = "  CONSTRAINT task_added_by_fk REFERENCES participant (id) ON DELETE SET NULL;\nUPDATE task SET added_by_id = requester_id;"
+
+[[plant]]
+name = "leads ledger: the migration writes a lead for each chief"
+meant = "the_migration_writes_no_lead_and_no_added_by"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "leads_ledger", "the_migration_writes_no_lead_and_no_added_by"]]
+[[plant.edit]]
+file = "crates/cf-ledger/migrations/0049.sql"
+find = ") STRICT;\n\n-- Who added the task"
+replace = ") STRICT;\nINSERT INTO lead (participant_id, scope) SELECT id, 'x' FROM participant WHERE role = 'chief';\n\n-- Who added the task"
+
+[[plant]]
+name = "leads ledger: an older build is not refused the newer ledger"
+meant = "an_older_build_refuses_the_whole_home_with_or_without_a_lead"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "leads_ledger", "an_older_build_refuses_the_whole_home_with_or_without_a_lead"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/schema.rs"
+find = "    if version > known as i64 {"
+replace = "    if version > known as i64 + 1000 {"
+
+[[plant]]
+name = "leads ledger: a current ledger is written to at its open"
+meant = "a_second_open_of_a_migrated_home_writes_nothing"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "leads_ledger", "a_second_open_of_a_migrated_home_writes_nothing"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/schema.rs"
+find = "    if version == known as i64 {\n        return Ok(());"
+replace = "    if version == known as i64 {\n        db.execute_batch(\"CREATE TABLE IF NOT EXISTS touched (x INTEGER)\")?;\n        return Ok(());"

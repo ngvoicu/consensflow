@@ -108,6 +108,35 @@ pub use slots::{
 };
 pub use staff_rules::undo_migration_0026;
 
+/// Put back the ledger before 0049, the leads' migration, when a fixture reconstructs one: the
+/// `lead` table and a task's `added_by_id` go, and `participant` is rebuilt as 0049 rebuilt it
+/// without `'lead'` in its role check, every row, index and trigger kept. A lead's row stops it
+/// (its role no longer passes the check), as it should: no ledger from before has one.
+pub fn undo_migration_0049(db: &rusqlite::Connection) -> rusqlite::Result<()> {
+    let migration = crate::MIGRATIONS[48];
+    let rebuild = &migration[..migration
+        .find("CREATE TABLE lead")
+        .expect("0049 makes the lead table")];
+    let narrow = rebuild.replace("'integrator', 'lead')", "'integrator')");
+    assert_ne!(narrow, rebuild, "0049 widens the role check");
+    db.execute_batch("PRAGMA foreign_keys = OFF")?;
+    let undone = db.execute_batch(&format!(
+        "BEGIN IMMEDIATE;
+         DROP TABLE lead;
+         ALTER TABLE task DROP COLUMN added_by_id;
+         {narrow}
+         DELETE FROM sqlite_sequence;
+         INSERT INTO sqlite_sequence (name, seq) SELECT name, seq FROM sequence_rows ORDER BY at;
+         DROP TABLE sequence_rows;
+         COMMIT;"
+    ));
+    if undone.is_err() {
+        let _ = db.execute_batch("ROLLBACK");
+    }
+    db.execute_batch("PRAGMA foreign_keys = ON")?;
+    undone
+}
+
 /// Remove an account hold's closed form when a fixture reconstructs a ledger before 0048.
 pub fn undo_migration_0048(db: &rusqlite::Connection) -> rusqlite::Result<()> {
     db.execute_batch("ALTER TABLE participant DROP COLUMN out_form")
@@ -263,6 +292,7 @@ pub fn hold_apart_what_node_never_writes(tables: &mut Map<String, Value>) {
             ("task", "turn_retries"),
             ("task", "retry_hold"),
             ("task", "turn_retry_at"),
+            ("task", "added_by_id"),
         ])
     {
         take_column_out(tables, table, column);
@@ -284,6 +314,7 @@ pub fn hold_apart_what_node_never_writes(tables: &mut Map<String, Value>) {
             "question_wait",
             "question_reminder_sent",
             "turn_retry",
+            "lead",
         ])
         .collect();
     tables.retain(|table, _| !made.contains(&table.as_str()));
@@ -379,6 +410,7 @@ pub fn hold_apart_what_node_never_had_in_its_schema(dump: &mut Value) {
         match name.as_deref() {
             Some("participant") => {
                 *sql = sql
+                    .replace(", 'lead'", "")
                     .replace(new_roles::IN_THE_CHECKS.0, new_roles::IN_THE_CHECKS.1)
                     .replace(TESTER_IN_THE_CHECKS.0, TESTER_IN_THE_CHECKS.1)
                     .replace(harness_models::COLUMN_LINES, "")
@@ -391,6 +423,10 @@ pub fn hold_apart_what_node_never_had_in_its_schema(dump: &mut Value) {
             }
             Some("task") => {
                 *sql = sql
+                    .replace(
+                        ", added_by_id INTEGER\n  CONSTRAINT task_added_by_fk REFERENCES participant (id) ON DELETE SET NULL",
+                        "",
+                    )
                     .replace(new_roles::IN_THE_CHECKS.0, new_roles::IN_THE_CHECKS.1)
                     .replace(TESTER_IN_THE_CHECKS.0, TESTER_IN_THE_CHECKS.1)
                     .replace(paused_with_project::COLUMN_LINES, "")

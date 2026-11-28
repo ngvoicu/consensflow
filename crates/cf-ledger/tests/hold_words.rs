@@ -648,10 +648,11 @@ fn a_ledger_with_holds_from_before_the_column_gains_it_null_keeps_every_row_and_
     ledger.close().unwrap();
     // As the build before 0048 left it.
     let raw = rusqlite::Connection::open(&file).unwrap();
+    cf_ledger::testing::undo_migration_0049(&raw).expect("0049 undone");
     cf_ledger::testing::undo_migration_0048(&raw).unwrap();
     raw.execute_batch(&format!(
         "PRAGMA user_version = {}",
-        cf_ledger::SCHEMA_VERSION - 1
+        cf_ledger::SCHEMA_VERSION - 2
     ))
     .unwrap();
     let rows = |db: &rusqlite::Connection| -> Vec<String> {
@@ -659,7 +660,7 @@ fn a_ledger_with_holds_from_before_the_column_gains_it_null_keeps_every_row_and_
         for table in ["participant", "event", "project", "task", "message"] {
             let columns: Vec<String> = db
                 .prepare(&format!(
-                    "SELECT name FROM pragma_table_info('{table}') WHERE name != 'out_form' ORDER BY cid"
+                    "SELECT name FROM pragma_table_info('{table}') WHERE name NOT IN ('out_form', 'added_by_id') ORDER BY cid"
                 ))
                 .unwrap()
                 .query_map([], |row| row.get(0))

@@ -43,12 +43,12 @@ fn migration_0038_keeps_the_0037_ledger_and_defaults_every_project_off() {
     );
     assert_eq!(&latest[2..3], &after[2..3]);
     // Every task also gains the count of its tries in a row (0047), reading zero, and no
-    // retry hold.
+    // retry hold, and (0049) no one who added it.
     assert_eq!(
         latest[3],
         after[3]
             .iter()
-            .map(|row| format!("{row}|Integer(0)|Null|Null"))
+            .map(|row| format!("{row}|Integer(0)|Null|Null|Null"))
             .collect::<Vec<_>>()
     );
     assert_eq!(&latest[4..], &after[4..]);

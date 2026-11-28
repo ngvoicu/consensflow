@@ -18,6 +18,16 @@ impl Ledger {
             .is_some())
     }
 
+    /// Adds a lead to a project: the lowest `lead-N` never any participant's, and at most three
+    /// at once. **Reached by no route, command or page operation**: only a test makes a lead.
+    pub fn add_lead(
+        &mut self,
+        project: i64,
+        lead: &crate::NewLead,
+    ) -> Result<ParticipantView, LedgerError> {
+        crate::leads::add_lead(&mut self.store, project, lead)
+    }
+
     /// Add a dedicated backup for a member.
     pub fn add_backup(
         &mut self,

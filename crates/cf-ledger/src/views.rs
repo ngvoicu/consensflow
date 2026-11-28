@@ -60,6 +60,7 @@ pub(crate) const TASK_SELECT: &str = concat!(
                      AND json_extract(s.receipt, '$.shown') IS NOT NULL
                      AND json_extract(s.receipt, '$.over') IS NULL), 0)
            ORDER BY h.id DESC LIMIT 1) AS hold_typed,
+         ab.handle AS added_by,
          CASE WHEN t.state = 'paused'
                AND coalesce(am.left_at, CASE WHEN a.member_id IS NULL THEN a.left_at END)
                    IS NOT NULL
@@ -67,14 +68,16 @@ pub(crate) const TASK_SELECT: &str = concat!(
   FROM task t
   JOIN participant q ON q.id = t.requester_id
   LEFT JOIN participant a ON a.id = t.assignee_id
-  LEFT JOIN participant am ON am.id = a.member_id"
+  LEFT JOIN participant am ON am.id = a.member_id
+  LEFT JOIN participant ab ON ab.id = t.added_by_id"
 );
 
 /// A participant with its member's handle, when it is a member's session.
 pub(crate) const PARTICIPANT_SELECT: &str = "
-  SELECT p.*, m.handle AS member_handle
+  SELECT p.*, m.handle AS member_handle, l.scope AS lead_scope, l.own_hands AS lead_own_hands
   FROM participant p
-  LEFT JOIN participant m ON m.id = p.member_id";
+  LEFT JOIN participant m ON m.id = p.member_id
+  LEFT JOIN lead l ON l.participant_id = p.id";
 
 /// A participant's row, as `PARTICIPANT_SELECT` reads it.
 pub(crate) struct ParticipantRow {
@@ -110,6 +113,9 @@ pub(crate) struct ParticipantRow {
     pub(crate) gone_model: Option<String>,
     pub(crate) designer: i64,
     pub(crate) member_handle: Option<String>,
+    /// What a lead leads and its own-hands flag; none for every other participant.
+    pub(crate) lead_scope: Option<String>,
+    pub(crate) lead_own_hands: Option<i64>,
 }
 
 impl ParticipantRow {
@@ -151,6 +157,8 @@ impl ParticipantRow {
             gone_model: row.get("gone_model")?,
             designer: row.get("designer")?,
             member_handle: row.get("member_handle")?,
+            lead_scope: row.get("lead_scope")?,
+            lead_own_hands: row.get("lead_own_hands")?,
         })
     }
 }
@@ -220,6 +228,13 @@ pub(crate) fn participant_view(row: &ParticipantRow) -> Result<ParticipantView, 
         member_id: row.member_id,
         member: row.member_handle.clone(),
         session,
+        lead: row
+            .lead_scope
+            .clone()
+            .map(|scope| cf_proto::ledger::LeadView {
+                scope,
+                own_hands: row.lead_own_hands == Some(1),
+            }),
     })
 }
 
@@ -310,6 +325,7 @@ pub(crate) fn task_view(row: &Row<'_>) -> rusqlite::Result<TaskView> {
         deleted_at: row.get("deleted_at")?,
         created_at: row.get("created_at")?,
         updated_at: row.get("updated_at")?,
+        added_by: row.get("added_by")?,
         // A paused task whose member left the staff says so, as a new chief's handoff does,
         // never a hold with that member, though its hold is kept to its end (T-1517's note).
         // A hold's first note is typed to the chief, not shown: its line says the hold all

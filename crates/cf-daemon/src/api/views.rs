@@ -205,6 +205,7 @@ mod tests {
             updated_at: "2026-10-05T09:00:00.000Z".to_owned(),
             aside: None,
             retry: None,
+            added_by: None,
         }
     }
 

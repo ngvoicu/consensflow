@@ -19,6 +19,7 @@ mod board;
 mod conversations;
 pub mod handles;
 mod holding;
+mod leads;
 mod ledger;
 mod meeting;
 mod messages;
@@ -51,11 +52,11 @@ pub use board::Board;
 pub use cf_proto::ledger::{
     Begun, ChiefConversation, ChiefOpenWork, Claim, ConversationView, Cut, DeletedProject,
     EventView, HeldTask, HistoryFrom, HistoryItem, HistoryKey, HistoryRead, HistoryRow, ItemDetail,
-    Lane, LastSwitch, LatestMessages, LatestTranscript, Links, MemberView, MessageParties,
-    MessageView, ParticipantView, ProjectView, Question, QuestionOption, RemovedMember, Resume,
-    Scanned, Stop, TaskCard, TaskCreated, TaskEdit, TaskEdited, TaskMoved, TaskPlaced,
-    TaskReleased, TaskRetiered, TaskThatFits, TaskThread, TaskTranscript, TaskView, TextCut,
-    TextPart,
+    Lane, LastSwitch, LatestMessages, LatestTranscript, LeadView, Links, MemberView,
+    MessageParties, MessageView, ParticipantView, ProjectView, Question, QuestionOption,
+    RemovedMember, Resume, Scanned, Stop, TaskCard, TaskCreated, TaskEdit, TaskEdited, TaskMoved,
+    TaskPlaced, TaskReleased, TaskRetiered, TaskThatFits, TaskThread, TaskTranscript, TaskView,
+    TextCut, TextPart,
 };
 pub use cf_proto::wake_ups::WakeUpView;
 pub use conversations::{
@@ -63,6 +64,7 @@ pub use conversations::{
     ID_SHOWN, NATIVE_SESSION_MAX, TRANSCRIPT_ITEM_MAX,
 };
 pub use holding::{QuestionStamp, WindowHolding};
+pub use leads::{NewLead, MOST_LEADS};
 #[cfg(feature = "test-support")]
 pub use ledger::Watcher;
 pub use ledger::{

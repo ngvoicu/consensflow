@@ -35,6 +35,7 @@ fn chief(model: Option<&str>, launched: Option<&str>) -> ParticipantView {
         member_id: None,
         member: None,
         session: None,
+        lead: None,
     }
 }
 

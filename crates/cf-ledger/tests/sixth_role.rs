@@ -203,7 +203,7 @@ fn the_ledgers_checks_hold_the_tables_roles_and_a_new_row_needs_a_migration() {
         open_ledger(&dir.path().join("consensflow.db"), Options::default()).expect("a ledger");
     let roles = cf_ledger::roles::ids();
     let mut members = checked(&ledger, "participant", "participant_role_check");
-    members.retain(|role| role != "human" && role != "chief");
+    members.retain(|role| role != "human" && role != "chief" && role != "lead");
     let sorted = |mut words: Vec<String>| {
         words.sort();
         words

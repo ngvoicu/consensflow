@@ -195,6 +195,7 @@ fn a_ledger_a_build_before_the_new_roles_left_with_members_and_tasks_of_the_five
     // As a build of the migration before it left it: its checks name the five roles, its
     // version is that migration's.
     let raw = Connection::open(&file).unwrap();
+    cf_ledger::testing::undo_migration_0049(&raw).expect("0049 undone");
     cf_ledger::testing::undo_migration_0048(&raw).expect("0048 undone");
     cf_ledger::testing::undo_migration_0047(&raw).unwrap();
     cf_ledger::testing::undo_migration_0046(&raw).expect("closed waits undone");

@@ -179,6 +179,7 @@ pub fn task(number: i64, title: &str, assignee: Option<&str>, state: &str) -> Ta
         updated_at: "2026-10-01T09:00:00.000Z".to_owned(),
         aside: None,
         retry: None,
+        added_by: None,
     }
 }
 
@@ -223,6 +224,7 @@ pub fn seat(harness: Option<&str>, model: Option<&str>) -> ParticipantView {
         member_id: None,
         member: None,
         session: None,
+        lead: None,
     }
 }
 
@@ -273,6 +275,7 @@ pub fn participant_of(row: &Value) -> ParticipantView {
         member_id: row["memberId"].as_i64(),
         member: text(row, "member"),
         session: text(row, "session"),
+        lead: None,
     }
 }
 
