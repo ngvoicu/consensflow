@@ -25064,7 +25064,7 @@ test('T-2405 a write whose offering read is no longer the dialog’s current one
   await open(page, data)
   // The dialog's current read of Codex moves on while the first write is on its way.
   await page.evaluate(async () => {
-    const { ModelLists } = await import('./core/dialogs.js')
+    const { ModelLists } = await import('/core/dialogs.js')
     const readOf = ModelLists.prototype.readOf
     ModelLists.prototype.readOf = function (harness) {
       return window.__moved && harness === 'codex' ? 'a-later-read' : readOf.call(this, harness)
