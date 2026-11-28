@@ -8,6 +8,7 @@
 //! offer". Whether each model is still listed by the person's installed harness is the page's
 //! to check when its dialog opens, from the read it makes then (never from here, never kept).
 
+use super::staff::draws_images;
 use cf_ledger::model::{parse_effort, require_model_id};
 use cf_ledger::roles;
 use cf_proto::agents::Harness;
@@ -79,7 +80,7 @@ impl Entry {
         let image = |id: &String| roles::find(id).is_some_and(|role| role.image_agent);
         if self.designer {
             let bare = self.model.is_none() && self.effort.is_none() && self.tier.is_none();
-            if harness != Harness::Codex || !bare || !self.roles.iter().all(image) {
+            if !draws_images(harness) || !bare || !self.roles.iter().all(image) {
                 return Err("the image designer is Codex's, with no model, effort or tier".into());
             }
             return Ok(());

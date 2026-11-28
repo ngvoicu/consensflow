@@ -274,6 +274,12 @@ pub(super) fn tier_of(value: Option<&Value>) -> Result<WorkTier, Said> {
     }
 }
 
+/// Whether an image designer may run on `harness`: Codex draws, no other does. The one place
+/// the staff pages ask it (the suggested staff's entries too).
+pub(super) fn draws_images(harness: Harness) -> bool {
+    harness == Harness::Codex
+}
+
 /// The harness (by its kind, `claude-code`, as the harness select says it), the model, the
 /// effort and the tier `body` names, each checked: the harness one ConsensFlow opens windows
 /// of, and Codex for an image designer, which draws with Codex's image tool; the model one
@@ -292,7 +298,7 @@ async fn picked<S: AsRef<str>>(
     let kind = body.text("harness").into_owned();
     let harness = Harness::from_kind(&kind)
         .ok_or_else(|| Said(format!("{kind} is no harness ConsensFlow runs")))?;
-    if designer && harness != Harness::Codex {
+    if designer && !draws_images(harness) {
         return Err(Said::from("an image designer draws on Codex"));
     }
     if adapter {
