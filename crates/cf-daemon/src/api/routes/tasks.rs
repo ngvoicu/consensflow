@@ -34,6 +34,11 @@ pub(super) async fn list(
     let waits = Waits::now(context, caller)?;
     // Nothing waits where nothing is held at the gate and the project is open.
     let held = !board.gated.is_empty() || waits.closed();
+    // The results still queued for the caller, which are typed into its window when its turn ends.
+    let queued = context
+        .ledger
+        .borrow()
+        .results_queued_for(caller.project.id, &caller.participant.handle)?;
     let summary = |card: &TaskCard| -> Result<Value, Failure> {
         let mut summary = TaskSummary::from(card);
         if held && GIVEN.contains(&card.state.as_str()) && !may_move(caller, &card.requester) {
@@ -45,7 +50,11 @@ pub(super) async fn list(
                 waiting.clone_into(&mut summary.title);
             }
         }
-        value(&summary)
+        let mut summary = value(&summary)?;
+        if queued.contains(&card.number) {
+            summary["resultQueued"] = json!(true);
+        }
+        Ok(summary)
     };
     let open = board
         .open

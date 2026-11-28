@@ -822,7 +822,12 @@ fn get(number: u64, rest: &[String], board: &Board) -> Result<Said, Failure> {
             Some(brief) => format!("{brief}\n\n{thread}"),
             None => thread,
         };
-        let text = format!("{}\n\n{body}", task_head(&task));
+        let queued = if task.get("resultQueued") == Some(&Value::Bool(true)) {
+            "\nIts result is queued for you and is typed in when your turn ends."
+        } else {
+            ""
+        };
+        let text = format!("{}{queued}\n\n{body}", task_head(&task));
         let answers = waiting_answers(messages);
         return Ok(Said::new(task, text).having_written("task", answers));
     };
@@ -2284,6 +2289,43 @@ and 2 idle sessions (`cf task list --all`)";
         assert_eq!(
             accepted(json!({ "jobs": 0, "agents": 2 })),
             format!("{line}\nT-3's window was running 2 background agents or workflows when it was finished; accepting closes the window and ends them.")
+        );
+    }
+
+    #[test]
+    fn a_get_and_a_list_say_when_the_result_is_queued_for_this_window() {
+        let mut queued = card(3, "done", Some("zeus"));
+        queued["resultQueued"] = json!(true);
+        let plain = card(4, "done", Some("zeus"));
+        let api = scripted(vec![reply(
+            200,
+            json!({ "open": [], "lanes": [lane("zeus", "worker", &[queued.clone(), plain])] }),
+        )]);
+        let board = Board::new(Some(&api.url), "tok");
+        let words = vec!["list".to_owned()];
+        let given: Vec<OsString> = words.iter().map(OsString::from).collect();
+        let listed = command(&words, &given, &board, &mut "".as_bytes())
+            .ok()
+            .unwrap()
+            .text;
+        assert!(
+            listed.contains("T-3 [done · result queued] @zeus"),
+            "{listed}"
+        );
+        assert!(listed.contains("T-4 [done] @zeus"), "{listed}");
+        let mut with_thread = queued;
+        with_thread["messages"] = json!([]);
+        let api = scripted(vec![reply(200, json!({ "task": with_thread }))]);
+        let board = Board::new(Some(&api.url), "tok");
+        let words = vec!["get".to_owned(), "T-3".to_owned()];
+        let given: Vec<OsString> = words.iter().map(OsString::from).collect();
+        let got = command(&words, &given, &board, &mut "".as_bytes())
+            .ok()
+            .unwrap()
+            .text;
+        assert!(
+            got.contains("\nIts result is queued for you and is typed in when your turn ends.\n"),
+            "{got}"
         );
     }
 

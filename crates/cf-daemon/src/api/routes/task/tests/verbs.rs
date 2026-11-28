@@ -1636,6 +1636,49 @@ async fn a_decision_says_when_the_result_it_withdraws_was_never_typed_into_the_c
 }
 
 #[tokio::test]
+async fn a_get_and_a_list_say_which_results_are_queued_for_the_caller_alone() {
+    let scene = scene();
+    let number = working_task(&scene);
+    let list = |token: String| {
+        let scene = &scene;
+        async move { api(scene, Method::GET, "/api/tasks", &token, "").await }
+    };
+    let marked = |said: &serde_json::Value| {
+        said["lanes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .flat_map(|lane| lane["tasks"].as_array().unwrap().clone())
+            .any(|task| task["resultQueued"] == json!(true))
+    };
+    // Nothing is queued yet.
+    assert!(
+        get(&scene, &scene.chief, &number.to_string()).await.1["task"]
+            .get("resultQueued")
+            .is_none()
+    );
+    scene
+        .context
+        .ledger
+        .borrow_mut()
+        .record_result(scene.project.id, number, "Parser done")
+        .unwrap();
+    let said = get(&scene, &scene.chief, &number.to_string()).await;
+    assert_eq!(said.1["task"]["resultQueued"], json!(true), "{:?}", said.1);
+    assert!(marked(&list(scene.chief.clone()).await.1));
+    // Only the caller's own: the member's window sees nothing new.
+    let said = get(&scene, &scene.zeus, &number.to_string()).await;
+    assert!(said.1["task"].get("resultQueued").is_none(), "{:?}", said.1);
+    assert!(!marked(&list(scene.zeus.clone()).await.1));
+    // A decided task's result is withdrawn, and nothing is said of it.
+    let said = post(&scene, &scene.chief, &format!("{number}/accept"), "{}").await;
+    assert_eq!(said.0, 200, "{:?}", said.1);
+    let said = get(&scene, &scene.chief, &number.to_string()).await;
+    assert!(said.1["task"].get("resultQueued").is_none(), "{:?}", said.1);
+    assert!(!marked(&list(scene.chief.clone()).await.1));
+}
+
+#[tokio::test]
 async fn a_pause_says_what_the_engine_holds_its_task_in_the_background_for() {
     // RS-25: no note is typed of the work a pause leaves running; the pause says it at once.
     let scene = scene();

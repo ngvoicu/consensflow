@@ -137,6 +137,25 @@ pub(crate) fn result_queued_for(
         .exists(params![project_id, number, handle])?)
 }
 
+/// The numbers of the tasks whose result is still queued for `handle`: never typed into its
+/// window, and typed in when its turn ends. What `cf task list` and `cf task get` say of them.
+pub(crate) fn results_queued_for(
+    store: &Store,
+    project_id: i64,
+    handle: &str,
+) -> Result<Vec<i64>, LedgerError> {
+    let mut query = store.db.prepare(
+        "SELECT DISTINCT t.number FROM message m JOIN task t ON t.id = m.task_id
+           JOIN participant p ON p.id = m.recipient_id
+          WHERE t.project_id = ?1 AND p.handle = ?2
+            AND m.kind = 'result' AND m.state = 'queued'",
+    )?;
+    let numbers = query
+        .query_map(params![project_id, handle], |row| row.get(0))?
+        .collect::<Result<Vec<i64>, _>>()?;
+    Ok(numbers)
+}
+
 /// The states a task can be finished at the word of the chief or the human.
 const FINISHABLE_TASK_STATES: [&str; 3] = ["working", "waiting", "paused"];
 

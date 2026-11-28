@@ -548,3 +548,31 @@ fn a_result_the_chief_was_given_is_not_said_to_be_queued() {
         .result_queued_for(w.project, task, "chief")
         .expect("a read"));
 }
+
+#[test]
+fn the_tasks_whose_results_are_queued_for_a_window_are_listed_for_that_window_only() {
+    let mut w = world();
+    let (first, result) = finished(&mut w, "zeus", "Parser");
+    let (second, _) = finished(&mut w, "diana", "Lexer");
+    let queued = |w: &World, handle: &str| {
+        let mut numbers = w
+            .ledger
+            .results_queued_for(w.project, handle)
+            .expect("a read");
+        numbers.sort_unstable();
+        numbers
+    };
+    assert_eq!(queued(&w, "chief"), vec![first, second]);
+    assert!(queued(&w, "zeus").is_empty(), "a member's window has none");
+    assert_eq!(
+        w.message(result.id).state,
+        "queued",
+        "the read receives nothing"
+    );
+    accept(&mut w, first);
+    assert_eq!(
+        queued(&w, "chief"),
+        vec![second],
+        "a decided task's result is withdrawn"
+    );
+}

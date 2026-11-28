@@ -97,7 +97,11 @@ pub(super) async fn handle(
             task.task.body.clear();
             task.task.title = held.to_owned();
         }
-        return Ok(Answer::ok(json!({ "task": value(&task)? })));
+        let mut shown = value(&task)?;
+        if ledger_result_queued(context, caller, task.task.number)? {
+            shown["resultQueued"] = json!(true);
+        }
+        return Ok(Answer::ok(json!({ "task": shown })));
     }
     if action == Some(TaskAction::Transcript) && get {
         return transcript(context, caller, &task, &request);
@@ -585,6 +589,16 @@ fn moved(
         );
     }
     Ok(Answer::ok(Value::Object(answer)))
+}
+
+/// Whether T-`number`'s result is still queued for the caller, to be typed into its window when
+/// its turn ends.
+fn ledger_result_queued(context: &Context, caller: &Caller, number: i64) -> Result<bool, Failure> {
+    Ok(context.ledger.borrow().result_queued_for(
+        caller.project.id,
+        number,
+        &caller.participant.handle,
+    )?)
 }
 
 /// `edit`: the brief, the tier, or both of a task before any window has its brief

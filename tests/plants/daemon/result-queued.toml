@@ -1,0 +1,101 @@
+# What a window is told of a result still queued for it, which is typed in when its turn ends:
+# `cf task accept`, `reopen` and `cancel` say when they withdrew one (T-2442, the own-hands chief
+# of 2026-11-27 that decided three tasks whose results were never typed into its window), and
+# `cf task get` and `cf task list` say it of the caller's own. One plant takes one rule out; a
+# test of it fails. Every name holds `result queued:`.
+
+[run]
+rq-ledger = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "decided"]
+rq-route = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "routes::task"]
+rq-cf = ["cargo", "test", "--offline", "-p", "cf", "--lib", "board::"]
+
+[[plant]]
+name = "result queued: the ledger's decision read finds nothing queued"
+meant = "a_result_still_queued_for_the_chief_is_said_so_before_its_decision_withdraws_it"
+runs = ["rq-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = '''              WHERE t.project_id = ?1 AND t.number = ?2 AND p.handle = ?3'''
+replace = '''              WHERE t.project_id = ?1 AND t.number = ?2 AND p.handle = ?3 AND 0'''
+
+[[plant]]
+name = "result queued: the ledger's list read finds nothing queued"
+meant = "the_tasks_whose_results_are_queued_for_a_window_are_listed_for_that_window_only"
+runs = ["rq-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = '''          WHERE t.project_id = ?1 AND p.handle = ?2'''
+replace = '''          WHERE t.project_id = ?1 AND p.handle = ?2 AND 0'''
+
+[[plant]]
+name = "result queued: the ledger's list read names any window's results"
+meant = "the_tasks_whose_results_are_queued_for_a_window_are_listed_for_that_window_only"
+runs = ["rq-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = '''          WHERE t.project_id = ?1 AND p.handle = ?2'''
+replace = '''          WHERE t.project_id = ?1 AND p.handle IS NOT NULL'''
+
+[[plant]]
+name = "result queued: a decision's route does not read the queued result"
+meant = "a_decision_says_when_the_result_it_withdraws_was_never_typed_into_the_chiefs_window"
+runs = ["rq-route"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/routes/task.rs"
+find = ''') && ledger.result_queued_for(project, number, by)?;'''
+replace = ''') && false;'''
+
+[[plant]]
+name = "result queued: a get does not say the result is queued"
+meant = "a_get_and_a_list_say_which_results_are_queued_for_the_caller_alone"
+runs = ["rq-route"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/routes/task.rs"
+find = '''        if ledger_result_queued(context, caller, task.task.number)? {'''
+replace = '''        if false {'''
+
+[[plant]]
+name = "result queued: a list does not mark the result queued"
+meant = "a_get_and_a_list_say_which_results_are_queued_for_the_caller_alone"
+runs = ["rq-route"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/routes/tasks.rs"
+find = '''        if queued.contains(&card.number) {'''
+replace = '''        if false {'''
+
+[[plant]]
+name = "result queued: cf's decision says nothing of the withdrawn result"
+meant = "a_decision_says_when_its_result_was_not_delivered_to_this_window"
+runs = ["rq-cf"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/task.rs"
+find = '''    format!("\nT-{number}'s result was not delivered to this window; read it with: {cf} task get T-{number}")'''
+replace = '''    let _ = (number, cf);
+    String::new()'''
+
+[[plant]]
+name = "result queued: cf's row has no mark"
+meant = "a_get_and_a_list_say_when_the_result_is_queued_for_this_window"
+runs = ["rq-cf"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/lines.rs"
+find = '''        format!("{state} · result queued")'''
+replace = '''        state'''
+
+[[plant]]
+name = "result queued: cf's get has no line"
+meant = "a_get_and_a_list_say_when_the_result_is_queued_for_this_window"
+runs = ["rq-cf"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/task.rs"
+find = '''            "\nIts result is queued for you and is typed in when your turn ends."'''
+replace = '''            ""'''

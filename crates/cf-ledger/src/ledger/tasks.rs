@@ -164,6 +164,15 @@ impl Ledger {
         tasks::result_queued_for(&self.store, project_id, number, handle)
     }
 
+    /// The numbers of the tasks whose result is still queued for `handle`.
+    pub fn results_queued_for(
+        &self,
+        project_id: i64,
+        handle: &str,
+    ) -> Result<Vec<i64>, LedgerError> {
+        tasks::results_queued_for(&self.store, project_id, handle)
+    }
+
     /// A coordinator accepts a task's result.
     pub fn accept_task(
         &mut self,
