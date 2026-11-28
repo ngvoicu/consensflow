@@ -114,9 +114,10 @@ pub use staff_rules::undo_migration_0026;
 /// (its role no longer passes the check), as it should: no ledger from before has one.
 pub fn undo_migration_0049(db: &rusqlite::Connection) -> rusqlite::Result<()> {
     let migration = crate::MIGRATIONS[48];
-    let rebuild = &migration[..migration
-        .find("CREATE TABLE lead")
-        .expect("0049 makes the lead table")];
+    let rebuild = migration
+        .split("CREATE TABLE lead")
+        .next()
+        .unwrap_or(migration);
     let narrow = rebuild.replace("'integrator', 'lead')", "'integrator')");
     assert_ne!(narrow, rebuild, "0049 widens the role check");
     db.execute_batch("PRAGMA foreign_keys = OFF")?;
