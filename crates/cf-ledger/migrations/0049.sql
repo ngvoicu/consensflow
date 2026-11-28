@@ -5,7 +5,8 @@
 -- the text SQLite holds after 0048 (0037's table with the columns 0039 added: `backup_of`,
 -- `vacation_since`, `out_kind`, and 0048's `out_form`) with `'lead'` the one word added to
 -- `participant_role_check`, every row and column as it was, its indexes made again, **and the
--- three triggers of 0039**, which dropping the table drops with it and which the foreign-key
+-- three triggers of 0039** (with `'lead'` joining the two words they refuse as a backup or as the
+-- owner of one: a lead, like the chief, has no backup), which dropping the table drops with it and which the foreign-key
 -- check cannot see missing. The sequences that keep a deleted id from coming back are put back
 -- as they were, in the order they were.
 
@@ -51,12 +52,12 @@ CREATE UNIQUE INDEX participant_one_live_backup ON participant(backup_of)
 CREATE TRIGGER participant_backup_insert BEFORE INSERT ON participant
 WHEN NEW.backup_of IS NOT NULL
 BEGIN
-  SELECT CASE WHEN NEW.member_id IS NOT NULL OR NEW.role IN ('human', 'chief')
+  SELECT CASE WHEN NEW.member_id IS NOT NULL OR NEW.role IN ('human', 'chief', 'lead')
     OR NEW.id = NEW.backup_of
     OR NOT EXISTS (
       SELECT 1 FROM participant owner WHERE owner.id = NEW.backup_of
         AND owner.project_id = NEW.project_id AND owner.member_id IS NULL
-        AND owner.role NOT IN ('human', 'chief')
+        AND owner.role NOT IN ('human', 'chief', 'lead')
         AND (NEW.left_at IS NOT NULL OR owner.left_at IS NULL)
         AND owner.backup_of IS NULL
     )
@@ -69,12 +70,12 @@ CREATE TRIGGER participant_backup_update
 BEFORE UPDATE OF backup_of, left_at, member_id, role, project_id ON participant
 WHEN NEW.backup_of IS NOT NULL
 BEGIN
-  SELECT CASE WHEN NEW.member_id IS NOT NULL OR NEW.role IN ('human', 'chief')
+  SELECT CASE WHEN NEW.member_id IS NOT NULL OR NEW.role IN ('human', 'chief', 'lead')
     OR NEW.id = NEW.backup_of
     OR NOT EXISTS (
       SELECT 1 FROM participant owner WHERE owner.id = NEW.backup_of
         AND owner.project_id = NEW.project_id AND owner.member_id IS NULL
-        AND owner.role NOT IN ('human', 'chief')
+        AND owner.role NOT IN ('human', 'chief', 'lead')
         AND (NEW.left_at IS NOT NULL OR owner.left_at IS NULL)
         AND owner.backup_of IS NULL
     )
@@ -87,7 +88,7 @@ CREATE TRIGGER participant_backup_owner_update
 BEFORE UPDATE OF backup_of, left_at, member_id, role, project_id ON participant
 WHEN EXISTS (SELECT 1 FROM participant child WHERE child.backup_of = OLD.id)
   AND (NEW.backup_of IS NOT NULL OR NEW.member_id IS NOT NULL
-       OR NEW.role IN ('human', 'chief') OR NEW.project_id != OLD.project_id
+       OR NEW.role IN ('human', 'chief', 'lead') OR NEW.project_id != OLD.project_id
        OR (NEW.left_at IS NOT NULL AND EXISTS (SELECT 1 FROM participant child
             WHERE child.backup_of = OLD.id AND child.left_at IS NULL)))
 BEGIN

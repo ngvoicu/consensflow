@@ -19,7 +19,9 @@ impl Ledger {
     }
 
     /// Adds a lead to a project: the lowest `lead-N` never any participant's, and at most three
-    /// at once. **Reached by no route, command or page operation**: only a test makes a lead.
+    /// at once. **Reached by no route, command or page operation**: it is compiled only for tests and the
+    /// `test-support` feature (until the page's step), so the shipped build holds no such symbol.
+    #[cfg(feature = "test-support")]
     pub fn add_lead(
         &mut self,
         project: i64,

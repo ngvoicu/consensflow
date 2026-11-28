@@ -59,6 +59,11 @@ pub(crate) fn add_lead(
     lead: &NewLead,
 ) -> Result<ParticipantView, LedgerError> {
     let harness = model::require_harness(&lead.harness)?;
+    // The model is held to what a chief's is (`create_project`, `switch_chief`).
+    if let Some(model) = &lead.model {
+        model::require_model_id(model)?;
+    }
+    model::parse_model_name(lead.model_name.as_ref().map(|name| json!(name)).as_ref())?;
     if lead.scope.trim().is_empty() {
         return Err(LedgerError::refused(
             "blank-scope",

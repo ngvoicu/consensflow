@@ -234,3 +234,133 @@ runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "leads_ledge
 file = "crates/cf-ledger/src/schema.rs"
 find = "    if version == known as i64 {\n        return Ok(());"
 replace = "    if version == known as i64 {\n        db.execute_batch(\"CREATE TABLE IF NOT EXISTS touched (x INTEGER)\")?;\n        return Ok(());"
+
+[[plant]]
+name = "leads ledger: the migration's copy leaves a column out (effort)"
+meant = "the_migration_keeps_every_row_every_id_and_every_sequence_of_a_populated_ledger"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "leads_ledger", "the_migration_keeps_every_row_every_id_and_every_sequence_of_a_populated_ledger"]]
+[[plant.edit]]
+file = "crates/cf-ledger/migrations/0049.sql"
+find = "gone_model, effort, model_name, needs_edit, former_handles, backup_of, vacation_since, out_kind, out_form)\n  SELECT id,"
+replace = "gone_model, model_name, needs_edit, former_handles, backup_of, vacation_since, out_kind, out_form)\n  SELECT id,"
+[[plant.edit]]
+file = "crates/cf-ledger/migrations/0049.sql"
+find = "gone_model, effort, model_name, needs_edit, former_handles, backup_of, vacation_since, out_kind, out_form\n  FROM participant_rows;"
+replace = "gone_model, model_name, needs_edit, former_handles, backup_of, vacation_since, out_kind, out_form\n  FROM participant_rows;"
+
+[[plant]]
+name = "leads ledger: the migration's copy exchanges two columns (out_until and out_since)"
+meant = "the_migration_keeps_every_row_every_id_and_every_sequence_of_a_populated_ledger"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "leads_ledger", "the_migration_keeps_every_row_every_id_and_every_sequence_of_a_populated_ledger"]]
+[[plant.edit]]
+file = "crates/cf-ledger/migrations/0049.sql"
+find = "  SELECT id, project_id, handle, role, roles, agent, harness, tier, member_id, out_until, out_since,"
+replace = "  SELECT id, project_id, handle, role, roles, agent, harness, tier, member_id, out_since, out_until,"
+
+[[plant]]
+name = "leads ledger: a column added to participant before the migration is not in its copy"
+meant = "the_migration_keeps_every_row_every_id_and_every_sequence_of_a_populated_ledger"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "leads_ledger", "the_migration_keeps_every_row_every_id_and_every_sequence_of_a_populated_ledger"]]
+[[plant.edit]]
+file = "crates/cf-ledger/migrations/0048.sql"
+find = "ALTER TABLE participant ADD COLUMN out_form TEXT;"
+replace = "ALTER TABLE participant ADD COLUMN out_form TEXT;\nALTER TABLE participant ADD COLUMN later_x TEXT;"
+
+[[plant]]
+name = "leads ledger: the insert trigger lets a lead be a backup"
+meant = "at_the_table_a_lead_has_no_backup_and_is_no_backup"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "leads_ledger", "at_the_table_a_lead_has_no_backup_and_is_no_backup"]]
+[[plant.edit]]
+file = "crates/cf-ledger/migrations/0049.sql"
+find = "CREATE TRIGGER participant_backup_insert BEFORE INSERT ON participant\nWHEN NEW.backup_of IS NOT NULL\nBEGIN\n  SELECT CASE WHEN NEW.member_id IS NOT NULL OR NEW.role IN ('human', 'chief', 'lead')"
+replace = "CREATE TRIGGER participant_backup_insert BEFORE INSERT ON participant\nWHEN NEW.backup_of IS NOT NULL\nBEGIN\n  SELECT CASE WHEN NEW.member_id IS NOT NULL OR NEW.role IN ('human', 'chief')"
+
+[[plant]]
+name = "leads ledger: the insert trigger lets a lead own a backup"
+meant = "at_the_table_a_lead_has_no_backup_and_is_no_backup"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "leads_ledger", "at_the_table_a_lead_has_no_backup_and_is_no_backup"]]
+[[plant.edit]]
+file = "crates/cf-ledger/migrations/0049.sql"
+find = "CREATE TRIGGER participant_backup_insert BEFORE INSERT ON participant\nWHEN NEW.backup_of IS NOT NULL\nBEGIN\n  SELECT CASE WHEN NEW.member_id IS NOT NULL OR NEW.role IN ('human', 'chief', 'lead')\n    OR NEW.id = NEW.backup_of\n    OR NOT EXISTS (\n      SELECT 1 FROM participant owner WHERE owner.id = NEW.backup_of\n        AND owner.project_id = NEW.project_id AND owner.member_id IS NULL\n        AND owner.role NOT IN ('human', 'chief', 'lead')"
+replace = "CREATE TRIGGER participant_backup_insert BEFORE INSERT ON participant\nWHEN NEW.backup_of IS NOT NULL\nBEGIN\n  SELECT CASE WHEN NEW.member_id IS NOT NULL OR NEW.role IN ('human', 'chief', 'lead')\n    OR NEW.id = NEW.backup_of\n    OR NOT EXISTS (\n      SELECT 1 FROM participant owner WHERE owner.id = NEW.backup_of\n        AND owner.project_id = NEW.project_id AND owner.member_id IS NULL\n        AND owner.role NOT IN ('human', 'chief')"
+
+[[plant]]
+name = "leads ledger: the update trigger lets a lead be a backup"
+meant = "at_the_table_a_lead_has_no_backup_and_is_no_backup"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "leads_ledger", "at_the_table_a_lead_has_no_backup_and_is_no_backup"]]
+[[plant.edit]]
+file = "crates/cf-ledger/migrations/0049.sql"
+find = "CREATE TRIGGER participant_backup_update\nBEFORE UPDATE OF backup_of, left_at, member_id, role, project_id ON participant\nWHEN NEW.backup_of IS NOT NULL\nBEGIN\n  SELECT CASE WHEN NEW.member_id IS NOT NULL OR NEW.role IN ('human', 'chief', 'lead')"
+replace = "CREATE TRIGGER participant_backup_update\nBEFORE UPDATE OF backup_of, left_at, member_id, role, project_id ON participant\nWHEN NEW.backup_of IS NOT NULL\nBEGIN\n  SELECT CASE WHEN NEW.member_id IS NOT NULL OR NEW.role IN ('human', 'chief')"
+
+[[plant]]
+name = "leads ledger: the update trigger lets a lead own a backup"
+meant = "at_the_table_a_lead_has_no_backup_and_is_no_backup"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "leads_ledger", "at_the_table_a_lead_has_no_backup_and_is_no_backup"]]
+[[plant.edit]]
+file = "crates/cf-ledger/migrations/0049.sql"
+find = "CREATE TRIGGER participant_backup_update\nBEFORE UPDATE OF backup_of, left_at, member_id, role, project_id ON participant\nWHEN NEW.backup_of IS NOT NULL\nBEGIN\n  SELECT CASE WHEN NEW.member_id IS NOT NULL OR NEW.role IN ('human', 'chief', 'lead')\n    OR NEW.id = NEW.backup_of\n    OR NOT EXISTS (\n      SELECT 1 FROM participant owner WHERE owner.id = NEW.backup_of\n        AND owner.project_id = NEW.project_id AND owner.member_id IS NULL\n        AND owner.role NOT IN ('human', 'chief', 'lead')"
+replace = "CREATE TRIGGER participant_backup_update\nBEFORE UPDATE OF backup_of, left_at, member_id, role, project_id ON participant\nWHEN NEW.backup_of IS NOT NULL\nBEGIN\n  SELECT CASE WHEN NEW.member_id IS NOT NULL OR NEW.role IN ('human', 'chief', 'lead')\n    OR NEW.id = NEW.backup_of\n    OR NOT EXISTS (\n      SELECT 1 FROM participant owner WHERE owner.id = NEW.backup_of\n        AND owner.project_id = NEW.project_id AND owner.member_id IS NULL\n        AND owner.role NOT IN ('human', 'chief')"
+
+[[plant]]
+name = "leads ledger: the owner trigger lets an owner of a backup become a lead"
+meant = "at_the_table_a_lead_has_no_backup_and_is_no_backup"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "leads_ledger", "at_the_table_a_lead_has_no_backup_and_is_no_backup"]]
+[[plant.edit]]
+file = "crates/cf-ledger/migrations/0049.sql"
+find = "CREATE TRIGGER participant_backup_owner_update\nBEFORE UPDATE OF backup_of, left_at, member_id, role, project_id ON participant\nWHEN EXISTS (SELECT 1 FROM participant child WHERE child.backup_of = OLD.id)\n  AND (NEW.backup_of IS NOT NULL OR NEW.member_id IS NOT NULL\n       OR NEW.role IN ('human', 'chief', 'lead')"
+replace = "CREATE TRIGGER participant_backup_owner_update\nBEFORE UPDATE OF backup_of, left_at, member_id, role, project_id ON participant\nWHEN EXISTS (SELECT 1 FROM participant child WHERE child.backup_of = OLD.id)\n  AND (NEW.backup_of IS NOT NULL OR NEW.member_id IS NOT NULL\n       OR NEW.role IN ('human', 'chief')"
+
+[[plant]]
+name = "leads ledger: a lead's model is not checked as an id"
+meant = "a_leads_model_and_its_name_are_held_to_what_a_chiefs_are"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "leads_ledger", "a_leads_model_and_its_name_are_held_to_what_a_chiefs_are"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/leads.rs"
+find = "        model::require_model_id(model)?;"
+replace = "        let _ = model;"
+
+[[plant]]
+name = "leads ledger: a lead's model name is not checked"
+meant = "a_leads_model_and_its_name_are_held_to_what_a_chiefs_are"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "leads_ledger", "a_leads_model_and_its_name_are_held_to_what_a_chiefs_are"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/leads.rs"
+find = "    model::parse_model_name(lead.model_name.as_ref().map(|name| json!(name)).as_ref())?;"
+replace = ""
+
+[[plant]]
+name = "leads ledger: the lead module is built for every build"
+meant = "nothing_but_the_ledger_names_add_lead_or_its_request"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "leads_ledger", "nothing_but_the_ledger_names_add_lead_or_its_request"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/lib.rs"
+find = "#[cfg(feature = \"test-support\")]\nmod leads;"
+replace = "mod leads;"
+
+[[plant]]
+name = "leads ledger: add_lead is a method of every build"
+meant = "nothing_but_the_ledger_names_add_lead_or_its_request"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "leads_ledger", "nothing_but_the_ledger_names_add_lead_or_its_request"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/ledger/staff.rs"
+find = "    #[cfg(feature = \"test-support\")]\n    pub fn add_lead("
+replace = "    pub fn add_lead("
+
+[[plant]]
+name = "leads ledger: a file of the ledger outside the three names add_lead"
+meant = "nothing_but_the_ledger_names_add_lead_or_its_request"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "leads_ledger", "nothing_but_the_ledger_names_add_lead_or_its_request"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/projects.rs"
+find = "//! Projects: each with its human, its chief and its staff, open or suspended,"
+replace = "//! Projects: each with its human, its chief and its staff, open or suspended, add_lead"
+
+[[plant]]
+name = "leads ledger: a file of the xtask names the lead request"
+meant = "nothing_but_the_ledger_names_add_lead_or_its_request"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "leads_ledger", "nothing_but_the_ledger_names_add_lead_or_its_request"]]
+[[plant.edit]]
+file = "tools/xtask/src/plants.rs"
+find = "//! `cargo xtask plants <family> [words…] [--check]`: the repository's mutation"
+replace = "//! `cargo xtask plants <family> [words…] [--check]`: NewLead the repository's mutation"

@@ -45,8 +45,18 @@ fn ledger_at_the_predecessor() -> Connection {
                   (6, 1, 'gone-backup', 'worker', '[\"worker\"]', 'codex', 'gpt', 'complex', '2026-11-01T10:04:00.000Z', '2026-11-01T12:00:00.000Z', '[]'),
                   (7, 2, 'human', 'human', '[]', NULL, NULL, NULL, '2026-11-02T10:00:00.000Z', NULL, '[]'),
                   (8, 2, 'chief', 'chief', '[]', 'pi', NULL, NULL, '2026-11-02T10:00:00.000Z', NULL, '[]');
+         INSERT INTO participant (id, project_id, handle, role, roles, member_id, created_at)
+           VALUES (10, 1, 'opus-high-amber-pine', 'worker', '[\"worker\"]', 3, '2026-11-01T10:06:00.000Z');
          UPDATE participant SET backup_of = 3 WHERE id = 5;
          UPDATE participant SET backup_of = 3 WHERE id = 6;
+         UPDATE participant SET
+             agent = 'agent-of-3', switched_from_harness = 'switched-from-harness-of-3',
+             switched_from_agent = 'switched-from-agent-of-3', switched_from_cut = 7, designer = 1,
+             switched_from_model = 'switched-from-model-of-3', launched_model = 'launched-model-of-3',
+             gone_model = 'gone-model-of-3', effort = 'effort-of-3', model_name = 'model-name-of-3',
+             needs_edit = 1, out_until = '2026-11-01T13:00:00.000Z', out_since = '2026-11-01T12:30:00.000Z',
+             vacation_since = '2026-11-01T11:30:00.000Z', out_kind = 'busy', out_form = '{\"kind\":\"billing\"}'
+           WHERE id = 3;
          INSERT INTO participant (id, project_id, handle, role, roles, created_at) VALUES (9, 2, 'temporary', 'worker', '[\"worker\"]', '2026-11-02T10:05:00.000Z');
          DELETE FROM participant WHERE id = 9;
          INSERT INTO task (id, project_id, number, title, body, requester_id, assignee_id, state, pool, tier, created_at, updated_at)
@@ -61,22 +71,26 @@ fn ledger_at_the_predecessor() -> Connection {
     db
 }
 
-/// Every table's rows, each value as SQLite quotes it, by the columns `columns_of` names for it
-/// (`task` after the migration has one column more than before).
+/// Every table's rows by rowid, each value with its type as SQLite quotes it, by the columns given
+/// for it (read from the schema of the predecessor: `task` after the migration has one more).
 fn every_row(db: &Connection, tables: &[(String, Vec<String>)]) -> Vec<(String, Vec<Vec<String>>)> {
     tables
         .iter()
         .map(|(table, columns)| {
             let quoted = columns
                 .iter()
-                .map(|column| format!("quote(\"{column}\")"))
+                .map(|column| format!("typeof(\"{column}\") || ':' || quote(\"{column}\")"))
                 .collect::<Vec<_>>()
                 .join(", ");
+            // By rowid, and each value with its type: a value moved to another column or another
+            // type is a difference.
             let rows = db
-                .prepare(&format!("SELECT {quoted} FROM \"{table}\" ORDER BY rowid"))
+                .prepare(&format!(
+                    "SELECT quote(rowid), {quoted} FROM \"{table}\" ORDER BY rowid"
+                ))
                 .expect("the SQL of a test reads the ledger")
                 .query_map([], |row| {
-                    (0..columns.len())
+                    (0..=columns.len())
                         .map(|at| row.get::<_, String>(at))
                         .collect::<rusqlite::Result<Vec<_>>>()
                 })
@@ -86,6 +100,49 @@ fn every_row(db: &Connection, tables: &[(String, Vec<String>)]) -> Vec<(String, 
             (table.clone(), rows)
         })
         .collect()
+}
+
+/// Each column of `participant`, read from the schema, holds in some row a value that is not its
+/// default: a column added to the table without a value here fails this, so a copy that forgets
+/// it cannot pass by comparing nulls with nulls. The values of the rich row differ from one
+/// another's, so two columns exchanged by a copy are a difference.
+fn every_column_of_participant_is_seeded(db: &Connection) {
+    let columns: Vec<(String, Option<String>)> = db
+        .prepare("SELECT name, dflt_value FROM pragma_table_info('participant')")
+        .expect("the SQL of a test reads the ledger")
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+        .expect("the SQL of a test reads the ledger")
+        .map(Result::unwrap)
+        .collect();
+    assert_eq!(
+        columns.len(),
+        29,
+        "participant's columns at the predecessor"
+    );
+    for (column, default) in columns {
+        let default = default.unwrap_or_else(|| "NULL".into());
+        let seeded: i64 = db
+            .query_row(
+                &format!(
+                    "SELECT COUNT(*) FROM participant WHERE quote(\"{column}\") != ?1 AND \"{column}\" IS NOT NULL"
+                ),
+                [&default],
+                |row| row.get(0),
+            )
+            .expect("the SQL of a test reads the ledger");
+        assert!(
+            seeded > 0,
+            "no row of `participant` gives `{column}` a value of its own"
+        );
+        let distinct: i64 = db
+            .query_row(
+                &format!("SELECT COUNT(DISTINCT quote(\"{column}\")) FROM participant"),
+                [],
+                |row| row.get(0),
+            )
+            .expect("the SQL of a test reads the ledger");
+        assert!(distinct > 1, "`{column}` holds one value in every row");
+    }
 }
 
 /// The tables the predecessor has, each with its columns.
@@ -136,12 +193,13 @@ fn sequences(db: &Connection) -> Vec<(String, i64)> {
 fn the_migration_keeps_every_row_every_id_and_every_sequence_of_a_populated_ledger() {
     let db = ledger_at_the_predecessor();
     let tables = tables_of(&db);
+    every_column_of_participant_is_seeded(&db);
     let before = every_row(&db, &tables);
     let ahead = sequences(&db);
     assert!(
         ahead
             .iter()
-            .any(|(name, seq)| name == "participant" && *seq == 9),
+            .any(|(name, seq)| name == "participant" && *seq == 10),
         "the sequence runs ahead of the rows: {ahead:?}"
     );
     migrate(&db, &MIGRATIONS).expect("migrated");
@@ -175,7 +233,7 @@ fn the_migration_keeps_every_row_every_id_and_every_sequence_of_a_populated_ledg
         [],
     )
     .expect("a new participant");
-    assert_eq!(db.last_insert_rowid(), 10);
+    assert_eq!(db.last_insert_rowid(), 11);
 }
 
 #[test]
@@ -192,7 +250,20 @@ fn the_migration_keeps_each_index_and_each_trigger_as_the_predecessor_held_it() 
     );
     migrate(&db, &MIGRATIONS).expect("migrated");
     let after = schema(&db, "'index', 'trigger'");
-    assert_eq!(after, before, "each index and trigger, by its text");
+    // The triggers are the predecessor's with one word more, `lead`, in the two lists of what
+    // is no backup and has none; every index and every other word is as it was.
+    let widened: Vec<_> = before
+        .into_iter()
+        .map(|(kind, name, sql)| {
+            let sql = if kind == "trigger" {
+                sql.replace("('human', 'chief')", "('human', 'chief', 'lead')")
+            } else {
+                sql
+            };
+            (kind, name, sql)
+        })
+        .collect();
+    assert_eq!(after, widened, "each index and trigger, by its text");
 }
 
 /// The foreign-key check cannot see a trigger that the rebuild dropped: an invalid backup
@@ -218,6 +289,37 @@ fn each_of_the_three_backup_triggers_still_refuses_what_it_refused() {
     );
     // The owner trigger: an owner with a live backup cannot leave.
     assert!(refused("UPDATE participant SET left_at = 'x' WHERE id = 3")
+        .contains("member still has a backup"));
+}
+
+/// A lead has no backup, as the chief has none, and is nobody's backup: the three triggers refuse
+/// the word `lead` where they refuse `human` and `chief`.
+#[test]
+fn at_the_table_a_lead_has_no_backup_and_is_no_backup() {
+    let db = ledger_at_the_predecessor();
+    migrate(&db, &MIGRATIONS).expect("migrated");
+    db.execute(
+        "INSERT INTO participant (id, project_id, handle, role, created_at) VALUES (20, 1, 'lead-1', 'lead', 'x')",
+        [],
+    )
+    .expect("a lead's row");
+    let refused = |sql: &str| -> String { db.execute_batch(sql).expect_err(sql).to_string() };
+    // The insert trigger: a backup of a lead, and a lead that is a backup.
+    assert!(refused("INSERT INTO participant (project_id, handle, role, created_at, backup_of) VALUES (1, 'bad-1', 'worker', 'x', 20)")
+        .contains("invalid backup relationship"));
+    assert!(refused("INSERT INTO participant (project_id, handle, role, created_at, backup_of) VALUES (1, 'bad-2', 'lead', 'x', 3)")
+        .contains("invalid backup relationship"));
+    // The update trigger: a member made the backup of a lead, and a member made a lead that backs up.
+    assert!(
+        refused("UPDATE participant SET backup_of = 20 WHERE id = 4")
+            .contains("invalid backup relationship")
+    );
+    assert!(
+        refused("UPDATE participant SET backup_of = 3, role = 'lead' WHERE id = 4")
+            .contains("invalid backup relationship")
+    );
+    // The owner trigger: a member with a backup cannot become a lead.
+    assert!(refused("UPDATE participant SET role = 'lead' WHERE id = 3")
         .contains("member still has a backup"));
 }
 
@@ -633,6 +735,46 @@ fn a_fourth_lead_is_refused_in_the_contracts_words_and_nothing_is_written() {
 }
 
 #[test]
+fn a_leads_model_and_its_name_are_held_to_what_a_chiefs_are() {
+    let (_home, mut ledger, project) = ledger_with_a_project();
+    let bad_id = ledger
+        .add_lead(
+            project.id,
+            &NewLead {
+                model: Some("-flag".into()),
+                ..lead("pages")
+            },
+        )
+        .expect_err("a model that reads as a flag");
+    assert_eq!(bad_id.code(), Some("invalid-model"));
+    let bad_name = ledger
+        .add_lead(
+            project.id,
+            &NewLead {
+                model_name: Some("two\nlines".into()),
+                ..lead("pages")
+            },
+        )
+        .expect_err("a name with a control character");
+    assert_eq!(bad_name.code(), Some("invalid-model-name"));
+    let blank_name = ledger
+        .add_lead(
+            project.id,
+            &NewLead {
+                model_name: Some("  ".into()),
+                ..lead("pages")
+            },
+        )
+        .expect_err("a blank name");
+    assert_eq!(blank_name.code(), Some("invalid-model-name"));
+    let read = ledger
+        .project(project.id)
+        .expect("read")
+        .expect("a project");
+    assert_eq!(read.participants.len(), 2, "nothing was written");
+}
+
+#[test]
 fn a_blank_scope_or_an_unknown_harness_is_refused_and_nothing_is_written() {
     let (_home, mut ledger, project) = ledger_with_a_project();
     let blank = ledger
@@ -775,10 +917,12 @@ fn a_task_says_who_added_it_only_where_its_requester_has_changed() {
         .all(|task| task.number != number || task.added_by.as_deref() == Some("lead-1")));
 }
 
-/// `add_lead` is the ledger's alone until the page's step: no route, command, page operation or
-/// engine entry calls it. A source test, so that a caller that appears must appear here first.
+/// `add_lead` is the ledger's alone until the page's step: it is compiled only for tests and the
+/// `test-support` feature, and this source test is the second guard: no file of the product but
+/// the three below names `add_lead` or `NewLead`, by whatever path or wrapper (a bare word, not a
+/// call), in any crate, the app and the xtask included. Test folders are the callers to come.
 #[test]
-fn nothing_but_the_ledger_and_its_tests_calls_add_lead() {
+fn nothing_but_the_ledger_names_add_lead_or_its_request() {
     fn walk(dir: &Path, found: &mut Vec<String>) {
         for entry in fs::read_dir(dir).expect("a folder") {
             let path = entry.expect("an entry").path();
@@ -788,37 +932,52 @@ fn nothing_but_the_ledger_and_its_tests_calls_add_lead() {
                 .to_string_lossy()
                 .to_string();
             if path.is_dir() {
-                if !["target", "node_modules", "tests", "testing", ".git"].contains(&name.as_str())
-                {
+                if !["target", "node_modules", "tests", ".git"].contains(&name.as_str()) {
                     walk(&path, found);
                 }
             } else if name.ends_with(".rs") && name != "tests.rs" && !name.ends_with("_tests.rs") {
                 let text = fs::read_to_string(&path).expect("a source");
-                if text.contains("add_lead(") {
-                    found.push(path.to_string_lossy().to_string());
+                if text.contains("add_lead") || text.contains("NewLead") {
+                    found.push(path.to_string_lossy().replace('\\', "/"));
                 }
             }
         }
     }
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let mut found = Vec::new();
-    for source in ["crates", "app/src-tauri/src", "xtask"] {
+    for source in ["crates", "app/src-tauri/src", "tools/xtask"] {
         let dir = root.join(source);
-        if dir.exists() {
-            walk(&dir, &mut found);
-        }
+        assert!(
+            dir.is_dir(),
+            "{source} is a folder of the product's sources"
+        );
+        walk(&dir, &mut found);
     }
     found.sort();
     let found: Vec<String> = found
         .into_iter()
-        .map(|path| {
-            let path = path.replace('\\', "/");
-            path.split("/crates/").last().unwrap_or(&path).to_string()
-        })
+        .map(|path| path.split("/crates/").last().unwrap_or(&path).to_string())
         .collect();
+    // And the feature gate is on both: the shipped build holds no such symbol.
+    let source = |path: &str| {
+        fs::read_to_string(root.join("crates/cf-ledger/src").join(path)).expect("a source")
+    };
+    assert!(
+        source("lib.rs").contains("#[cfg(feature = \"test-support\")]\nmod leads;"),
+        "the module is for tests and the test-support feature only"
+    );
+    assert!(
+        source("ledger/staff.rs")
+            .contains("#[cfg(feature = \"test-support\")]\n    pub fn add_lead("),
+        "the method is for tests and the test-support feature only"
+    );
     assert_eq!(
         found,
-        ["cf-ledger/src/leads.rs", "cf-ledger/src/ledger/staff.rs"],
-        "who calls or defines add_lead"
+        [
+            "cf-ledger/src/leads.rs",
+            "cf-ledger/src/ledger/staff.rs",
+            "cf-ledger/src/lib.rs"
+        ],
+        "who names add_lead or NewLead"
     );
 }
