@@ -553,8 +553,11 @@ describe('consensflow Pi extension', () => {
 
   for (const hook of ['before_agent_start', 'agent_start', 'turn_start']) {
     it(`says working first thing at ${hook}, before a later extension's handler`, async () => {
-      const s = await setup(null, { idle: false })
+      const s = await setup(null)
       try {
+        assert.equal(wordOf(s).state, 'rest')
+        // Pi sets its run flag, then calls the hook.
+        s.setIdle(false)
         assert.equal(await s.pi.handlers.get(hook)({}, s.ctx), undefined, 'it changes nothing of the run')
         const word = wordOf(s)
         assert.deepEqual([word.state, word.begun, word.ended], ['working', 1, 0])
@@ -981,16 +984,18 @@ describe('consensflow Pi extension', () => {
         [wordOf(s).state, wordOf(s).begun, wordOf(s).ended, wordOf(s).held, wordOf(s).last],
         ['rest', 1, 1, null, { leaf: 'answer-1', aborted: null }],
       )
+      // A prompt in hand again, and only entries of another kind after the leaf (a label, a
+      // person's entry): no run ended; the prompt stays in hand.
+      await again.handlers.get('input')({ type: 'input', text: 'again' }, s.ctx)
       await again.handlers.get('session_shutdown')({ reason: 'reload' })
-      // Entries of another kind after the leaf (a label, a person's entry) are no run.
       s.ctx.sessionManager.getBranch = () => [
         { type: 'message', id: 'answer-1', message: { role: 'assistant' } },
         { type: 'label', id: 'label-1' },
       ]
       const third = fakePi()
-      createDeliveryExtension(third, { settled: s.settled, launchId: 'launch-pi-test', pollMs: 60_000 })
+      createDeliveryExtension(third, { settled: s.settled, launchId: 'launch-pi-test', pollMs: 60_000, inHandMs: 30_000 })
       await third.handlers.get('session_start')({ reason: 'reload' }, s.ctx)
-      assert.deepEqual([wordOf(s).begun, wordOf(s).ended], [1, 1], 'nothing awaited: nothing counted')
+      assert.deepEqual([wordOf(s).state, wordOf(s).begun, wordOf(s).ended], ['busy', 1, 1], 'no answer after the leaf: nothing counted')
       await third.handlers.get('session_shutdown')({ reason: 'quit' })
     } finally {
       await s.close()
