@@ -811,7 +811,10 @@ fn nothing_but_the_ledger_and_its_tests_calls_add_lead() {
     found.sort();
     let found: Vec<String> = found
         .into_iter()
-        .map(|path| path.split("/crates/").last().unwrap_or(&path).to_string())
+        .map(|path| {
+            let path = path.replace('\\', "/");
+            path.split("/crates/").last().unwrap_or(&path).to_string()
+        })
         .collect();
     assert_eq!(
         found,
