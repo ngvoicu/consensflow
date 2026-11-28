@@ -115,7 +115,7 @@
 //! table goes on past a part, its line says so): the first by the command the paste
 //! gives, each next by the command the part before ends with (`--part N`), and the
 //! opening says in how many ([`Telling::in_parts`]: on the Mac fixture, with specs on and the
-//! most rules, one piece through 26 rows, two through 297, three at 298). Each part printed is said to the board, and
+//! most rules, one piece through 24 rows, two through 297, three at 298). Each part printed is said to the board, and
 //! logged as `message.part_read` (`receive_read_part`) whatever state the note is in: the
 //! role is read once every part was printed in the conversation it goes to, in any order,
 //! and told then or once its paste is confirmed, whichever is last (T-1513, review T-1510:
