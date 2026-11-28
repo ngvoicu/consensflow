@@ -531,6 +531,64 @@ fn a_backup_cannot_be_repurposed_as_an_independent_member_by_editing_its_roles()
     assert!(changed.is_err(), "the backup's roles follow its member");
 }
 
+/// T-2405 round 2: a write of a member's roles that names the roles it read is refused, in its
+/// transaction, when another writer gave a role meanwhile, and writes nothing, for the member and
+/// for its backup alike.
+#[test]
+fn roles_written_from_a_stale_read_are_refused_and_leave_the_member_and_its_backup_as_they_are() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut ledger = open_ledger(&dir.path().join("ledger.db"), Options::default()).unwrap();
+    let p = project(
+        &mut ledger,
+        vec![
+            member("alpha", "worker", "standard"),
+            member("beta", "worker", "standard"),
+        ],
+    );
+    let (primary, backup) = (id(&p, "alpha"), id(&p, "beta"));
+    stage_columns(&ledger);
+    ledger
+        .sqlite()
+        .execute(
+            "UPDATE participant SET backup_of=? WHERE id=?",
+            [primary, backup],
+        )
+        .unwrap();
+    let roles_of = |ledger: &Ledger, id: i64| -> Value {
+        let text: String = ledger
+            .sqlite()
+            .query_row("SELECT roles FROM participant WHERE id=?", [id], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        serde_json::from_str(&text).unwrap()
+    };
+    // The page read ["worker"]; a second writer gives the reviewer slot meanwhile.
+    ledger
+        .set_roles(p.id, "alpha", &["worker", "reviewer"])
+        .unwrap();
+    let refused = ledger
+        .set_roles_if(p.id, "alpha", &["worker", "researcher"], &["worker"])
+        .expect_err("the roles are no longer the ones the writer read");
+    assert!(refused.to_string().contains("look again"), "{refused}");
+    assert_eq!(roles_of(&ledger, primary), json!(["worker", "reviewer"]));
+    assert_eq!(roles_of(&ledger, backup), json!(["worker", "reviewer"]));
+    // Read again, the same write holds (the order of the read does not matter).
+    ledger
+        .set_roles_if(
+            p.id,
+            "alpha",
+            &["worker", "reviewer", "researcher"],
+            &["reviewer", "worker"],
+        )
+        .unwrap();
+    assert_eq!(
+        roles_of(&ledger, primary),
+        json!(["worker", "reviewer", "researcher"])
+    );
+    assert_eq!(roles_of(&ledger, backup), roles_of(&ledger, primary));
+}
+
 #[test]
 fn a_live_member_cannot_have_two_live_backups() {
     let dir = tempfile::tempdir().unwrap();

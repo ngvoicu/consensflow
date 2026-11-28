@@ -1,0 +1,12 @@
+{
+  "about": "The staff ConsensFlow itself is built with, and that we know works: Claude Code does the work and makes the hardest calls, and Codex reviews and tests it, a second family of models checking the first.",
+  "members": [
+    { "harness": "claude-code", "model": "claude-opus-5-5", "effort": "medium", "tier": "critical", "roles": ["worker"] },
+    { "harness": "claude-code", "model": "claude-sonnet-5-5", "effort": "medium", "tier": "complex", "roles": ["worker"] },
+    { "harness": "claude-code", "model": "claude-opus-5-5", "effort": "xhigh", "tier": "standard", "roles": ["frontend"] },
+    { "harness": "claude-code", "model": "claude-fable-5-2", "effort": "high", "tier": "critical", "roles": ["architect", "advisor", "reviewer"] },
+    { "harness": "codex", "model": "gpt-6-2-astra", "effort": "xhigh", "tier": "complex", "roles": ["reviewer"] },
+    { "harness": "codex", "model": "gpt-6-2-astra", "effort": "xhigh", "tier": "standard", "roles": ["researcher", "reviewer", "tester"] },
+    { "harness": "codex", "designer": true, "roles": ["designer"] }
+  ]
+}

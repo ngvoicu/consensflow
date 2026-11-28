@@ -153,6 +153,18 @@ impl Ledger {
         staff::set_roles(&mut self.store, project_id, handle, roles)
     }
 
+    /// [`Ledger::set_roles`] that is refused (`roles-changed`) when the member's roles are no
+    /// longer `expected`, the ones the writer read: the check and the write are one transaction.
+    pub fn set_roles_if<S: AsRef<str>, E: AsRef<str>>(
+        &mut self,
+        project_id: i64,
+        handle: &str,
+        roles: &[S],
+        expected: &[E],
+    ) -> Result<ParticipantView, LedgerError> {
+        staff::set_roles_if(&mut self.store, project_id, handle, roles, Some(expected))
+    }
+
     /// A member leaves the staff, its open tasks cancelled.
     pub fn remove_member(
         &mut self,

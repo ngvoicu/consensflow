@@ -1454,6 +1454,54 @@ async fn a_role_is_given_to_a_member_by_member_roles_at_the_tier_it_has_and_add_
         .await;
 }
 
+/// T-2405 round 2: `member.roles` with `expected`, the roles the page last read, holds only if the
+/// member still has them; another writer's role is never written over, and a page that sends
+/// no `expected` writes as before.
+#[tokio::test]
+async fn member_roles_that_names_the_roles_it_read_is_refused_when_they_changed() {
+    LocalSet::new()
+        .run_until(async {
+            let staffing = staffing();
+            let added = staffing
+                .add(json!({ "harness": "claude-code", "model": "claude-sonnet-5-5", "effort": "medium", "tier": "light", "roles": ["integrator"] }))
+                .await;
+            assert_eq!(added["ok"], true, "{added}");
+            let handle = "claude-sonnet-5-5-medium";
+            // Another writer gives the worker slot after the page read ["integrator"].
+            let other = ask(
+                &staffing.app,
+                "member.roles",
+                json!({ "project": staffing.project, "agent": handle, "roles": ["worker", "integrator"] }),
+            )
+            .await;
+            assert_eq!(other["ok"], true, "{other}");
+            let stale = ask(
+                &staffing.app,
+                "member.roles",
+                json!({ "project": staffing.project, "agent": handle, "roles": ["integrator", "tester"], "expected": ["integrator"] }),
+            )
+            .await;
+            assert_eq!(stale["ok"], false, "{stale}");
+            assert!(stale["error"].as_str().unwrap().contains("look again"), "{stale}");
+            assert_eq!(staffing.member(handle).roles, ["worker", "integrator"]);
+            let fresh = ask(
+                &staffing.app,
+                "member.roles",
+                json!({ "project": staffing.project, "agent": handle, "roles": ["worker", "integrator", "tester"], "expected": ["integrator", "worker"] }),
+            )
+            .await;
+            assert_eq!(fresh["ok"], true, "{fresh}");
+            let bad = ask(
+                &staffing.app,
+                "member.roles",
+                json!({ "project": staffing.project, "agent": handle, "roles": ["worker"], "expected": "worker" }),
+            )
+            .await;
+            assert_eq!(bad["ok"], false, "{bad}");
+        })
+        .await;
+}
+
 // BKV-04: page operations preserve a backup as a separate row and carry its link
 // through New project. These tests use the recorded harness catalogs above.
 async fn bkv_page_owner(s: &Staffing) -> String {

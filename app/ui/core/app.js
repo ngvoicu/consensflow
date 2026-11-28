@@ -10,6 +10,7 @@ import { ProjectMenu } from './project-menu.js'
 import { poolName, readRoles } from './roles.js'
 import { SpecsSettings } from './specs-settings.js'
 import { SpecsViewer } from './specs-viewer.js'
+import { readSuggestion } from './suggested-staff.js'
 import { TerminalsView } from './terminals.js'
 
 /**
@@ -99,12 +100,14 @@ async function daemon(operation, body = {}) {
 
 /**
  * The harnesses not installed here, read again: Add member and the chief's pickers offer none of
- * them; and the staff's roles, which the pickers offer and the board names.
+ * them; the staff's roles, which the pickers offer and the board names; and the suggested staff
+ * the staff dialogs offer (T-2404).
  */
 async function readMissing() {
-  const { missing = [], roles } = await daemon('harnesses.missing')
+  const { missing = [], roles, suggestedStaff } = await daemon('harnesses.missing')
   state.missing = missing
   readRoles(roles)
+  readSuggestion(suggestedStaff)
 }
 
 /**

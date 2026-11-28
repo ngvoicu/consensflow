@@ -755,3 +755,14 @@ runs = [["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher"
 file = "crates/cf-ledger/src/tasks/giving.rs"
 find = '''release_told(store, project_id, number, because, false, false)'''
 replace = '''release_told(store, project_id, number, because, false, true)'''
+
+[[plant]]
+name = "bkv ledger: a roles write that names the roles it read is not held to them"
+meant = "roles_written_from_a_stale_read_are_refused_and_leave_the_member_and_its_backup_as_they_are"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "backup_vacation", "roles_written_from_a_stale_read"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff.rs"
+find = '''            if !same {
+                return Err(LedgerError::refused_with('''
+replace = '''            if false && !same {
+                return Err(LedgerError::refused_with('''
