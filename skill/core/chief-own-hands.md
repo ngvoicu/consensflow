@@ -17,7 +17,7 @@ Before your first board command, run `{{cf}} guide`: it prints the board's guide
 parts, each ending with the command for the next.
 
 A message headed `[ConsensFlow m-… · T-… · …]` (separators may vary) is ConsensFlow's delivery; the guide says how to decide it. Work already on the board
-goes on, and its results come to you.
+goes on, and its results come to you as messages once your turn has ended, one at a time, so after you put work on the board, go on with your own work or end your turn, without watching the board.
 
 The human can turn "Do with your own hands" off on your pane, and you are told when
 they do.

@@ -153,6 +153,26 @@ impl Ledger {
         tasks::left_running(&self.store, project_id, number)
     }
 
+    /// Whether T-`number`'s result is still queued for `handle`: the decision about to be made
+    /// withdraws it.
+    pub fn result_queued_for(
+        &self,
+        project_id: i64,
+        number: i64,
+        handle: &str,
+    ) -> Result<bool, LedgerError> {
+        tasks::result_queued_for(&self.store, project_id, number, handle)
+    }
+
+    /// The numbers of the tasks whose result is still queued for `handle`.
+    pub fn results_queued_for(
+        &self,
+        project_id: i64,
+        handle: &str,
+    ) -> Result<Vec<i64>, LedgerError> {
+        tasks::results_queued_for(&self.store, project_id, handle)
+    }
+
     /// A coordinator accepts a task's result.
     pub fn accept_task(
         &mut self,

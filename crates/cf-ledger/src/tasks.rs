@@ -28,7 +28,8 @@ pub use finishing::reopen_or_accept;
 pub(crate) use finishing::{
     accept_failed_task, accept_task, call_off, cancel_task, delete_tasks, fail_task, give_up_task,
     left_running, note_stranded_waits, record_finished, record_result, release_ready, reopen_task,
-    tell_stranded_waiters, tell_waiting_for_failed, waiting_for_it_of, Ending,
+    result_queued_for, results_queued_for, tell_stranded_waiters, tell_waiting_for_failed,
+    waiting_for_it_of, Ending,
 };
 pub use giving::{asked_role, NewTask};
 pub(crate) use giving::{

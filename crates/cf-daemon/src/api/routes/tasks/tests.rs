@@ -1618,6 +1618,56 @@ async fn stc_accept_moves_several_done_tasks_together() {
     }
 }
 
+/// A finished task whose result the chief was given: its number.
+fn given_result_task(scene: &Scene) -> i64 {
+    let number = session_task_at_work(scene);
+    let mut ledger = scene.context.ledger.borrow_mut();
+    let result = ledger
+        .record_result(scene.project.id, number, "Done.")
+        .unwrap()
+        .message
+        .unwrap();
+    ledger.begin_delivery(result.id).unwrap();
+    ledger.confirm_delivery(result.id, None).unwrap();
+    number
+}
+
+/// Four done tasks, the results of the second and the fourth still queued for the chief,
+/// decided together by `action`: the numbers its answer says that of, and those of the two.
+async fn bulk_says_queued(action: &str) -> (Vec<i64>, Vec<i64>) {
+    let scene = scene();
+    let first = given_result_task(&scene);
+    let second = finished_session_task(&scene);
+    let third = given_result_task(&scene);
+    let fourth = finished_session_task(&scene);
+    let (status, said) = stc_post(
+        &scene,
+        &json!({"action":action, "tasks":[first,second,third,fourth], "body":"checked"}),
+    )
+    .await;
+    assert_eq!(status, 200, "{action}: {said}");
+    let results = said["tasks"].as_array().unwrap();
+    assert_eq!(results.len(), 4, "{action}: {said}");
+    let named = results
+        .iter()
+        .filter(|result| result.get("resultQueued") == Some(&json!(true)))
+        .map(|result| result["task"]["number"].as_i64().unwrap())
+        .collect();
+    (named, vec![second, fourth])
+}
+
+#[tokio::test]
+async fn stc_a_bulk_accept_names_exactly_the_tasks_whose_results_were_still_queued() {
+    let (named, queued) = bulk_says_queued("accept").await;
+    assert_eq!(named, queued);
+}
+
+#[tokio::test]
+async fn stc_a_bulk_cancel_names_exactly_the_tasks_whose_results_were_still_queued() {
+    let (named, queued) = bulk_says_queued("cancel").await;
+    assert_eq!(named, queued);
+}
+
 #[tokio::test]
 async fn stc_a_key_refuses_a_changed_source_even_when_the_sections_are_the_same() {
     let scene = scene();

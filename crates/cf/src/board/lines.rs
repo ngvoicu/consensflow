@@ -79,11 +79,17 @@ pub fn task_line(task: &Value) -> String {
 /// telling its chief (`aside`, while it holds: a note that asks no decision is not typed into
 /// the chief's window): `paused · its window stays open …`.
 fn state_with_aside(task: &Value) -> String {
-    match task.get("aside").and_then(Value::as_str) {
+    let state = match task.get("aside").and_then(Value::as_str) {
         Some(aside) if !aside.is_empty() => {
             format!("{} · {aside}", js::text(task.get("state")))
         }
         _ => js::text(task.get("state")).into_owned(),
+    };
+    // Its result is still queued for the caller.
+    if task.get("resultQueued") == Some(&Value::Bool(true)) {
+        format!("{state} · result queued")
+    } else {
+        state
     }
 }
 

@@ -34,6 +34,11 @@ pub(super) async fn list(
     let waits = Waits::now(context, caller)?;
     // Nothing waits where nothing is held at the gate and the project is open.
     let held = !board.gated.is_empty() || waits.closed();
+    // The results still queued for the caller.
+    let queued = context
+        .ledger
+        .borrow()
+        .results_queued_for(caller.project.id, &caller.participant.handle)?;
     let summary = |card: &TaskCard| -> Result<Value, Failure> {
         let mut summary = TaskSummary::from(card);
         if held && GIVEN.contains(&card.state.as_str()) && !may_move(caller, &card.requester) {
@@ -45,7 +50,11 @@ pub(super) async fn list(
                 waiting.clone_into(&mut summary.title);
             }
         }
-        value(&summary)
+        let mut summary = value(&summary)?;
+        if queued.contains(&card.number) {
+            summary["resultQueued"] = json!(true);
+        }
+        Ok(summary)
     };
     let open = board
         .open
@@ -400,17 +409,21 @@ fn decide(
         } else {
             Vec::new()
         };
-        warnings.push((running, dropped));
+        let result_queued = ledger.result_queued_for(caller.project.id, number, by)?;
+        warnings.push((running, dropped, result_queued));
     }
     let moved = ledger.decide_tasks(caller.project.id, &numbers, by, action, words)?;
     drop(ledger);
     (context.kick)();
     let mut tasks = Vec::new();
-    for (task, (running, dropped)) in moved.iter().zip(warnings) {
+    for (task, (running, dropped, result_queued)) in moved.iter().zip(warnings) {
         let mut result = Map::new();
         result.insert("task".into(), value(&TaskSummary::from(task))?);
         if let Some((jobs, agents)) = running.filter(|count| *count != (0, 0)) {
             result.insert("running".into(), json!({"jobs":jobs,"agents":agents}));
+        }
+        if result_queued {
+            result.insert("resultQueued".into(), json!(true));
         }
         if !dropped.is_empty() {
             result.insert("dropped".into(), json!(dropped));

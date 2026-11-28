@@ -97,7 +97,11 @@ pub(super) async fn handle(
             task.task.body.clear();
             task.task.title = held.to_owned();
         }
-        return Ok(Answer::ok(json!({ "task": value(&task)? })));
+        let mut shown = value(&task)?;
+        if ledger_result_queued(context, caller, task.task.number)? {
+            shown["resultQueued"] = json!(true);
+        }
+        return Ok(Answer::ok(json!({ "task": shown })));
     }
     if action == Some(TaskAction::Transcript) && get {
         return transcript(context, caller, &task, &request);
@@ -503,6 +507,11 @@ fn moved(
     let mut dropped = Vec::new();
     let mut running = (0, 0);
     let mut told_withdrawn: Vec<i64> = Vec::new();
+    // Read before the decision, which withdraws a result still queued for the caller.
+    let result_queued = matches!(
+        action,
+        TaskAction::Accept | TaskAction::Cancel | TaskAction::Reopen
+    ) && ledger.result_queued_for(project, number, by)?;
     let moved = match action {
         TaskAction::Accept => {
             // Read before the accept, whose close of the window ends what it still runs.
@@ -570,6 +579,9 @@ fn moved(
     if !dropped.is_empty() {
         answer.insert("dropped".to_owned(), json!(dropped));
     }
+    if result_queued {
+        answer.insert("resultQueued".to_owned(), json!(true));
+    }
     if running != (0, 0) {
         answer.insert(
             "running".to_owned(),
@@ -577,6 +589,15 @@ fn moved(
         );
     }
     Ok(Answer::ok(Value::Object(answer)))
+}
+
+/// Whether T-`number`'s result is still queued for the caller.
+fn ledger_result_queued(context: &Context, caller: &Caller, number: i64) -> Result<bool, Failure> {
+    Ok(context.ledger.borrow().result_queued_for(
+        caller.project.id,
+        number,
+        &caller.participant.handle,
+    )?)
 }
 
 /// `edit`: the brief, the tier, or both of a task before any window has its brief

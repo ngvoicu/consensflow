@@ -1587,6 +1587,116 @@ async fn an_accept_says_how_many_jobs_and_agents_the_finish_counted_running() {
 }
 
 #[tokio::test]
+async fn a_decision_says_when_the_result_it_withdraws_was_still_queued_for_the_chief() {
+    // The field report of 2026-11-27: a chief in one long turn accepted tasks whose results
+    // were still queued for it, and nothing said so.
+    for (action, state) in [
+        ("accept", "accepted"),
+        ("reopen", "queued"),
+        ("cancel", "cancelled"),
+    ] {
+        let scene = scene();
+        let number = working_task(&scene);
+        scene
+            .context
+            .ledger
+            .borrow_mut()
+            .record_result(scene.project.id, number, "Parser done")
+            .unwrap();
+        let body = if action == "reopen" {
+            r#"{"body":"More"}"#
+        } else {
+            "{}"
+        };
+        let said = post(&scene, &scene.chief, &format!("{number}/{action}"), body).await;
+        assert_eq!(said.0, 200, "{action}: {:?}", said.1);
+        assert_eq!(
+            said.1["resultQueued"],
+            json!(true),
+            "{action}: {:?}",
+            said.1
+        );
+        assert_eq!(said.1["task"]["state"], state, "{action}");
+    }
+}
+
+#[tokio::test]
+async fn a_decision_on_a_result_the_chief_was_given_says_nothing_of_it() {
+    for action in ["accept", "reopen", "cancel"] {
+        let scene = scene();
+        let number = working_task(&scene);
+        let result = scene
+            .context
+            .ledger
+            .borrow_mut()
+            .record_result(scene.project.id, number, "Parser done")
+            .unwrap()
+            .message
+            .unwrap();
+        {
+            let mut ledger = scene.context.ledger.borrow_mut();
+            ledger.begin_delivery(result.id).unwrap();
+            ledger.confirm_delivery(result.id, None).unwrap();
+        }
+        let body = if action == "reopen" {
+            r#"{"body":"More"}"#
+        } else {
+            "{}"
+        };
+        let said = post(&scene, &scene.chief, &format!("{number}/{action}"), body).await;
+        assert_eq!(said.0, 200, "{action}: {:?}", said.1);
+        assert!(
+            said.1.get("resultQueued").is_none(),
+            "{action}: {:?}",
+            said.1
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_get_and_a_list_say_which_results_are_queued_for_the_caller_alone() {
+    let scene = scene();
+    let number = working_task(&scene);
+    let list = |token: String| {
+        let scene = &scene;
+        async move { api(scene, Method::GET, "/api/tasks", &token, "").await }
+    };
+    let marked = |said: &serde_json::Value| {
+        said["lanes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .flat_map(|lane| lane["tasks"].as_array().unwrap().clone())
+            .any(|task| task["resultQueued"] == json!(true))
+    };
+    // Nothing is queued yet.
+    assert!(
+        get(&scene, &scene.chief, &number.to_string()).await.1["task"]
+            .get("resultQueued")
+            .is_none()
+    );
+    scene
+        .context
+        .ledger
+        .borrow_mut()
+        .record_result(scene.project.id, number, "Parser done")
+        .unwrap();
+    let said = get(&scene, &scene.chief, &number.to_string()).await;
+    assert_eq!(said.1["task"]["resultQueued"], json!(true), "{:?}", said.1);
+    assert!(marked(&list(scene.chief.clone()).await.1));
+    // Only the caller's own: the member's window sees nothing new.
+    let said = get(&scene, &scene.zeus, &number.to_string()).await;
+    assert!(said.1["task"].get("resultQueued").is_none(), "{:?}", said.1);
+    assert!(!marked(&list(scene.zeus.clone()).await.1));
+    // A decided task's result is withdrawn, and nothing is said of it.
+    let said = post(&scene, &scene.chief, &format!("{number}/accept"), "{}").await;
+    assert_eq!(said.0, 200, "{:?}", said.1);
+    let said = get(&scene, &scene.chief, &number.to_string()).await;
+    assert!(said.1["task"].get("resultQueued").is_none(), "{:?}", said.1);
+    assert!(!marked(&list(scene.chief.clone()).await.1));
+}
+
+#[tokio::test]
 async fn a_pause_says_what_the_engine_holds_its_task_in_the_background_for() {
     // RS-25: no note is typed of the work a pause leaves running; the pause says it at once.
     let scene = scene();

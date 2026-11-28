@@ -58,6 +58,8 @@ fn own_hands_gives_a_short_text_that_is_whole_in_itself() {
         "run `cf guide`",
         "A message headed `[ConsensFlow m-… · T-… · …]` (separators may vary) is\nConsensFlow's delivery",
         "Work already on the board\ngoes on, and its results come to you",
+        "its results come to you as messages once your turn has ended",
+        "go on with your own work or end your turn, without watching the board",
         "turn \"Do with your own hands\" off on your pane, and you are told",
     ] {
         assert!(flat.contains(&words.replace('\n', " ")), "{words}: {text}");

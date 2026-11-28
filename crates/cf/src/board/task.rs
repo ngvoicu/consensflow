@@ -639,7 +639,10 @@ fn decide_many(
             .get("dropped")
             .and_then(Value::as_array)
             .map_or_else(String::new, |dropped| went_with_it(dropped));
-        lines.push(format!("{}{running}{dropped}", task_line(task)));
+        let withdrawn = result.get("resultQueued").map_or_else(String::new, |_| {
+            result_still_queued(number, &board.cf().to_string())
+        });
+        lines.push(format!("{}{running}{dropped}{withdrawn}", task_line(task)));
     }
     Ok(Said::new(answer.into_value(), lines.join("\n")))
 }
@@ -819,7 +822,12 @@ fn get(number: u64, rest: &[String], board: &Board) -> Result<Said, Failure> {
             Some(brief) => format!("{brief}\n\n{thread}"),
             None => thread,
         };
-        let text = format!("{}\n\n{body}", task_head(&task));
+        let queued = if task.get("resultQueued") == Some(&Value::Bool(true)) {
+            "\nIts result is still queued for you."
+        } else {
+            ""
+        };
+        let text = format!("{}{queued}\n\n{body}", task_head(&task));
         let answers = waiting_answers(messages);
         return Ok(Said::new(task, text).having_written("task", answers));
     };
@@ -988,7 +996,11 @@ fn moved(
         "accept" => format!("{}{running}", task_line(&task)),
         _ => format!("{}{dropped}", task_line(&task)),
     };
-    Ok(Said::new(task, format!("{said}{sent}")))
+    let withdrawn = match answer.value().get("resultQueued") {
+        Some(_) => result_still_queued(number, &board.cf().to_string()),
+        None => String::new(),
+    };
+    Ok(Said::new(task, format!("{said}{sent}{withdrawn}")))
 }
 
 /// The members of the tier a task went to when nobody held the one asked, as `: @anubis`.
@@ -1123,6 +1135,13 @@ fn new_title(words: &Split) -> Result<Option<String>, Failure> {
             "{TITLE} takes the new title: {TITLE} \"…\""
         ))),
     }
+}
+
+/// What a decision on a task says when its result was still queued for the caller: the
+/// decision withdrew it, and `cf task get` has it. It does not say the window never had it:
+/// after a restart, recovery queues again a paste the window may have taken.
+fn result_still_queued(number: u64, cf: &str) -> String {
+    format!("\nT-{number}'s result was still queued for this window; read it with: {cf} task get T-{number}")
 }
 
 /// What an accept says of the background work the task's window was counted running when
@@ -2272,6 +2291,124 @@ and 2 idle sessions (`cf task list --all`)";
             accepted(json!({ "jobs": 0, "agents": 2 })),
             format!("{line}\nT-3's window was running 2 background agents or workflows when it was finished; accepting closes the window and ends them.")
         );
+    }
+
+    #[test]
+    fn a_get_and_a_list_say_when_the_result_is_queued_for_this_window() {
+        let mut queued = card(3, "done", Some("zeus"));
+        queued["resultQueued"] = json!(true);
+        let plain = card(4, "done", Some("zeus"));
+        let api = scripted(vec![reply(
+            200,
+            json!({ "open": [], "lanes": [lane("zeus", "worker", &[queued.clone(), plain])] }),
+        )]);
+        let board = Board::new(Some(&api.url), "tok");
+        let words = vec!["list".to_owned()];
+        let given: Vec<OsString> = words.iter().map(OsString::from).collect();
+        let listed = command(&words, &given, &board, &mut "".as_bytes())
+            .ok()
+            .unwrap()
+            .text;
+        assert!(
+            listed.contains("T-3 [done · result queued] @zeus"),
+            "{listed}"
+        );
+        assert!(listed.contains("T-4 [done] @zeus"), "{listed}");
+        let mut with_thread = queued;
+        with_thread["messages"] = json!([]);
+        let api = scripted(vec![reply(200, json!({ "task": with_thread }))]);
+        let board = Board::new(Some(&api.url), "tok");
+        let words = vec!["get".to_owned(), "T-3".to_owned()];
+        let given: Vec<OsString> = words.iter().map(OsString::from).collect();
+        let got = command(&words, &given, &board, &mut "".as_bytes())
+            .ok()
+            .unwrap()
+            .text;
+        assert!(
+            got.contains("\nIts result is still queued for you.\n"),
+            "{got}"
+        );
+    }
+
+    #[test]
+    fn a_decision_says_when_its_result_was_still_queued_for_this_window() {
+        let said = |verb: &str, state: &str, queued: bool| {
+            let mut answer = json!({ "task": card(3, state, Some("zeus")) });
+            if queued {
+                answer["resultQueued"] = json!(true);
+            }
+            let api = scripted(vec![reply(200, answer)]);
+            let mut words = vec![verb.to_owned(), "T-3".to_owned()];
+            if verb == "reopen" {
+                words.push("More".to_owned());
+            }
+            let given: Vec<OsString> = words.iter().map(OsString::from).collect();
+            command(
+                &words,
+                &given,
+                &Board::new(Some(&api.url), "tok"),
+                &mut "".as_bytes(),
+            )
+            .ok()
+            .map(|said| said.text)
+            .unwrap()
+        };
+        for (verb, state) in [
+            ("accept", "accepted"),
+            ("cancel", "cancelled"),
+            ("reopen", "working"),
+        ] {
+            let plain = said(verb, state, false);
+            assert!(!plain.contains("still queued"), "{verb}: {plain}");
+            assert_eq!(
+                said(verb, state, true),
+                format!("{plain}\nT-3's result was still queued for this window; read it with: cf task get T-3"),
+                "{verb}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_bulk_decision_says_of_exactly_the_tasks_whose_results_were_still_queued() {
+        for (verb, state) in [("accept", "accepted"), ("cancel", "cancelled")] {
+            let results: Vec<Value> = [(3, false), (4, true), (5, false), (6, true)]
+                .iter()
+                .map(|&(number, queued)| {
+                    let mut result = json!({ "task": card(number, state, Some("zeus")) });
+                    if queued {
+                        result["resultQueued"] = json!(true);
+                    }
+                    result
+                })
+                .collect();
+            let api = scripted(vec![reply(200, json!({ "tasks": results }))]);
+            let words: Vec<String> = [verb, "T-3", "T-4", "T-5", "T-6"]
+                .iter()
+                .map(|word| (*word).to_owned())
+                .collect();
+            let given: Vec<OsString> = words.iter().map(OsString::from).collect();
+            let said = command(
+                &words,
+                &given,
+                &Board::new(Some(&api.url), "tok"),
+                &mut "".as_bytes(),
+            )
+            .ok()
+            .map(|said| said.text)
+            .unwrap();
+            let warned: Vec<&str> = said
+                .lines()
+                .filter(|line| line.contains("still queued"))
+                .collect();
+            assert_eq!(
+                warned,
+                [
+                    "T-4's result was still queued for this window; read it with: cf task get T-4",
+                    "T-6's result was still queued for this window; read it with: cf task get T-6",
+                ],
+                "{verb}: {said}"
+            );
+        }
     }
 
     /// What `cf task edit words…` posted and printed, the board answering with `answer`.
