@@ -280,13 +280,13 @@ mod tests {
     /// a log not made yet is waited for as one without its start line, not refused.
     #[test]
     fn a_log_not_made_yet_is_waited_for_until_its_start_line() {
-        let home = tempfile::tempdir().unwrap();
+        let home = crate::door::made("cf-daemon-log-").unwrap();
         let log = home.path().join("daemon.log");
         let writer = {
             let log = log.clone();
             std::thread::spawn(move || {
                 std::thread::sleep(std::time::Duration::from_millis(300));
-                std::fs::write(
+                crate::door::write(
                     &log,
                     "2026-11-28T06:57:17.000Z info start pid 12 rust 3.0.7 home /h\n",
                 )
