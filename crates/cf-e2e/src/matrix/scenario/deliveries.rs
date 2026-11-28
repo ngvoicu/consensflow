@@ -65,13 +65,12 @@ fn typed_at(items: &[crate::live::ask::Item], id: &Value) -> Vec<usize> {
         .collect()
 }
 
-/// How many of the daemon's events of `kind` are about the message `id`.
+/// How many of the daemon's events of `kind` are about the message `id`; a hand-over refused
+/// before anything was written is no paste ([`crate::handed`]).
 fn events_of(snapshot: &Snapshot, kind: &str, id: &Value) -> usize {
-    snapshot
-        .events
-        .iter()
-        .filter(|event| event["kind"] == kind && event["data"]["message"] == *id)
-        .count()
+    id.as_i64().map_or(0, |id| {
+        crate::handed::of_message(&snapshot.events, kind, id).len()
+    })
 }
 
 /// The checks that the one message of `kind` about the task bound to `name` was delivered, went

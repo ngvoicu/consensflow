@@ -186,6 +186,7 @@ fn check(log: &Log) -> Result<Check> {
                             event["kind"] == "delivery.failed"
                                 || event["kind"] == "delivery.retried"
                         })
+                        .filter(|event| !cf_e2e::handed::refused_before_written(event))
                         .map(|event| {
                             event["data"]["reason"]
                                 .as_str()

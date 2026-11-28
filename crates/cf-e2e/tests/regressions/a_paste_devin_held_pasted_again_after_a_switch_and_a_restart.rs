@@ -102,12 +102,10 @@ fn a_rig_in_the_gap() -> Config {
     }
 }
 
-/// The daemon's events of `kind` about the message `id`.
+/// How many of the daemon's events of `kind` there are about the message `id`; a hand-over
+/// refused before anything was written is no paste ([`cf_e2e::handed`]).
 fn of_message(events: &[Value], kind: &str, id: i64) -> usize {
-    events
-        .iter()
-        .filter(|event| event["kind"] == kind && event["data"]["message"] == id)
-        .count()
+    cf_e2e::handed::of_message(events, kind, id).len()
 }
 
 /// The worker's result, once the daemon has made it: its message's id.

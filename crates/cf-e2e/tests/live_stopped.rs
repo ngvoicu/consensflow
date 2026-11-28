@@ -325,12 +325,8 @@ fn stopped_chief_is_handed_its_result_once_though_it_shows_nothing_for_ninety_se
         },
     )?;
     let events = members.events();
-    let count = |kind: &str| {
-        events
-            .iter()
-            .filter(|event| event["kind"] == kind && event["data"]["message"] == id)
-            .count()
-    };
+    // A hand-over refused before anything was written is no paste (`cf_e2e::handed`).
+    let count = |kind: &str| cf_e2e::handed::of_message(&events, kind, id).len();
     let session = members
         .rig()
         .open_frames()

@@ -64,7 +64,8 @@ test('a second stand-in starts only after the first has finished starting', asyn
   }
   try {
     const first = lock.start(launch('first'))
-    for (let i = 0; i < 300 && events.length === 0; i++) {
+    // The first start waits for the OS lock, which a loaded hosted runner can hold for seconds.
+    for (let i = 0; i < 3000 && events.length === 0; i++) {
       await new Promise((resolve) => setTimeout(resolve, 10))
     }
     assert.deepEqual(events, ['first started'])
