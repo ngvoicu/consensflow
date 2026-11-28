@@ -264,8 +264,8 @@ runs = ["pch-extension"]
 
 [[plant.edit]]
 file = "hosts/pi-extension/consensflow-delivery.mjs"
-find = "  pi.on('session_compact', compactionEnded)\n"
-replace = "  pi.on('session_before_compact', () => void writeCompactionWord())\n  pi.on('session_compact', compactionEnded)\n"
+find = "    piCompacts = true\n"
+replace = "    piCompacts = true\n    void writeCompactionWord()\n"
 
 [[plant]]
 name = "pi compaction hold: the extension asks for a compaction though its word could not be written"

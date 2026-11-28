@@ -244,18 +244,18 @@ runs = ["pts-extension"]
 
 [[plant.edit]]
 file = "hosts/pi-extension/consensflow-delivery.mjs"
-find = "    if (!late && !idle() && streams(ctx)) {\n"
+find = "    if (!late && !idle() && !compactingThen) {\n"
 replace = "    if (false) {\n"
 
 [[plant]]
 name = "pi turn state: a new instance in a compaction says working"
-meant = "says busy at the session's start for a Pi not idle"
+meant = "starts working where Pi is not idle at a session's start, busy where Pi said it compacts"
 runs = ["pts-extension"]
 
 [[plant.edit]]
 file = "hosts/pi-extension/consensflow-delivery.mjs"
-find = "    if (!late && !idle() && streams(ctx)) {\n"
-replace = "    if (!late && !idle()) {\n"
+find = "    const compactingThen = before?.compacting === true\n"
+replace = "    const compactingThen = false\n"
 
 [[plant]]
 name = "pi turn state: a reload sends its sent message again"
@@ -276,6 +276,46 @@ runs = ["pts-extension"]
 file = "hosts/pi-extension/consensflow-delivery.mjs"
 find = "      sent: sentId,\n"
 replace = "      sent: null,\n"
+
+[[plant]]
+name = "pi turn state: a new instance reads the request on the wire, not Pi's run flag"
+meant = "starts working where Pi is not idle at a session's start, busy where Pi said it compacts"
+runs = ["pts-extension"]
+
+[[plant.edit]]
+file = "hosts/pi-extension/consensflow-delivery.mjs"
+find = "    if (!late && !idle() && !compactingThen) {\n"
+replace = "    if (!late && !idle() && ctx?.signal !== undefined) {\n"
+
+[[plant]]
+name = "pi turn state: Pi's compaction is not in the word"
+meant = "starts working where Pi is not idle at a session's start, busy where Pi said it compacts"
+runs = ["pts-extension"]
+
+[[plant.edit]]
+file = "hosts/pi-extension/consensflow-delivery.mjs"
+find = "      compacting: piCompacts,\n"
+replace = "      compacting: false,\n"
+
+[[plant]]
+name = "pi turn state: a run ended inside the shutdown is not counted"
+meant = "counts a run that began and ended while no instance was there (inside the old one's shutdown)"
+runs = ["pts-extension"]
+
+[[plant.edit]]
+file = "hosts/pi-extension/consensflow-delivery.mjs"
+find = "    } else if (!late && awaited && idle() && answeredSince(ctx, before.leaf)) {\n"
+replace = "    } else if (false) {\n"
+
+[[plant]]
+name = "pi turn state: any entry after the word's leaf counts as a run's end"
+meant = "counts a run that began and ended while no instance was there (inside the old one's shutdown)"
+runs = ["pts-extension"]
+
+[[plant.edit]]
+file = "hosts/pi-extension/consensflow-delivery.mjs"
+find = "    return branch.slice(from).some((entry) => entry?.type === 'message' && entry.message?.role === 'assistant')\n"
+replace = "    return branch.slice(from).length > 0\n"
 
 # --- the reader ---
 

@@ -511,7 +511,6 @@ describe('consensflow Pi extension', () => {
     ['an idle Pi on a user message', { leaf: { id: 'leaf-1', type: 'message', message: { role: 'user' } } }, 'rest'],
     ['an idle Pi on an error', { leaf: { id: 'leaf-1', type: 'message', message: { role: 'assistant', stopReason: 'error' } } }, 'rest'],
     ['an idle Pi with messages pending', { pendingMessages: true }, 'rest'],
-    ['a Pi not idle', { idle: false }, 'busy'],
   ]) {
     it(`says ${state} at the session's start for ${name}`, async () => {
       // The start alone: no pass of the timer after it and no inbox event, so the word is
@@ -915,7 +914,6 @@ describe('consensflow Pi extension', () => {
       // The prompt let go during the shutdown: Pi's run is at its request before the new instance
       // starts.
       s.setIdle(false)
-      s.ctx.signal = new AbortController().signal
       const again = fakePi()
       createDeliveryExtension(again, { settled: s.settled, launchId: 'launch-pi-test', pollMs: 60_000, inHandMs: 30_000 })
       await again.handlers.get('session_start')({ reason: 'reload' }, s.ctx)
@@ -931,6 +929,69 @@ describe('consensflow Pi extension', () => {
       await again.handlers.get('agent_settled')({ aborted: false }, s.ctx)
       assert.deepEqual([wordOf(s).begun, wordOf(s).ended], [1, 1])
       await again.handlers.get('session_shutdown')({ reason: 'quit' })
+    } finally {
+      await s.close()
+    }
+  })
+
+  it("starts working where Pi is not idle at a session's start, busy where Pi said it compacts", async () => {
+    // Pi's own run flag on (a retry's back-off, a request): a run, whatever is on the wire.
+    const s = await setup(null, { idle: false, firstPass: false, watchInbox: () => ({ close() {} }) })
+    try {
+      assert.deepEqual([wordOf(s).state, wordOf(s).begun, wordOf(s).ended, wordOf(s).compacting], ['working', 1, 0, false])
+      // Pi tells a compaction: the word says so, and the next instance that finds Pi not idle is
+      // busy, not a run.
+      s.setIdle(true)
+      await s.pi.handlers.get('agent_settled')({ aborted: false }, s.ctx)
+      await s.extension.pass(true)
+      s.setIdle(false)
+      await s.pi.handlers.get('session_before_compact')({ type: 'session_before_compact', reason: 'manual' }, s.ctx)
+      assert.deepEqual([wordOf(s).state, wordOf(s).compacting], ['busy', true])
+      await s.pi.handlers.get('session_shutdown')({ reason: 'reload' })
+      const again = fakePi()
+      createDeliveryExtension(again, { settled: s.settled, launchId: 'launch-pi-test', pollMs: 60_000 })
+      await again.handlers.get('session_start')({ reason: 'reload' }, s.ctx)
+      assert.deepEqual([wordOf(s).state, wordOf(s).begun, wordOf(s).ended, wordOf(s).compacting], ['busy', 1, 1, true])
+      s.setIdle(true)
+      await again.handlers.get('session_compact')({ type: 'session_compact', reason: 'manual' }, s.ctx)
+      assert.equal(wordOf(s).compacting, false)
+      await again.handlers.get('session_shutdown')({ reason: 'quit' })
+    } finally {
+      await s.close()
+    }
+  })
+
+  it('counts a run that began and ended while no instance was there (inside the old one\'s shutdown)', async () => {
+    const s = await setup(null, { inHandMs: 30_000 })
+    try {
+      await s.pi.handlers.get('input')({ type: 'input', text: 'the human typed this' }, s.ctx)
+      assert.deepEqual([wordOf(s).state, wordOf(s).begun, wordOf(s).leaf], ['busy', 0, 'leaf-1'])
+      await s.pi.handlers.get('session_shutdown')({ reason: 'reload' })
+      // The prompt ran and was answered while the old instance was shutting down.
+      s.ctx.sessionManager.getLeafId = () => 'answer-1'
+      s.ctx.sessionManager.getBranch = () => [
+        { type: 'message', id: 'leaf-1', message: { role: 'assistant' } },
+        { type: 'message', id: 'user-1', message: { role: 'user' } },
+        { type: 'message', id: 'answer-1', message: { role: 'assistant' } },
+      ]
+      const again = fakePi()
+      createDeliveryExtension(again, { settled: s.settled, launchId: 'launch-pi-test', pollMs: 60_000, inHandMs: 30_000 })
+      await again.handlers.get('session_start')({ reason: 'reload' }, s.ctx)
+      assert.deepEqual(
+        [wordOf(s).state, wordOf(s).begun, wordOf(s).ended, wordOf(s).held, wordOf(s).last],
+        ['rest', 1, 1, null, { leaf: 'answer-1', aborted: null }],
+      )
+      await again.handlers.get('session_shutdown')({ reason: 'reload' })
+      // Entries of another kind after the leaf (a label, a person's entry) are no run.
+      s.ctx.sessionManager.getBranch = () => [
+        { type: 'message', id: 'answer-1', message: { role: 'assistant' } },
+        { type: 'label', id: 'label-1' },
+      ]
+      const third = fakePi()
+      createDeliveryExtension(third, { settled: s.settled, launchId: 'launch-pi-test', pollMs: 60_000 })
+      await third.handlers.get('session_start')({ reason: 'reload' }, s.ctx)
+      assert.deepEqual([wordOf(s).begun, wordOf(s).ended], [1, 1], 'nothing awaited: nothing counted')
+      await third.handlers.get('session_shutdown')({ reason: 'quit' })
     } finally {
       await s.close()
     }

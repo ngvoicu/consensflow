@@ -1,0 +1,9 @@
+{"type":"session","version":3,"id":"01a21f95-6f24-734b-a64e-0d03891a1b8a","timestamp":"2026-11-28T00:36:56.740Z","cwd":"<run>/reload-inside-shutdown-extras"}
+{"type":"model_change","id":"7bdbdf1a","parentId":null,"timestamp":"2026-11-28T00:36:56.743Z","provider":"stand-in","modelId":"stand-in-model"}
+{"type":"thinking_level_change","id":"6e0be17f","parentId":"7bdbdf1a","timestamp":"2026-11-28T00:36:56.743Z","thinkingLevel":"off"}
+{"type":"custom","customType":"keeper","data":{"count":1},"id":"e30692ea","parentId":"6e0be17f","timestamp":"2026-11-28T00:36:56.754Z"}
+{"type":"message","id":"a7daa36a","parentId":"e30692ea","timestamp":"2026-11-28T00:36:56.754Z","message":{"role":"system","content":"","sections":{},"timestamp":1795826216754,"toolsAdded":[{"name":"read"},{"name":"bash"},{"name":"edit"},{"name":"write"}]}}
+{"type":"message","id":"0353f96e","parentId":"a7daa36a","timestamp":"2026-11-28T00:36:56.754Z","message":{"role":"user","content":[{"type":"text","text":"Run the long script"}],"timestamp":1795826216754}}
+{"type":"message","id":"d37ff5fa","parentId":"0353f96e","timestamp":"2026-11-28T00:36:56.754Z","message":{"role":"assistant","content":[{"type":"text","text":"Done."}],"api":"faux:1795826216739:a825f4ugjhj","provider":"stand-in","model":"stand-in-model","usage":{"input":0,"output":2,"cacheRead":0,"cacheWrite":1444,"totalTokens":1446,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}},"stopReason":"stop","timestamp":1795826216744,"thinkingLevel":"off"}}
+{"type":"custom","customType":"keeper","data":{"count":2},"id":"1af81ce7","parentId":"d37ff5fa","timestamp":"2026-11-28T00:36:56.755Z"}
+{"type":"custom_message","customType":"keeper","content":"Kept the cache warm.","display":true,"id":"3f1a35a8","parentId":"1af81ce7","timestamp":"2026-11-28T00:36:56.755Z"}

@@ -1148,6 +1148,122 @@ const CASES = {
     await at.close()
   },
 
+  /** Finding 28: a person's `input` hook holds a prompt, Pi reloads, the prompt is let go during the
+   * old instance's shutdown, and its first request fails into Pi's retry back-off, which goes on
+   * past the reload. Pi's run is on all through the back-off: the word says `working`, one run more
+   * begun than ended, and Escape there (Pi's `abortRetry`) ends it with no second request. */
+  async reload_retry_backoff() {
+    const go = gate()
+    const closing = gate()
+    let held = false
+    let shutting = false
+    let backoff = false
+    const at = await open('reload-backoff', {
+      ours: { pollMs: 200 },
+      person: {
+        input: async () => {
+          if (!held) {
+            held = true
+            await go.shut
+          }
+        },
+        session_shutdown: async () => {
+          if (!shutting) {
+            shutting = true
+            await closing.shut
+          }
+        },
+      },
+    })
+    await settles(at)
+    at.session.settingsManager.getRetrySettings = () => ({ enabled: true, maxRetries: 2, baseDelayMs: 4_000, maxAgentDelayMs: 60_000 })
+    at.session.subscribe((event) => {
+      if (event.type === 'auto_retry_start') backoff = true
+    })
+    at.faux.setResponses([
+      ai.fauxAssistantMessage('', { stopReason: 'error', errorMessage: '503 Service Unavailable: overloaded' }),
+      ai.fauxAssistantMessage('Retry done'),
+    ])
+    const prompt = at.session.prompt('Run the long script')
+    await at.until(() => held)
+    const reloading = at.session.reload()
+    await at.until(() => shutting)
+    const from = at.loop.seen.length
+    go.open()
+    await at.until(() => backoff)
+    closing.open()
+    await reloading
+    // The run's hooks that came between the two instances read the old instance's last word.
+    const to = at.loop.seen.findIndex((x, i) => i >= from && x.event === 'session_start')
+    at.loop.seen.splice(from, Math.max(0, to - from))
+    await wait(5 * 200)
+    const during = at.word()
+    if (worded) {
+      assert.deepEqual([during?.state, during?.begun > during?.ended], ['working', true], `in the back-off: ${JSON.stringify(during)}`)
+      at.moment('backoff', { at: 'work' })
+    }
+    // The stop's Escape in the back-off: Pi cancels the retry.
+    at.session.abortRetry()
+    await prompt
+    await settles(at)
+    assert.equal(at.faux.state.callCount, 1, 'no second request')
+    notes.push(`reload in a back-off (${form}): ${JSON.stringify(during)}`)
+    await at.close()
+  },
+
+  /** Finding 26: a request that begins and ends inside a person's slow `session_shutdown` handler
+   * (2.5 s): the new instance, at its start, sees from the session that the run ended (an
+   * assistant step after the word's leaf) and counts it; the window rests on its answer. */
+  async reload_run_inside_shutdown() {
+    const input = gate()
+    const shutdown = gate()
+    let held = false
+    let shutting = false
+    let answered = false
+    const at = await open('reload-inside-shutdown', {
+      ours: { pollMs: 200 },
+      person: {
+        input: async () => {
+          if (!held) {
+            held = true
+            await input.shut
+          }
+        },
+        session_shutdown: async () => {
+          if (!shutting) {
+            shutting = true
+            await shutdown.shut
+          }
+        },
+        agent_settled: () => void (answered = true),
+      },
+    })
+    await settles(at)
+    at.faux.setResponses([ai.fauxAssistantMessage('Done.')])
+    const prompt = at.session.prompt('Run the long script')
+    await at.until(() => held)
+    const reloading = at.session.reload()
+    await at.until(() => shutting)
+    const from = at.loop.seen.length
+    input.open()
+    await prompt
+    await at.until(() => answered)
+    await wait(2_500)
+    shutdown.open()
+    await reloading
+    // The run's hooks came while no instance of ours was there: they read the old instance's word.
+    const to = at.loop.seen.findIndex((x, i) => i >= from && x.event === 'session_start')
+    at.loop.seen.splice(from, Math.max(0, to - from))
+    await wait(5 * 200)
+    const after = at.word()
+    if (worded) {
+      assert.deepEqual([after?.state, after?.begun, after?.ended, after?.held], ['rest', 1, 1, null], `after the reload: ${JSON.stringify(after)}`)
+      at.moment('answered', { at: 'rest', ended: 'stop', words: 'Done.' })
+    }
+    notes.push(`run inside the shutdown (${form}): ${JSON.stringify(after)}`)
+    await at.close()
+  },
+
   /** D5: a new session that was never written: `rest`, a leaf named, no file. A message goes in. */
   async new_session() {
     const at = await open('new-session')

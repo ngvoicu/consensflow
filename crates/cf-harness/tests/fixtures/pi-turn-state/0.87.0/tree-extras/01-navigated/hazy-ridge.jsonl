@@ -1,15 +1,15 @@
-{"type":"session","version":3,"id":"01a21f13-f40b-7772-835d-91ccd9ebb2bf","timestamp":"2026-11-27T22:15:31.083Z","cwd":"<run>/tree-extras"}
-{"type":"model_change","id":"85aa5c72","parentId":null,"timestamp":"2026-11-27T22:15:31.085Z","provider":"stand-in","modelId":"stand-in-model"}
-{"type":"thinking_level_change","id":"a39cf02a","parentId":"85aa5c72","timestamp":"2026-11-27T22:15:31.085Z","thinkingLevel":"off"}
-{"type":"custom","customType":"keeper","data":{"count":1},"id":"8e926cb9","parentId":"a39cf02a","timestamp":"2026-11-27T22:15:31.207Z"}
-{"type":"message","id":"177f96fc","parentId":"8e926cb9","timestamp":"2026-11-27T22:15:31.207Z","message":{"role":"system","content":"","sections":{},"timestamp":1795817731206,"toolsAdded":[{"name":"read"},{"name":"bash"},{"name":"edit"},{"name":"write"}]}}
-{"type":"message","id":"5d22989c","parentId":"177f96fc","timestamp":"2026-11-27T22:15:31.207Z","message":{"role":"user","content":[{"type":"text","text":"First prompt"}],"timestamp":1795817731206}}
-{"type":"message","id":"641412cb","parentId":"5d22989c","timestamp":"2026-11-27T22:15:31.207Z","message":{"role":"assistant","content":[{"type":"text","text":"First answer"}],"api":"faux:1795817731082:if617puxkz","provider":"stand-in","model":"stand-in-model","usage":{"input":1521,"output":3,"cacheRead":0,"cacheWrite":1521,"totalTokens":3045,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}},"stopReason":"stop","timestamp":1795817731206}}
-{"type":"custom","customType":"keeper","data":{"count":2},"id":"6e8a2e01","parentId":"641412cb","timestamp":"2026-11-27T22:15:31.207Z"}
-{"type":"custom_message","customType":"keeper","content":"Kept the cache warm.","display":true,"id":"85e73dd8","parentId":"6e8a2e01","timestamp":"2026-11-27T22:15:31.207Z"}
-{"type":"custom","customType":"keeper","data":{"count":1},"id":"49e29c14","parentId":"85e73dd8","timestamp":"2026-11-27T22:15:31.328Z"}
-{"type":"message","id":"c5de8ef7","parentId":"49e29c14","timestamp":"2026-11-27T22:15:31.328Z","message":{"role":"user","content":[{"type":"text","text":"Second prompt"}],"timestamp":1795817731328}}
-{"type":"message","id":"f5f8f0af","parentId":"c5de8ef7","timestamp":"2026-11-27T22:15:31.329Z","message":{"role":"assistant","content":[{"type":"text","text":"Partial answer"}],"api":"faux:1795817731082:if617puxkz","provider":"stand-in","model":"stand-in-model","usage":{"input":17,"output":4,"cacheRead":1521,"cacheWrite":18,"totalTokens":1560,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}},"stopReason":"error","errorMessage":"Final provider error","timestamp":1795817731206}}
-{"type":"custom","customType":"keeper","data":{"count":2},"id":"e781d2e4","parentId":"f5f8f0af","timestamp":"2026-11-27T22:15:31.329Z"}
-{"type":"custom_message","customType":"keeper","content":"Kept the cache warm.","display":true,"id":"b173c4ac","parentId":"e781d2e4","timestamp":"2026-11-27T22:15:31.329Z"}
-{"type":"label","id":"877a0dee","parentId":"641412cb","timestamp":"2026-11-27T22:15:31.450Z","targetId":"641412cb","label":"Kept answer"}
+{"type":"session","version":3,"id":"01a21f92-ce97-7713-9a6e-c0e1abf129e2","timestamp":"2026-11-28T00:34:04.567Z","cwd":"<run>/tree-extras"}
+{"type":"model_change","id":"3f1ca230","parentId":null,"timestamp":"2026-11-28T00:34:04.569Z","provider":"stand-in","modelId":"stand-in-model"}
+{"type":"thinking_level_change","id":"dd072445","parentId":"3f1ca230","timestamp":"2026-11-28T00:34:04.569Z","thinkingLevel":"off"}
+{"type":"custom","customType":"keeper","data":{"count":1},"id":"00ce40e9","parentId":"dd072445","timestamp":"2026-11-28T00:34:04.691Z"}
+{"type":"message","id":"4c5c12c9","parentId":"00ce40e9","timestamp":"2026-11-28T00:34:04.691Z","message":{"role":"system","content":"","sections":{},"timestamp":1795826044690,"toolsAdded":[{"name":"read"},{"name":"bash"},{"name":"edit"},{"name":"write"}]}}
+{"type":"message","id":"638b8248","parentId":"4c5c12c9","timestamp":"2026-11-28T00:34:04.691Z","message":{"role":"user","content":[{"type":"text","text":"First prompt"}],"timestamp":1795826044690}}
+{"type":"message","id":"608a8562","parentId":"638b8248","timestamp":"2026-11-28T00:34:04.691Z","message":{"role":"assistant","content":[{"type":"text","text":"First answer"}],"api":"faux:1795826044566:pxal4cmke0g","provider":"stand-in","model":"stand-in-model","usage":{"input":1521,"output":3,"cacheRead":0,"cacheWrite":1521,"totalTokens":3045,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}},"stopReason":"stop","timestamp":1795826044690}}
+{"type":"custom","customType":"keeper","data":{"count":2},"id":"7a41c1ac","parentId":"608a8562","timestamp":"2026-11-28T00:34:04.691Z"}
+{"type":"custom_message","customType":"keeper","content":"Kept the cache warm.","display":true,"id":"0af21116","parentId":"7a41c1ac","timestamp":"2026-11-28T00:34:04.691Z"}
+{"type":"custom","customType":"keeper","data":{"count":1},"id":"c6265bdc","parentId":"0af21116","timestamp":"2026-11-28T00:34:04.812Z"}
+{"type":"message","id":"f1af1931","parentId":"c6265bdc","timestamp":"2026-11-28T00:34:04.812Z","message":{"role":"user","content":[{"type":"text","text":"Second prompt"}],"timestamp":1795826044812}}
+{"type":"message","id":"342f2cdd","parentId":"f1af1931","timestamp":"2026-11-28T00:34:04.812Z","message":{"role":"assistant","content":[{"type":"text","text":"Partial answer"}],"api":"faux:1795826044566:pxal4cmke0g","provider":"stand-in","model":"stand-in-model","usage":{"input":17,"output":4,"cacheRead":1521,"cacheWrite":18,"totalTokens":1560,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}},"stopReason":"error","errorMessage":"Final provider error","timestamp":1795826044690}}
+{"type":"custom","customType":"keeper","data":{"count":2},"id":"d9a7a854","parentId":"342f2cdd","timestamp":"2026-11-28T00:34:04.812Z"}
+{"type":"custom_message","customType":"keeper","content":"Kept the cache warm.","display":true,"id":"c46ef3e6","parentId":"d9a7a854","timestamp":"2026-11-28T00:34:04.812Z"}
+{"type":"label","id":"d515b96b","parentId":"608a8562","timestamp":"2026-11-28T00:34:04.933Z","targetId":"608a8562","label":"Kept answer"}

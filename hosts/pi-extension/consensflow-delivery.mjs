@@ -136,7 +136,7 @@ export async function piVersionOf(script = process.argv[1]) {
  * Install the delivery extension against Pi's ExtensionAPI.
  *
  * **The word** (`settled/<launchId>.state.json`, written under another name and moved into place):
- * `{launchId, sessionId, state, leaf, begun, ended, last, held, sent, pid, n, at}`, Pi's own run state as
+ * `{launchId, sessionId, state, leaf, begun, ended, last, held, sent, compacting, pid, n, at}`, Pi's own run state as
  * this extension follows it (the brain's `architecture/pi-turn-state.md`). `state` is `working` (a
  * run is on), `busy` (no run, and Pi is not free: it compacts, sums up a branch, or holds a prompt
  * someone submitted) or `rest`. `leaf` is `getLeafId()` at the write. `begun` and `ended` count this
@@ -160,9 +160,11 @@ export async function piVersionOf(script = process.argv[1]) {
  * The counts are the launch's. The word stays at `session_shutdown`, and the instance Pi starts
  * next in the launch (`/reload`, a new session, a switch) goes on from its counts, and, where the
  * session is the same, from its last end, its prompt in hand and its message sent; a new session
- * has no last end. An instance that starts while Pi's run is at its requests (a prompt held across
- * a reload and let go before the new instance began: Pi not idle, and its run's `signal` there)
- * starts with that run on: `working`, one run more begun than ended, and nothing in hand.
+ * has no last end. An instance that starts while Pi's own run flag is on (Pi not idle, and no
+ * compaction Pi told of: `compacting` in the word, from `session_before_compact` to its end)
+ * starts with that run on: `working`, one run more begun than ended, nothing in hand. One that
+ * starts after a run began and ended with no instance there (inside the old one's shutdown) counts
+ * that run's end, by Pi's answer on the session's branch after the word's leaf.
  *
  * The state is `working` while a run is on; else `busy` while a prompt is in hand or Pi is not
  * idle; else `rest`. It is written when it changes, at every hook and every pass of the poll;
@@ -233,15 +235,8 @@ export function createDeliveryExtension(
   let last = null
   // When the prompt in hand was submitted.
   let inHand = null
-  // Whether Pi's agent loop is at work: its signal is there only while a run's requests go on (a
-  // compaction has a signal of its own, and Pi before the loop has none).
-  const streams = (ctx) => {
-    try {
-      return ctx?.signal !== undefined && ctx?.signal !== null
-    } catch {
-      return false
-    }
-  }
+  // Whether Pi said a compaction began (`session_before_compact`) and has not said it ended.
+  let piCompacts = false
   // A Pi before the line, or one that says no version: no word in this launch.
   const late = !writesWord(piVersion)
   // The message this extension sent that has no acknowledgement yet.
@@ -335,6 +330,7 @@ export function createDeliveryExtension(
       last,
       held: inHand,
       sent: sentId,
+      compacting: piCompacts,
       pid,
     }
     const key = JSON.stringify(word)
@@ -397,6 +393,8 @@ export function createDeliveryExtension(
   }
 
   const acknowledge = async (id, admitted, reason, archive = null) => {
+    // Shut down: nothing more is written; the message is the next instance's.
+    if (shut) return
     const entry = pending.get(id)
     if (entry === undefined || entry.done) return
     entry.done = true
@@ -462,6 +460,7 @@ export function createDeliveryExtension(
     })
     const files = names.filter((name) => name.endsWith('.json')).sort()
     for (const file of files) {
+      if (shut) return
       const path = join(inbox, file)
       let record
       try {
@@ -645,6 +644,21 @@ export function createDeliveryExtension(
         }
       : null
 
+  // Whether the session's branch holds an answer of Pi's (an assistant step) after the entry
+  // `leaf` (the whole branch where the word named none): a run ended there.
+  const answeredSince = (ctx, leaf) => {
+    let branch
+    try {
+      branch = ctx?.sessionManager?.getBranch?.()
+    } catch {
+      return false
+    }
+    if (!Array.isArray(branch)) return false
+    const from = leaf === null || leaf === undefined ? 0 : branch.findIndex((entry) => entry?.id === leaf) + 1
+    if (from === 0 && leaf !== null && leaf !== undefined) return false
+    return branch.slice(from).some((entry) => entry?.type === 'message' && entry.message?.role === 'assistant')
+  }
+
   pi.on('session_start', async (_event, ctx) => {
     context = ctx
     shut = false
@@ -653,24 +667,34 @@ export function createDeliveryExtension(
     await writeShown()
     // The counts go on: they are the launch's, from the word an instance before this one wrote;
     // where the session is the same (a `/reload`), its last end, its message sent, and the prompt
-    // it had in hand until a run begins or its time is up. Pi's own run at work as this instance
-    // starts (that prompt let go before it began, its request going on): the run is on, the prompt
-    // its own. Pi busy with no request going on (a compaction, a run not at its loop yet) is `busy`,
-    // and the run's next hook (`turn_start`) begins it.
+    // it had in hand until a run begins or its time is up. Pi's own run flag on as this instance
+    // starts (`isIdle()` false, and no compaction Pi told the instance before of): the run is on,
+    // whatever is on the wire (a request, a retry's back-off), the prompt its own. A run that began
+    // and ended while no instance was there (inside the old one's shutdown: Pi idle now, a run or a
+    // prompt in hand in the word, and an answer of Pi's on the session's branch after the word's
+    // leaf): counted, ended there.
     const before = await carried()
     const same = before !== null && before.sessionId === sessionIdOf(ctx)
     if (before !== null && before.ended > ended) ended = before.ended
     last = same ? lastOf(before) : null
     sentId = null
     if (same) await adopt(before.sent)
-    if (!late && !idle() && streams(ctx)) {
+    const compactingThen = before?.compacting === true
+    const awaited = same && (before.begun > before.ended || Number.isFinite(before.held))
+    if (!late && !idle() && !compactingThen) {
       begun = ended + 1
+      inHand = null
+    } else if (!late && awaited && idle() && answeredSince(ctx, before.leaf)) {
+      ended += 1
+      begun = ended
+      last = { leaf: frontierOf(ctx)?.id ?? null, aborted: null }
       inHand = null
     } else {
       begun = ended
       inHand =
         same && Number.isFinite(before.held) && now() - before.held < inHandMs ? before.held : null
     }
+    piCompacts = compactingThen && !idle()
     restAfter = ended
     lastWord = null
     // The word at once; the timer's first pass reads the inbox: nothing is sent from a handler.
@@ -777,8 +801,21 @@ export function createDeliveryExtension(
     context = ctx ?? context
     if (compacting) await takeCompactionWordBack()
   }
-  pi.on('session_compact', compactionEnded)
-  pi.on('session_compact_failed', compactionEnded)
+  pi.on('session_before_compact', (_event, ctx) => {
+    context = ctx ?? context
+    piCompacts = true
+    return say(false).then(() => undefined)
+  })
+  pi.on('session_compact', async (event, ctx) => {
+    piCompacts = false
+    await compactionEnded(event, ctx)
+    await say(false)
+  })
+  pi.on('session_compact_failed', async (event, ctx) => {
+    piCompacts = false
+    await compactionEnded(event, ctx)
+    await say(false)
+  })
   pi.on('session_shutdown', async () => {
     shut = true
     clearTimeout(limit)

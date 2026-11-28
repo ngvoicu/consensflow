@@ -687,3 +687,45 @@ fn a_window_that_goes_away_just_after_its_run_ended_gives_its_answer() {
         assert_eq!(window.state(), "done", "{what}");
     }
 }
+
+#[test]
+fn a_pause_during_a_retrys_back_off_after_a_reload_presses_one_key() {
+    // Finding 28: a prompt let go during a reload's shutdown, its first request a 503, and Pi's
+    // retry back-off going on after the new instance started. Pi's run flag is on: the word says
+    // `working`, and a pause presses one Escape into the back-off (Pi's cancel of the retry: the
+    // published loops show no second request after it), and no more.
+    for form in FORMS {
+        let (version, form) = form.split_once('|').unwrap();
+        let (text, word) = moment(version, &format!("reload-backoff-{form}"), "01-backoff");
+        let what = format!("{version} {form}");
+        assert_eq!(
+            (
+                word["state"].clone(),
+                word["begun"].clone(),
+                word["ended"].clone()
+            ),
+            (json!("working"), json!(1), json!(0)),
+            "{what}"
+        );
+        let mut window = Window::new();
+        window.grows(&text.unwrap(), Some(&word));
+        assert_eq!(
+            window.state(),
+            "working",
+            "{what}: the 503 in the back-off is Pi's to handle"
+        );
+        window.pause();
+        window.pass();
+        assert_eq!(window.escapes(), 1, "{what}: one key into the back-off");
+        // Pi ends the run at the Escape: its word rests at that end.
+        let mut rested = word.clone();
+        rested["state"] = json!("rest");
+        rested["ended"] = json!(1);
+        rested["last"] = json!({ "leaf": word["leaf"], "aborted": false });
+        window.says(Some(&rested));
+        window.passes(3);
+        assert_eq!(window.escapes(), 1, "{what}: no key after it");
+        assert!(window.told().is_empty(), "{what}");
+        assert_eq!(window.state(), "paused", "{what}: paid");
+    }
+}

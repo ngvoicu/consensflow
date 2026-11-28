@@ -1,9 +1,9 @@
-{"type":"session","version":3,"id":"01a21f15-73b3-7149-a0df-68337b01247c","timestamp":"2026-11-27T22:17:09.299Z","cwd":"<run>/refused-then-aborted-extras"}
-{"type":"model_change","id":"24538cee","parentId":null,"timestamp":"2026-11-27T22:17:09.302Z","provider":"stand-in","modelId":"stand-in-model"}
-{"type":"thinking_level_change","id":"92850999","parentId":"24538cee","timestamp":"2026-11-27T22:17:09.302Z","thinkingLevel":"off"}
-{"type":"custom","customType":"keeper","data":{"count":1},"id":"5a52e10d","parentId":"92850999","timestamp":"2026-11-27T22:17:09.304Z"}
-{"type":"message","id":"8ebd5eb7","parentId":"5a52e10d","timestamp":"2026-11-27T22:17:09.304Z","message":{"role":"system","content":"","sections":{},"timestamp":1795817829304,"toolsAdded":[{"name":"read"},{"name":"bash"},{"name":"edit"},{"name":"write"}]}}
-{"type":"message","id":"2ab42cce","parentId":"8ebd5eb7","timestamp":"2026-11-27T22:17:09.304Z","message":{"role":"user","content":[{"type":"text","text":"Run the long script"}],"timestamp":1795817829304}}
-{"type":"message","id":"2d40d04c","parentId":"2ab42cce","timestamp":"2026-11-27T22:17:09.304Z","message":{"role":"assistant","content":[{"type":"text","text":"Partial answer"}],"api":"faux:1795817829298:f1gfgv650uk","provider":"stand-in","model":"stand-in-model","usage":{"input":0,"output":4,"cacheRead":0,"cacheWrite":1444,"totalTokens":1448,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}},"stopReason":"error","errorMessage":"503 Service Unavailable: overloaded","timestamp":1795817829303,"thinkingLevel":"off"}}
-{"type":"custom","customType":"keeper","data":{"count":2},"id":"760a7603","parentId":"2d40d04c","timestamp":"2026-11-27T22:17:09.309Z"}
-{"type":"custom_message","customType":"keeper","content":"Kept the cache warm.","display":true,"id":"51e22cd5","parentId":"760a7603","timestamp":"2026-11-27T22:17:09.309Z"}
+{"type":"session","version":3,"id":"01a21f94-99f9-7478-a1fc-84344c04336a","timestamp":"2026-11-28T00:36:02.169Z","cwd":"<run>/refused-then-aborted-extras"}
+{"type":"model_change","id":"2ffff622","parentId":null,"timestamp":"2026-11-28T00:36:02.173Z","provider":"stand-in","modelId":"stand-in-model"}
+{"type":"thinking_level_change","id":"01269766","parentId":"2ffff622","timestamp":"2026-11-28T00:36:02.173Z","thinkingLevel":"off"}
+{"type":"custom","customType":"keeper","data":{"count":1},"id":"435ea0ac","parentId":"01269766","timestamp":"2026-11-28T00:36:02.174Z"}
+{"type":"message","id":"ee9ab0c8","parentId":"435ea0ac","timestamp":"2026-11-28T00:36:02.174Z","message":{"role":"system","content":"","sections":{},"timestamp":1795826162174,"toolsAdded":[{"name":"read"},{"name":"bash"},{"name":"edit"},{"name":"write"}]}}
+{"type":"message","id":"27d76625","parentId":"ee9ab0c8","timestamp":"2026-11-28T00:36:02.174Z","message":{"role":"user","content":[{"type":"text","text":"Run the long script"}],"timestamp":1795826162174}}
+{"type":"message","id":"af588ac0","parentId":"27d76625","timestamp":"2026-11-28T00:36:02.175Z","message":{"role":"assistant","content":[{"type":"text","text":"Partial answer"}],"api":"faux:1795826162168:sgcm38lscrp","provider":"stand-in","model":"stand-in-model","usage":{"input":0,"output":4,"cacheRead":0,"cacheWrite":1444,"totalTokens":1448,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}},"stopReason":"error","errorMessage":"503 Service Unavailable: overloaded","timestamp":1795826162174,"thinkingLevel":"off"}}
+{"type":"custom","customType":"keeper","data":{"count":2},"id":"839951cf","parentId":"af588ac0","timestamp":"2026-11-28T00:36:02.179Z"}
+{"type":"custom_message","customType":"keeper","content":"Kept the cache warm.","display":true,"id":"7c9aa9e6","parentId":"839951cf","timestamp":"2026-11-28T00:36:02.179Z"}
