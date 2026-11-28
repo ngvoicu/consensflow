@@ -33,8 +33,8 @@ runs = ["held-words-engine"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/dispatcher.rs"
-find = "cf_harness::records::hold_form(because)"
-replace = "{ let _ = because; None }"
+find = "                hold,\n                cf_harness::records::hold_form(because),\n"
+replace = "                hold,\n                { let _ = because; None },\n"
 
 [[plant]]
 name = "held words: the hold's event keeps a word of the refusal"
