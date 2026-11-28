@@ -363,10 +363,10 @@ fn the_staff_a_replacement_holds_whole_and_read_in_one_piece_is_as_large_as_the_
     let whole = |note: &MessageView, cf: &CfWord| goes_whole(note, &[], cf);
     let one = |note: &MessageView, cf: &CfWord| read_in_one(note, cf);
     for (cf, pins) in [
-        (a_mac(), [Some(127), Some(151), None, Some(15)]),
-        (a_windows(), [Some(123), Some(148), None, Some(12)]),
+        (a_mac(), [Some(162), Some(184), Some(26), Some(49)]),
+        (a_windows(), [Some(159), Some(181), Some(23), Some(46)]),
     ] {
-        assert_eq!(
+        assert!(
             one(
                 &note(
                     None,
@@ -375,8 +375,7 @@ fn the_staff_a_replacement_holds_whole_and_read_in_one_piece_is_as_large_as_the_
                 ),
                 &cf
             ),
-            PATH_ONCE,
-            "{cf}: whether specs and the most rules fit with an empty staff"
+            "{cf}: specs and the most rules fit with an empty staff"
         );
         assert_eq!(
             rows_while(&cf, true, None, &whole),
@@ -416,9 +415,9 @@ fn the_staff_a_replacement_holds_whole_and_read_in_one_piece_is_as_large_as_the_
     };
     if !PATH_ONCE {
         assert_eq!(
-            [parts(0), parts(295), parts(296), parts(300)],
-            [2, 2, 3, 3],
-            "docs: 2 parts through 295 rows, 3 at 296"
+            [parts(26), parts(27), parts(297), parts(298)],
+            [1, 2, 2, 3],
+            "docs: one piece through 26 rows, 2 parts through 297, 3 at 298"
         );
     }
 }
@@ -1175,16 +1174,8 @@ fn the_largest_roles_are_given_to_a_muse_window_in_the_parts_its_hooks_say_and_e
             &chief(0, false, None),
             2,
         );
-        let longest_in_bytes = if !PATH_ONCE && shape == "Windows" {
-            3
-        } else {
-            2
-        };
-        let longest_in_hook = if !PATH_ONCE && shape == "Windows" {
-            4
-        } else {
-            3
-        };
+        let longest_in_bytes = 2;
+        let longest_in_hook = 3;
         on(
             &format!("the largest chief in bytes (25 staff, specs, the most rules) on {shape}"),
             &chief(25, true, Some(&utf8)),
@@ -1251,20 +1242,20 @@ fn the_parts_of_a_muse_chiefs_role_begin_at_a_paragraph_or_a_heading_and_never_i
     // lines the part after the first begins with.
     type Case<'a> = (&'a str, CfWord, usize, bool, Option<&'a str>, &'a [&'a str]);
     // These first lines are measured for the active path mode and each shell.
-    const REVIEW: &str = "A finding blocks the work only when it would make it fail (a";
-    const DESIGN: &str = "Work big enough to need a design (a new module, a new API, a";
-    const CHOOSE: &str = "## Choose the role, not the member";
-    let mac = if PATH_ONCE { REVIEW } else { DESIGN };
-    let windows = if PATH_ONCE { REVIEW } else { CHOOSE };
+    // With nobody on the staff the chief's text is short, and its second part begins at the
+    // Reviews; a staff of workers and reviewers adds their paragraphs and the table.
+    const REVIEWS: &str = "## Reviews";
+    const UNHELD: &str = "Nobody on your staff is a frontend designer, an architect, a";
+    const BOTH: &str = "Then decide both: reopen the work with what must change, or ";
     let cases: [Case; 4] = [
-        ("a Mac, no staff", a_mac(), 0, false, None, &[mac]),
+        ("a Mac, no staff", a_mac(), 0, false, None, &[REVIEWS]),
         (
             "a Mac, the largest chief",
             a_mac(),
             25,
             true,
             Some(&utf8),
-            &[mac],
+            &[UNHELD],
         ),
         (
             "Windows, the largest chief",
@@ -1272,7 +1263,7 @@ fn the_parts_of_a_muse_chiefs_role_begin_at_a_paragraph_or_a_heading_and_never_i
             25,
             true,
             Some(&utf8),
-            &[windows],
+            &[BOTH],
         ),
         (
             "a Mac, the most escaped rules",
@@ -1280,7 +1271,7 @@ fn the_parts_of_a_muse_chiefs_role_begin_at_a_paragraph_or_a_heading_and_never_i
             25,
             true,
             Some(&escaped),
-            &[mac],
+            &[UNHELD],
         ),
     ];
     for (name, cf, rows, specs, rules, expected) in cases {

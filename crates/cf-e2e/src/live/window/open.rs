@@ -395,8 +395,7 @@ impl<'a> Open<'a> {
         let harness = self.install.harness();
         let home = self
             .rig
-            .var("HOME")
-            .filter(|home| !home.is_empty())
+            .project_home()
             .ok_or_else(|| Error::Daemon("the rig gives its windows no home".to_owned()))?;
         let workspace = live_folder_in(Path::new(home), &self.folder)?;
         let agent = self.agent.clone().unwrap_or_else(|| agents::agent(harness));
@@ -465,16 +464,13 @@ impl<'a> Open<'a> {
         );
         let drop_env: Vec<String> = start.drop_env.into_iter().chain(self.drop_env).collect();
         let opened_at_ms = jiff::Timestamp::now().as_millisecond();
-        let opened = self.rig.host(
-            "pane.open",
-            open_request(
-                &self.id,
-                &workspace,
-                &argv,
-                (&window_vars, &drop_env),
-                ask::silent_paste(harness.kind())?,
-            ),
-        )?;
+        let opened = self.rig.open_pane(open_request(
+            &self.id,
+            &workspace,
+            &argv,
+            (&window_vars, &drop_env),
+            ask::silent_paste(harness.kind())?,
+        ))?;
         if opened["ok"] != true {
             return Err(Error::Daemon(format!(
                 "{} did not open: {opened}",

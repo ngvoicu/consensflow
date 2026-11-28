@@ -224,11 +224,14 @@ platforms = ["macos", "linux"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/pty.rs"
-find = '''        let _active_write = ActiveWrite(active_writes);
-        let mut writer = writer.lock().map_err(|_| PaneError::LockPoisoned)?;'''
-replace = '''        let _active_write = ActiveWrite(active_writes);
-        let _table = self.lock_panes()?;
-        let mut writer = writer.lock().map_err(|_| PaneError::LockPoisoned)?;'''
+find = """        write_gated_in(
+            &writer,
+            bytes,
+            &mut || gate(&screening),
+            &std::thread::sleep,
+        )?;"""
+replace = '''        let _table = self.lock_panes().map_err(Gated::Pane)?;
+        write_gated_in(&writer, bytes, &mut || gate(&screening), &std::thread::sleep)?;'''
 
 [[plant]]
 name = "load timing: an ack frees nothing of the pane's flow"
@@ -238,15 +241,13 @@ platforms = ["macos", "linux"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/pty/flow.rs"
-find = '''            state.unacked.pop_front();
-            state.unacked_bytes -= byte_count;
+find = '''            state.acked_bytes += byte_count as u64;
         }
         self.ready.notify_all();
-        Ok(())'''
-replace = '''            state.unacked.pop_front();
-            state.unacked_bytes -= byte_count;
+        Ok(state.acked_bytes)'''
+replace = '''            state.acked_bytes += byte_count as u64;
         }
-        Ok(())'''
+        Ok(state.acked_bytes)'''
 
 # --- the app: the hanging login shell is ended when it has started what it started ---
 

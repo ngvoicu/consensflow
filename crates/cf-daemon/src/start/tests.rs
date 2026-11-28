@@ -23,6 +23,8 @@ use tokio::task::LocalSet;
 use super::*;
 use crate::testing::Said;
 
+mod broken;
+mod first_start;
 mod held;
 mod input;
 mod restart;
@@ -110,6 +112,11 @@ fn options(
     let (app, connection) = BridgeBuilder::new(Role::Host).connect(app_input, app_output);
     drop(tokio::task::spawn_local(connection));
     let (noted, told) = (Rc::clone(exited), Rc::clone(handles));
+    // The `cf` of the test's bundle is there, as the app's is: on Windows the guard's stand-ins
+    // are made from it, and a bundle with none would start the windows without the guard.
+    let bundle = machine::bundle_of(&root.join("bundle").join("bin").join("cf"));
+    std::fs::create_dir_all(&bundle.bin).expect("the bundle's folder");
+    std::fs::write(&bundle.cf, b"a cf").expect("the bundle's cf");
     let options = Options {
         input: Box::new(daemon_input),
         output: Box::new(daemon_output),
@@ -119,7 +126,7 @@ fn options(
             Ok(())
         }),
         exit: Rc::new(move |code| noted.borrow_mut().push(code)),
-        bundle: machine::bundle_of(&root.join("bundle").join("bin").join("cf")),
+        bundle,
         signals: false,
     };
     (options, app)
@@ -463,7 +470,7 @@ async fn a_second_daemon_on_the_same_home_is_refused_and_touches_no_window_of_th
 }
 
 #[tokio::test]
-async fn a_ledger_that_cannot_be_opened_fails_the_start_and_the_log_ends_with_exit_1() {
+async fn a_file_that_is_no_ledger_fails_the_start_and_the_log_ends_with_exit_74() {
     LocalSet::new()
         .run_until(async {
             let root = Rc::new(tempfile::tempdir().unwrap());
@@ -485,7 +492,7 @@ async fn a_ledger_that_cannot_be_opened_fails_the_start_and_the_log_ends_with_ex
                 said_of(&lines[0]).starts_with("info start pid "),
                 "{lines:?}"
             );
-            assert_eq!(said_of(&lines[1]), "info exit 1");
+            assert_eq!(said_of(&lines[1]), "info exit 74");
         })
         .await;
 }

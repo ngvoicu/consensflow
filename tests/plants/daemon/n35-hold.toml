@@ -11,9 +11,13 @@
 #   person to the window, and `queue` resets the count for it, so no move needs to.
 #
 # Every name holds `n35 hold`, so `cargo xtask plants daemon "n35 hold"` runs them all.
+#
+# How it is run: the model plants (run `n35-model`) draw 400 schedules, the model test's default; the plants driver
+# starts only `cargo` and `node` and passes xtask's own environment on, so `CF_N35_SEEDS=2000 cargo xtask plants
+# daemon "n35 hold"` asks for more.
 
 [run]
-n35-model = ["env", "CF_N35_SEEDS=400", "cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "n35_model::"]
+n35-model = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "n35_model::"]
 n35-dispatcher = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "n35_hold"]
 n35-probe = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "held_route"]
 n35-ledger = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "turn_retry"]
@@ -61,7 +65,7 @@ runs = ["n35-dispatcher", "n35-ledger"]
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/turn_retry.rs"
 find = "    let Some(hold) = hold else {\n        return Ok(());"
-replace = "    let Some(hold) = hold else {\n        start_again(store, task, \"2026-01-01T00:00:00.000Z\")?;\n        return Ok(());"
+replace = "    let Some(hold) = hold else {\n        start_again(store, task)?;\n        return Ok(());"
 
 [[plant]]
 name = "n35 hold: a tell to the window does not reset the count"

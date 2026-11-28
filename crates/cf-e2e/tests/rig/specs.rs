@@ -537,8 +537,8 @@ fn a_variant_claude_has_installed_itself_is_the_one_the_chief_is_told_of_and_not
     let installed = Path::new(rig.var("CLAUDE_CONFIG_DIR").unwrap_or_default())
         .join("skills")
         .join("specmint-core-html");
-    fs::create_dir_all(&installed)?;
-    fs::write(
+    cf_e2e::door::make_dir(&installed)?;
+    cf_e2e::door::write(
         installed.join("SKILL.md"),
         "---\nname: specmint-core-html\n---\nthe human's own copy\n",
     )?;

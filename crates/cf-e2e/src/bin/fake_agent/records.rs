@@ -516,8 +516,8 @@ mod tests {
         let mut records = Records::new(config.path(), "sess-1", 4242).unwrap();
         // The folder of the conversations goes with a rig of another run that ends, and the
         // folder of the status files with whoever tidies the machine's Claude folder.
-        fs::remove_dir_all(config.path().join("projects")).unwrap();
-        fs::remove_dir_all(config.path().join("sessions")).unwrap();
+        cf_e2e::door::remove(config.path().join("projects")).unwrap();
+        cf_e2e::door::remove(config.path().join("sessions")).unwrap();
         records.append(4242, user("heard")).unwrap();
         records.status(4242, "idle").unwrap();
         assert_eq!(

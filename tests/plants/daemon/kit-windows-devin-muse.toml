@@ -130,11 +130,11 @@ file = "crates/cf-e2e/src/live/isolation.rs"
 find = '''            watched: vec![
                 owner.join("credentials.toml"),
                 owner.join("config.json"),
-                owner.join("cli").join("trusted_workspaces.json"),
+                owner.join("cli/trusted_workspaces.json"),
             ],'''
 replace = '''            watched: vec![
                 owner.join("config.json"),
-                owner.join("cli").join("trusted_workspaces.json"),
+                owner.join("cli/trusted_workspaces.json"),
             ],'''
 
 [[plant]]
@@ -147,11 +147,11 @@ file = "crates/cf-e2e/src/live/isolation.rs"
 find = '''            watched: vec![
                 owner.join("credentials.toml"),
                 owner.join("config.json"),
-                owner.join("cli").join("trusted_workspaces.json"),
+                owner.join("cli/trusted_workspaces.json"),
             ],'''
 replace = '''            watched: vec![
                 owner.join("credentials.toml"),
-                owner.join("cli").join("trusted_workspaces.json"),
+                owner.join("cli/trusted_workspaces.json"),
             ],'''
 
 [[plant]]
@@ -164,7 +164,7 @@ file = "crates/cf-e2e/src/live/isolation.rs"
 find = '''            watched: vec![
                 owner.join("credentials.toml"),
                 owner.join("config.json"),
-                owner.join("cli").join("trusted_workspaces.json"),
+                owner.join("cli/trusted_workspaces.json"),
             ],'''
 replace = '''            watched: vec![owner.join("credentials.toml"), owner.join("config.json")],'''
 
@@ -190,9 +190,8 @@ platforms = ["windows"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/isolation.rs"
-find = '''                let roaming = machine("APPDATA")
-                    .map_or_else(|| home.join("AppData").join("Roaming"), PathBuf::from);'''
-replace = '''                let roaming = home.join("AppData").join("Roaming");'''
+find = '''                let roaming = machine("APPDATA").unwrap_or_else(|| home.join("AppData/Roaming"));'''
+replace = '''                let roaming = home.join("AppData/Roaming");'''
 
 # ---------------------------------------------------------------------------- what a run says (Windows)
 
@@ -203,9 +202,9 @@ runs = ["windows-lib"]
 platforms = ["windows"]
 
 [[plant.edit]]
-file = "crates/cf-e2e/src/live/isolation/watch.rs"
-find = '''            format!("~/{}", parts.join("/"))'''
-replace = '''            format!("~/{}", below.display())'''
+file = "crates/cf-e2e/src/door/source.rs"
+find = '''                .join("/"),'''
+replace = '''                .join(std::path::MAIN_SEPARATOR_STR),'''
 
 # ---------------------------------------------------------------------------- Muse: the arm
 
@@ -218,8 +217,8 @@ runs = ["isolation-lib"]
 file = "crates/cf-e2e/src/live/isolation.rs"
 find = '''            Harness::Muse => Some(Self::muse(
                 home,
-                &xdg(home, "XDG_CONFIG_HOME", &[".config"]),
-                &xdg(home, "XDG_DATA_HOME", &[".local", "share"]),
+                xdg(home, "XDG_CONFIG_HOME", &[".config"]),
+                xdg(home, "XDG_DATA_HOME", &[".local", "share"]),
             )),'''
 replace = '''            Harness::Muse => None,'''
 
@@ -233,8 +232,8 @@ platforms = ["windows"]
 file = "crates/cf-e2e/src/live/isolation.rs"
 find = '''            Harness::Muse => Some(Self::muse(
                 home,
-                &xdg(home, "XDG_CONFIG_HOME", &[".config"]),
-                &xdg(home, "XDG_DATA_HOME", &[".local", "share"]),
+                xdg(home, "XDG_CONFIG_HOME", &[".config"]),
+                xdg(home, "XDG_DATA_HOME", &[".local", "share"]),
             )),'''
 replace = '''            Harness::Muse => None,'''
 
@@ -246,6 +245,6 @@ platforms = ["windows"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/isolation.rs"
-find = '''                data.join("muse").join("session-index.db"),
+find = '''                data.join("muse/session-index.db"),
 '''
 replace = ''''''

@@ -92,7 +92,7 @@ runs = ["pl-page"]
 
 [[plant.edit]]
 file = "app/ui/term.js"
-find = "      linkHandler: { ...link, allowNonHttpProtocols: false },\n"
+find = "      linkHandler: { ...this.link, allowNonHttpProtocols: false },\n"
 replace = ""
 
 [[plant]]
@@ -102,8 +102,8 @@ runs = ["pl-page"]
 
 [[plant.edit]]
 file = "app/ui/term.js"
-find = "linkHandler: { ...link, allowNonHttpProtocols: false },"
-replace = "linkHandler: { ...link, allowNonHttpProtocols: true },"
+find = "linkHandler: { ...this.link, allowNonHttpProtocols: false },"
+replace = "linkHandler: { ...this.link, allowNonHttpProtocols: true },"
 
 [[plant]]
 name = "pane links: the title does not say where a link goes"
@@ -407,12 +407,12 @@ replace = "    let ours = com_started(start()).unwrap_or(false);\n"
 
 [[plant]]
 name = "pane links: a plain address is a link again"
-meant = "pane links on a Mac › a plain URL is no link: no underline, no title, and Cmd+click opens nothing"
+meant = "pane links on a Mac › plain addresses open whole or are left as text when punctuation is ambiguous"
 runs = ["pl-page"]
 
 [[plant.edit]]
 file = "app/ui/term.js"
-find = "    this.terminal.open(host)\n"
+find = "    this.terminal.open(this.host)\n"
 replace = '''    this.terminal.registerLinkProvider({
       provideLinks: (y, done) => {
         const text = this.terminal.buffer.active.getLine(y - 1)?.translateToString(true) ?? ''
@@ -426,14 +426,14 @@ replace = '''    this.terminal.registerLinkProvider({
                     end: { x: found.index + found[0].length, y },
                   },
                   text: found[0],
-                  ...link,
+                  ...this.link,
                 },
               ]
             : undefined,
         )
       },
     })
-    this.terminal.open(host)
+    this.terminal.open(this.host)
 '''
 
 [[plant]]

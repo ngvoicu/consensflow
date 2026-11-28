@@ -597,25 +597,20 @@ fn powershell_7_runs_the_line_a_member_is_taught_and_the_brief_arrives_whole() {
     a_taught_file_arrives_whole_in("PowerShell 7", &powershell_7());
 }
 
-/// The chief's line, `task add --tier standard --file brief.md`, against a board that answers
-/// as it does a task.
+/// The chief's line, `task reopen T-3 --file brief.md` (the example the shells' text gives of a
+/// brief from a file, which names no role's command, so it stands with any staff), against a
+/// board that answers as it does a task.
 fn the_chief_s_line_arrives_whole_in(shell: &str, program: &Path) {
     let case = Case::new("unused");
     let (_exe, word) = spaced_cf(&case);
     brief_file(&case, "brief.md", false, "\n");
-    let line = taught("chief", &word, "task add --tier standard --file ");
-    assert!(
-        line.ends_with("task add --tier standard --file brief.md"),
-        "{line}"
-    );
+    let line = taught("chief", &word, "task reopen T-3 --file ");
+    assert!(line.ends_with("task reopen T-3 --file brief.md"), "{line}");
     let task = json!({
         "number": 3, "state": "open", "assignee": null, "requester": "chief",
         "title": "Parser", "blockedBy": [], "pool": "worker", "tier": "standard",
     });
-    let answer = reply(
-        201,
-        json!({ "task": task, "message": null, "gated": false }),
-    );
+    let answer = reply(200, json!({ "task": task }));
     let (code, said, body) = case.run_against(
         answer,
         program,

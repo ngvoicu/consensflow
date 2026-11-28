@@ -332,7 +332,9 @@ pub fn run(matrix: &Matrix, log: &Log) -> Result<Outcome> {
         checks.extend(oracle::after_done(&snapshot, &bindings, earlier, later));
     }
     let (mut checks, known) = sort_known(checks, scenario.known);
-    let turns = snapshot.turns_by_seat(seating, asks_in);
+    let turns = snapshot.turns_by_seat(seating, asks_in, &|agent| {
+        members.added_handle(agent).map(str::to_owned)
+    });
     let total_turns = snapshot.total_turns(asks_in);
     checks.push(Check::new(
         "bounds",
@@ -420,7 +422,6 @@ pub fn source() -> Value {
         crate::process::Run::new("git")
             .args(words)
             .cwd(crate::checkout::root())
-            .inheriting_env()
             .run()
             .map(|ran| ran.stdout.trim().to_owned())
             .unwrap_or_default()
@@ -449,6 +450,55 @@ fn tokens(members: &Members) -> Vec<String> {
         .collect()
 }
 
+/// The record kind of each window of the run, by handle: the chief's, and each session of a
+/// member by the seat that member is ([`Seating::of_member`]). A session of a member no seat is
+/// is an error that says so: an export that read it as Claude's would be empty and look whole
+/// (B27, CLN-16).
+fn record_kinds(
+    events: &[Value],
+    seating: &Seating,
+    joined: &dyn Fn(&str) -> Option<String>,
+) -> Result<Vec<(String, &'static str)>> {
+    let mut handles: Vec<(String, &'static str)> =
+        vec![("chief".to_owned(), seating.seat(Role::Chief).kind())];
+    for event in events
+        .iter()
+        .filter(|event| event["kind"] == "session.started")
+    {
+        let handle = event["data"]["handle"]
+            .as_str()
+            .unwrap_or_default()
+            .to_owned();
+        let member = event["data"]["member"].as_str().unwrap_or_default();
+        let seat = seating.of_member(member, joined).ok_or_else(|| {
+            crate::Error::Daemon(format!(
+                "session {handle} is of member {member:?}, which is no seat of this board: its record cannot be read as any harness's"
+            ))
+        })?;
+        if handles.iter().any(|(held, _)| *held == handle) {
+            return Err(crate::Error::Daemon(format!(
+                "session {handle} started twice: one record file would hold two windows"
+            )));
+        }
+        handles.push((handle, seat.kind()));
+    }
+    Ok(handles)
+}
+
+/// The rows of one window's record file. A record that could not be read is an error naming the
+/// window and its harness, never an empty file: an empty `[]` says the session had no items.
+fn record_rows(handle: &str, kind: &str, read: Result<Vec<Item>>) -> Result<Vec<Value>> {
+    let items = read.map_err(|error| {
+        crate::Error::Daemon(format!(
+            "the record of session {handle} ({kind}) could not be read: {error}"
+        ))
+    })?;
+    Ok(items
+        .iter()
+        .map(|item| json!({ "id": item.id, "role": item.role, "text": item.text, "complete": item.complete }))
+        .collect())
+}
+
 /// Each window's own record, as the daemon reads it, a file to each session of the run:
 /// `records/<handle>.json`, its items' roles, words and ends.
 fn records_of(
@@ -457,29 +507,15 @@ fn records_of(
     snapshot: &Snapshot,
     evidence: &Evidence,
 ) -> Result {
-    let mut handles: Vec<(String, &'static str)> =
-        vec![("chief".to_owned(), seating.seat(Role::Chief).kind())];
-    for event in snapshot
-        .events
-        .iter()
-        .filter(|event| event["kind"] == "session.started")
-    {
-        let handle = event["data"]["handle"]
-            .as_str()
-            .unwrap_or_default()
-            .to_owned();
-        let kind = event["data"]["member"]
-            .as_str()
-            .and_then(|agent| seating.of_agent(agent))
-            .map_or("claude-code", super::seating::Seat::kind);
-        handles.push((handle, kind));
-    }
+    let handles = record_kinds(&snapshot.events, seating, &|agent| {
+        members.added_handle(agent).map(str::to_owned)
+    })?;
     for (handle, kind) in handles {
-        let items = observe::record(members, &snapshot.events, kind, &handle).unwrap_or_default();
-        let rows: Vec<Value> = items
-            .iter()
-            .map(|item| json!({ "id": item.id, "role": item.role, "text": item.text, "complete": item.complete }))
-            .collect();
+        let rows = record_rows(
+            &handle,
+            kind,
+            observe::record(members, &snapshot.events, kind, &handle),
+        )?;
         evidence.json(&format!("records/{handle}.json"), &Value::Array(rows))?;
     }
     Ok(())
@@ -841,6 +877,72 @@ fn windows(members: &Members, evidence: &Evidence) -> Result {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// CLN-16: each session's record is read as its seat's harness, found by the handle its
+    /// member joined under; a member of no seat, or a session twice, fails the export.
+    #[test]
+    fn each_sessions_record_is_read_as_the_harness_of_its_seat_and_an_unmatched_one_fails() {
+        let board = Seating::board(0).unwrap();
+        let joined = |agent: &str| match agent {
+            "matrix-advisor" => Some("swe-2-medium".to_owned()),
+            "matrix-worker" => Some("gpt-6-1-luna".to_owned()),
+            _ => None,
+        };
+        let started = |handle: &str, member: &str| json!({ "kind": "session.started", "data": { "handle": handle, "member": member } });
+        let kinds = record_kinds(
+            &[
+                started("swe-2-medium-amber", "swe-2-medium"),
+                started("gpt-6-1-luna-amber", "gpt-6-1-luna"),
+            ],
+            &board,
+            &joined,
+        )
+        .unwrap();
+        assert_eq!(
+            kinds,
+            [
+                ("chief".to_owned(), "claude-code"),
+                ("swe-2-medium-amber".to_owned(), "devin"),
+                ("gpt-6-1-luna-amber".to_owned(), "codex"),
+            ]
+        );
+        let stranger = record_kinds(&[started("x-amber", "x")], &board, &joined)
+            .unwrap_err()
+            .to_string();
+        assert!(stranger.contains("no seat of this board"), "{stranger}");
+        let twice = record_kinds(
+            &[
+                started("swe-2-medium-amber", "swe-2-medium"),
+                started("swe-2-medium-amber", "swe-2-medium"),
+            ],
+            &board,
+            &joined,
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(twice.contains("started twice"), "{twice}");
+    }
+
+    /// A record that failed to read fails the export; it is not a window with no items.
+    #[test]
+    fn a_record_that_could_not_be_read_fails_the_export_and_is_not_an_empty_file() {
+        let failed = record_rows(
+            "x-amber",
+            "codex",
+            Err(crate::Error::Daemon("reader down".to_owned())),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(
+            failed.contains("x-amber")
+                && failed.contains("codex")
+                && failed.contains("reader down"),
+            "{failed}"
+        );
+        assert!(record_rows("x-amber", "codex", Ok(Vec::new()))
+            .unwrap()
+            .is_empty());
+    }
 
     /// A stand-in board ends a scenario at three minutes, and one that waits by design (minutes
     /// of wake-up calls) at three and what it waits; never past the scenario's own deadline.

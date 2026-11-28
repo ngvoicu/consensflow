@@ -437,8 +437,8 @@ mod tests {
 
     #[test]
     fn kit_round3_history_export_refuses_a_foreign_record_folder() {
-        let foreign = tempfile::tempdir().unwrap();
-        std::fs::write(foreign.path().join("record"), "fabricated record").unwrap();
+        let foreign = cf_e2e::standin_process::unowned_tempdir();
+        cf_e2e::standin_process::foreign_write(foreign.path().join("record"), "fabricated record");
         let run = cf_e2e::door::made("cf-history-guard-").unwrap();
         assert!(
             copy_tree(foreign.path(), &run.path().join("copy")).is_err(),

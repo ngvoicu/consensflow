@@ -31,6 +31,7 @@ use crate::shared::record::key::Keys;
 use crate::shared::record::reading::Reading;
 use store::Store;
 pub(crate) use store::MISSING_SESSION;
+use store::MISSING_STORE;
 pub(in crate::devin) use wires::Turns;
 use wires::Wires;
 
@@ -68,8 +69,9 @@ impl Look for Reader {
             self.store = None;
             self.wires = Wires::default();
             self.answer = None;
-            // A session the store has no row of yet is no failure to read it.
-            Arc::new(if reason == MISSING_SESSION {
+            // A session the store has no row of yet, or a store Devin has not made yet, is no
+            // failure to read it: the record is absent, as a transcript not written is.
+            Arc::new(if reason == MISSING_SESSION || reason == MISSING_STORE {
                 Reading::Missing(format!("unreadable: {reason}"))
             } else {
                 Reading::unreadable(&reason)

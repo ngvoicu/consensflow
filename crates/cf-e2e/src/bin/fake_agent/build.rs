@@ -83,7 +83,7 @@ fn run_in_the_foreground(asked: &Asked, window: &Window) -> Result<Reply, String
         daemon.into_os_string(),
     ];
     let mut shell = in_a_shell(&program, words, false)?
-        .inheriting_window_env()
+        .as_this_window(cf_e2e::door::spawn::Window::this())
         .closed_input()
         .spawn()
         .map_err(|failed| failed.to_string())?;
@@ -135,7 +135,7 @@ fn leave_a_daemon(seconds: &str, build: &Path, daemon: &Path) -> Result<(), Stri
         .arg(JOB)
         .arg(seconds)
         .arg(daemon)
-        .inheriting_window_env()
+        .as_this_window(cf_e2e::door::spawn::Window::this())
         .closed_input()
         .spawn()
         .map_err(|failed| failed.to_string())?;

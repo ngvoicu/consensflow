@@ -16,6 +16,11 @@ use crate::shared::quota::{busy_quota, exhausted_quota, unavailable_quota};
 use crate::shared::record::drawn::{self, Detail, Kind, Status};
 use crate::shared::record::reading::{native_id, ModelMoved, Role};
 
+/// How many of the latest command records' uuids a transcript remembers (`is_a_report`): a
+/// report's parent is one exact uuid, never used twice, so an old one matches nothing by
+/// mistake; the bound is for memory alone.
+const REMEMBERED_COMMANDS: usize = 64;
+
 impl Transcript {
     /// The record at `seq` among the transcript's, with its `place` in the
     /// tree when it has one.
@@ -40,7 +45,17 @@ impl Transcript {
             }
             Projected::Assistant(assistant) => self.assistant(assistant, seq)?,
             Projected::User(user) => self.user(user, place, seq)?,
-            Projected::Output(parent) => self.output(parent),
+            Projected::Output(printed) => {
+                if let Some(uuid) = &printed.uuid {
+                    if self.printed_by_the_system.len() == REMEMBERED_COMMANDS {
+                        self.printed_by_the_system.remove(0);
+                    }
+                    self.printed_by_the_system.push(Arc::clone(uuid));
+                }
+                if let Some(parent) = &printed.ends {
+                    self.output(parent);
+                }
+            }
             Projected::Boundary(boundary) => self.boundary(boundary),
             Projected::Compacted(tokens) => self.compacted_from = *tokens,
         }
@@ -391,6 +406,14 @@ impl Transcript {
         if js::trim(&record.text).is_empty() {
             return Ok(());
         }
+        // What a command the harness answered by itself leaves for the model's next turn
+        // (`/context`'s report, a child of the system's record of its output) asks nothing
+        // of the model: it changes nothing the look reads, neither the turn (open or at
+        // rest) nor the items (an item would make a window that has had no turn no longer
+        // empty, and the adapter takes an empty transcript for a window at its prompt).
+        if self.is_a_report(record) {
+            return Ok(());
+        }
         let ends = record
             .output_of
             .as_deref()
@@ -454,6 +477,18 @@ impl Transcript {
         self.candidate = None;
         self.terminal = None;
         Ok(())
+    }
+
+    /// Whether the user's record is what a command the harness answered by itself holds for
+    /// the model's next turn: marked so (`report_of`), and a child of the system's
+    /// `local_command` record last read, which is the command's output. A record with the same
+    /// marks anywhere else (a companion of a prompt) is no report: it may be asked about.
+    fn is_a_report(&self, record: &User) -> bool {
+        record.report_of.as_deref().is_some_and(|parent| {
+            self.printed_by_the_system
+                .iter()
+                .any(|uuid| &**uuid == parent)
+        })
     }
 
     /// `lateAncestor`: whether the user record at `place` is one of the

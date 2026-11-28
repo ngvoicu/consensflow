@@ -130,11 +130,12 @@ pub(super) fn working(
 /// `found`, the program `name`, if it ends 0 when it is asked `probe`; an error that
 /// says how it ended otherwise.
 pub(super) fn runs(found: PathBuf, name: &str, probe: &[&str]) -> Result<PathBuf> {
-    let ran = Run::new(&found)
-        .args(probe)
-        .inheriting_env()
-        .closed_input()
-        .run()?;
+    // A harness's program is started as one: on the run's homes, with its update switches.
+    let start = match super::Harness::from_name(name) {
+        Some(harness) => Run::harness(harness.name(), &found),
+        None => Run::new(&found),
+    };
+    let ran = start.args(probe).closed_input().run()?;
     if ran.code == Some(0) {
         return Ok(found);
     }
@@ -219,7 +220,6 @@ fn holds_no_harness(folder: &Path) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use std::fs;
 
     use super::*;
 
@@ -242,12 +242,12 @@ mod tests {
     #[test]
     fn a_command_is_the_first_file_of_its_name_on_the_path() {
         let (first, second, empty) = (
-            tempfile::tempdir().unwrap(),
-            tempfile::tempdir().unwrap(),
-            tempfile::tempdir().unwrap(),
+            crate::door::made("t-").unwrap(),
+            crate::door::made("t-").unwrap(),
+            crate::door::made("t-").unwrap(),
         );
         let name = file_of("codex");
-        fs::write(second.path().join(&name), "second").unwrap();
+        crate::door::write(second.path().join(&name), "second").unwrap();
         let path = path_of(&[empty.path(), first.path(), second.path()]);
         // (On Windows the extension is the one `PATHEXT` names, as it names it.)
         assert_eq!(
@@ -255,7 +255,7 @@ mod tests {
             Some(second.path().join(&name))
         );
         // Another folder has one before it: that one is the command.
-        fs::write(first.path().join(&name), "first").unwrap();
+        crate::door::write(first.path().join(&name), "first").unwrap();
         assert_eq!(
             find("codex", &path, Some(".cmd")),
             Some(first.path().join(&name))
@@ -264,8 +264,8 @@ mod tests {
 
     #[test]
     fn a_folder_of_the_name_is_no_command_and_a_command_that_is_not_there_is_none() {
-        let folder = tempfile::tempdir().unwrap();
-        fs::create_dir(folder.path().join(file_of("codex"))).unwrap();
+        let folder = crate::door::made("t-").unwrap();
+        crate::door::make_dir(folder.path().join(file_of("codex"))).unwrap();
         let missing = folder.path().join("no-such-folder");
         let path = path_of(&[folder.path(), &missing]);
         assert_eq!(find("codex", &path, None), None);
@@ -276,10 +276,10 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn on_windows_a_command_is_the_file_with_an_extension_of_pathext_in_its_order() {
-        let folder = tempfile::tempdir().unwrap();
-        fs::write(folder.path().join("codex.cmd"), "").unwrap();
-        fs::write(folder.path().join("codex.exe"), "").unwrap();
-        fs::write(folder.path().join("codex"), "").unwrap();
+        let folder = crate::door::made("t-").unwrap();
+        crate::door::write(folder.path().join("codex.cmd"), "").unwrap();
+        crate::door::write(folder.path().join("codex.exe"), "").unwrap();
+        crate::door::write(folder.path().join("codex"), "").unwrap();
         let path = path_of(&[folder.path()]);
         assert_eq!(
             find("codex", &path, Some(".CMD;.EXE")),
@@ -294,7 +294,7 @@ mod tests {
 
     #[test]
     fn a_terminal_apps_shims_are_no_harness_of_the_machine() {
-        let root = tempfile::tempdir().unwrap();
+        let root = crate::door::made("t-").unwrap();
         let name = file_of("claude");
         let (cmux, app, real) = (
             root.path().join("cmux-cli-shims"),
@@ -302,8 +302,8 @@ mod tests {
             root.path().join("real"),
         );
         for folder in [&cmux, &app, &real] {
-            fs::create_dir_all(folder).unwrap();
-            fs::write(folder.join(&name), "").unwrap();
+            crate::door::make_dir(folder).unwrap();
+            crate::door::write(folder.join(&name), "").unwrap();
         }
         // Each is first on the path, and none of them is the command.
         let path = path_of(&[&cmux, &app, &real]);
@@ -332,7 +332,10 @@ mod tests {
     fn a_file_of_the_name_that_does_not_run_is_passed_over_for_a_later_one_that_does() {
         // The Store's alias of `python3`, as zeewin has it first on its PATH: a shell finds
         // it, and whatever it is asked it ends 9009 and says there is no Python.
-        let (alias, real) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let (alias, real) = (
+            crate::door::made("t-").unwrap(),
+            crate::door::made("t-").unwrap(),
+        );
         let stub = program(
             alias.path(),
             "python3",
@@ -370,7 +373,7 @@ mod tests {
             python
         );
         // None of the name at all is the error that it is in no folder of the PATH.
-        let empty = tempfile::tempdir().unwrap();
+        let empty = crate::door::made("t-").unwrap();
         let none = working(
             "python3",
             &path_of(&[empty.path()]),

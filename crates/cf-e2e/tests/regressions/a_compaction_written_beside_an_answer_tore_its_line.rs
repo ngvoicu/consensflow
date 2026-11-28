@@ -28,7 +28,7 @@
 //! byte after the answer, and the plant that tears the line would pass. The second is
 //! the wait.
 
-use std::fs::{File, OpenOptions};
+use std::fs::File;
 use std::io::{self, Write};
 use std::path::Path;
 use std::thread::sleep;
@@ -83,7 +83,7 @@ fn a_compaction_written_as_the_stand_in_answers_is_copied_with_the_answer() -> O
         .join("integration")
         .join(format!("{session}.jsonl"));
     let mut record = Stalling {
-        record: OpenOptions::new().append(true).open(file)?,
+        record: cf_e2e::door::append(file)?,
         stall: Duration::from_secs(6),
         stalled: false,
     };

@@ -21,7 +21,19 @@ import {
   tierColumns,
   tiersOf,
 } from './roles.js'
-import { crowded, holdersOf, inTheWay, slotHead, slotName, slotRows, takenWords } from './slots.js'
+import {
+  anchorOf,
+  crowded,
+  goneRoles,
+  holdersOf,
+  inTheWay,
+  NO_SLOT,
+  slotHead,
+  slotName,
+  slotRows,
+  takenWords,
+  together,
+} from './slots.js'
 
 /**
  * The dialogs that say who works on a project and how: New project (its
@@ -38,20 +50,15 @@ import { crowded, holdersOf, inTheWay, slotHead, slotName, slotRows, takenWords 
 /** How a picker says a tier, one of the daemon's: "Critical work". */
 const tierLabel = (tier) => `${tier.charAt(0).toUpperCase()}${tier.slice(1)} work`
 const rank = (list, value) => (list.includes(value) ? list.indexOf(value) : list.length)
-/** A staff reads by role, in the daemon's order of them, then by tier, the most critical first, then by name. */
-const byRoleAndTier = (a, b) =>
-  rank(roleIds(), a.role) - rank(roleIds(), b.role) ||
-  rank(tierColumns(), a.tier) - rank(tierColumns(), b.tier) ||
-  a.name.localeCompare(b.name)
 /** The tiers a member of `roles` can be in: each tier every one of its roles with tiers has a slot at. */
 const tiersFor = (roles) =>
   tierColumns().filter((tier) =>
     roles.every((role) => tiersOf(role).length === 0 || tiersOf(role).includes(tier)),
   )
 /**
- * What a staff table says under a member's name: its tier and its harness, and what it runs on
- * (its model's id and its effort) only where its name does not say it (HMD-12); a pick of New
- * project has no name made yet, and says its harness, its effort and its tier.
+ * What a member's part says under its name: its tier and its harness, and what it runs on (its
+ * model's id and its effort) only where its name does not say it (HMD-12); a pick of New project
+ * has no name made yet, and says its harness, its effort and its tier.
  */
 const runsLabel = (member, named = true) => {
   // A member whose roles have no tier is said to have none (an image designer's: a design task
@@ -73,66 +80,93 @@ const runsLabel = (member, named = true) => {
 /** A member's roles in the order the picker offers them. */
 const inRoleOrder = (roles) => [...roles].sort((a, b) => rank(roleIds(), a) - rank(roleIds(), b))
 
-/** A staff table's last cell: the actions of the member or backup its row is for. */
-function toolsCell(tools) {
-  const cell = element('td', 'staff-tools')
-  const actions = element('div', 'staff-actions')
-  actions.append(...tools)
-  cell.append(actions)
-  return cell
-}
+/**
+ * What a member's own part holds, in words, as its slot's card is named by them (T-2341): its
+ * Edit where it has one, its Vacation where it has one to change, and its backup where it may
+ * have one or has one. An image designer has no Edit, and is offered no backup.
+ */
+const opensSaid = ({ edit, vacation, backup, remove }) =>
+  together(
+    [edit && 'Edit', vacation && 'Vacation', backup && 'backup', remove && 'Remove'].filter(
+      Boolean,
+    ),
+  )
 
 /**
- * A member's row in a staff table, the same in both staff dialogs: its cell, the slots it holds
- * (each slot's Remove is the slot's own, above), and its own tools, said once however many slots
- * it holds. The member's backup slot follows it (`backupSlot`): together they are the member's
- * group, as the board draws a member and its backup as one team (the owner, 2026-11-19).
+ * A member's Remove in its part, where no slot's cross reaches it (its role is gone): asked first
+ * in its card, as a last role's Remove is.
  */
-function memberRow(who, roles, tools) {
-  const row = element('tr', 'staff-group')
-  row.dataset.roles = inRoleOrder(roles).join(' ')
-  const slots = element('td', 'member-slots-cell')
-  slots.append(element('span', 'member-slots', inRoleOrder(roles).map(roleLabel).join(' · ')))
-  row.append(who, slots, toolsCell(tools))
+const removeMember = (name, action) =>
+  button('Remove from the staff', 'quiet-button', action, `Remove ${name} from the staff`)
+
+/**
+ * The first lines of a member's part, or of its backup's, under its name: what it runs on, its
+ * model marked where its harness lists it no more (T-1143) with what to do in words, or what to
+ * do where the update could not tell what it ran on (T-1202), and on Vacation where it rests.
+ */
+function aboutLines(
+  runs,
+  { gone = null, harness = null, needsEdit = false, agent = null, resting = false },
+) {
+  const about = element('div', 'slot-part-about')
+  const meta = element('span', 'member-meta')
+  if (gone) meta.append(element('mark', 'model-gone', gone), ` · ${runs}`)
+  else meta.textContent = runs
+  about.append(meta)
+  if (gone) {
+    about.append(
+      element(
+        'span',
+        'member-gone',
+        `${harness} no longer lists ${gone}: edit it to a model it lists.`,
+      ),
+    )
+  }
+  if (needsEdit) {
+    about.append(
+      element(
+        'span',
+        'member-gone',
+        `The update could not tell what ${agent ?? 'its agent'} ran on: edit it to a model its harness lists, or remove it.`,
+      ),
+    )
+  }
+  if (resting) {
+    const mark = element('span', 'slot-mark', 'on Vacation')
+    mark.dataset.tone = 'rest'
+    about.append(mark)
+  }
+  return about
+}
+
+/** A part's acts, in one row that wraps where the dialog is narrow. */
+function actsOf(acts) {
+  const row = element('div', 'slot-part-acts')
+  row.append(...acts)
   return row
 }
 
 /**
- * A staff's groups, one a member, shaded odd and even in turn (the owner, 2026-11-20: "lets make
- * each row a different color/shade like odd/even"): a member's rows and its backup slot take
- * one shade, so one member is told from the next and never split from its backup.
+ * A member's backup in its part, the same in both staff dialogs: the backup (`about`, its name's
+ * lines, and `acts`: Change backup, its Vacation and Remove backup), or none (null, with Add
+ * backup). An image designer is offered no backup, and shows the one it has (an earlier
+ * version's) with its Vacation and Remove backup.
  */
-const shaded = (groups) =>
-  groups.flatMap((rows, at) => {
-    for (const row of rows) row.dataset.shade = at % 2 === 0 ? 'odd' : 'even'
-    return rows
-  })
-
-/**
- * The last row of a member's group, alike under every member that may have a backup, in both
- * staff dialogs: its backup (`who`, a staff cell, with Change backup, its Vacation and Remove
- * backup) or none (null, with Add backup). An image designer is offered no backup, and shows
- * the one it has (an earlier version's) with its Vacation and Remove backup.
- */
-function backupSlot(owner, who, tools) {
-  const row = element('tr', 'staff-group-more backup-slot')
-  row.dataset.backupOf = owner
-  const cell = element('td')
-  cell.colSpan = 2
-  const part = element('div', who === null ? 'backup-part backup-none' : 'backup-part')
+function backupPart(owner, backup, about, acts) {
+  const part = element('div', backup === null ? 'backup-part backup-none' : 'backup-part')
+  const who = element('div', 'backup-who')
   // Said to a screen reader as "backup of @zeus …", or "backup for @zeus: none".
-  part.append(
+  who.append(
     element('span', 'team-kind', 'backup'),
-    element('span', 'visually-hidden', who === null ? ` for ${owner}: ` : ` of ${owner} `),
+    element('span', 'visually-hidden', backup === null ? ` for ${owner}: ` : ` of ${owner} `),
   )
-  if (who === null) part.append(element('span', 'member-meta', 'none'))
-  else part.append(...who.childNodes)
-  cell.append(part)
-  row.append(cell, toolsCell(tools))
-  return { row, part }
+  if (backup === null) who.append(element('span', 'member-meta', 'none'))
+  else who.append(element('span', 'member-name', backup), about)
+  part.append(who, actsOf(acts))
+  return part
 }
 
-/** A backup slot's actions, the same in both staff dialogs: named for the member they are for. */
+/** A backup's acts, the same in both staff dialogs: named for the member they are for. */
 const addBackup = (owner, action) =>
   button('Add backup', 'quiet-button', action, `Add backup for ${owner}`)
 const changeBackup = (owner, action) =>
@@ -140,63 +174,95 @@ const changeBackup = (owner, action) =>
 const removeBackup = (owner, action) =>
   button('Remove backup', 'quiet-button', action, `Remove backup for ${owner}`)
 
-/** A staff table's first cell: who, and what it runs. */
-function whoCell(name, runs) {
-  const cell = element('td')
-  cell.append(
-    element('span', 'member-name', name),
-    element('br'),
-    element('span', 'member-meta', runs),
-  )
-  return cell
+/**
+ * Why the member form is to be shut, as a staff dialog's staff is now (T-2341, rounds 2 and 3), or
+ * none where what it was opened for is as it was: the empty slot of its Add is held, the member
+ * its Edit or its backup's form is for left or is called otherwise now, or that member's backup is
+ * another (or none, or one now) than the form was opened on. The member is the one the form
+ * opened on, by its id: one that took its name meanwhile is not it. `look` reads the staff:
+ * `holder(role, tier)`, `now(id)` (what the member of that id is called now, or null where it
+ * left), `backup(id)` (the key of its backup, or null) and `backupName(key)`.
+ */
+function formGoneWords(form, look) {
+  if (form.slot !== null) {
+    const held = look.holder(form.slot.role, form.slot.tier)
+    return held
+      ? `The ${slotName(form.slot.role, form.slot.tier)} slot is ${held.name}'s now, so its Add was closed. Nothing was added.`
+      : null
+  }
+  /** Where the member of `id`, called `name` as the form opened, left or is called otherwise. */
+  const gone = (id, name, what) => {
+    const now = look.now(id)
+    if (now === null) return `${name} left the staff, so ${what} was closed. Nothing was saved.`
+    return now === name ? null : `${name} is ${now} now, so ${what} was closed. Nothing was saved.`
+  }
+  if (form.backup !== null) {
+    const { owner, changing, of, ofName } = form.backup
+    const what = changing ? 'Change backup' : 'Add backup'
+    const left = gone(owner.id, owner.label, what)
+    if (left !== null) return left
+    const now = look.backup(owner.id)
+    if (now === of) return null
+    if (now === null)
+      return `${owner.label} has no backup now, so ${what} was closed. Nothing was saved.`
+    return of === null
+      ? `${owner.label} has a backup now, ${look.backupName(now)}, so Add backup was closed. Nothing was saved.`
+      : `${owner.label}'s backup is ${look.backupName(now)} now, not ${ofName}, so Change backup was closed. Nothing was saved.`
+  }
+  if (form.editing !== null) return gone(form.editingId, form.editingName, 'its Edit')
+  return null
 }
 
 /**
- * A staff table's first cell for a member whose harness no longer lists its model (T-1143):
- * the model marked, and what is wrong in words.
+ * Draws a staff dialog's slots, the member form in the place a slot's row has for it (T-2341):
+ * under an empty slot its Add opened, or in the part of the member whose Edit or backup opened
+ * it. A redraw leaves the form where it is while its place stays; a form whose place goes is
+ * put back under the slots first, so a redraw never takes it out of the dialog. The keyboard
+ * stays in the form wherever it goes.
  */
-function goneCell(name, model, runs, harness) {
-  const cell = element('td')
-  const meta = element('span', 'member-meta')
-  meta.append(element('mark', 'model-gone', model), ` · ${runs}`)
-  cell.append(
-    element('span', 'member-name', name),
-    element('br'),
-    meta,
-    element('br'),
-    element(
-      'span',
-      'member-gone',
-      `${harness} no longer lists ${model}: edit it to a model it lists.`,
-    ),
-  )
-  return cell
+function drawSlots(body, rows, form) {
+  const table = body.closest('table')
+  const had = form.contains(document.activeElement) ? document.activeElement : null
+  const wanted = rows.flatMap((row) => [...row.querySelectorAll('.slot-form-place')])[0]
+  const held = form.parentElement
+  if (body.contains(form) && held.dataset.keep !== wanted?.dataset.keep) table.after(form)
+  redraw(body, rows)
+  const place = body.querySelector('.slot-form-place')
+  if (place !== null && form.parentElement !== place) place.append(form)
+  if (place === null && body.contains(form)) table.after(form)
+  if (had?.isConnected && document.activeElement !== had) {
+    had.focus({ preventScroll: true })
+  }
 }
 
 /**
- * A staff table's first cell for a member the update could not run on what it ran on
- * (T-1202): no model, and what to do in words.
+ * The member's part, once a slot's card opened it: in sight with the slot it came from, the
+ * keyboard on its first act.
  */
-function needsEditCell(name, runs, agent) {
-  const cell = whoCell(name, runs)
-  cell.append(
-    element('br'),
-    element(
-      'span',
-      'member-gone',
-      `The update could not tell what ${agent ?? 'its agent'} ran on: edit it to a model its harness lists, or remove it.`,
-    ),
-  )
-  return cell
+function showPart(body) {
+  const row = body.querySelector('tr.slot-open-row')
+  if (row === null) return
+  const still = matchMedia('(prefers-reduced-motion: reduce)').matches
+  row.scrollIntoView({ block: 'nearest', behavior: still ? 'auto' : 'smooth' })
+  const first = row.querySelector('.slot-part-acts button, .slot-part button:not(.slot-part-close)')
+  ;(first ?? row.querySelector('.slot-part-close'))?.focus({ preventScroll: true })
 }
 
-/** A staff table with nobody in it says so, and what to do, across its three columns. */
-function nobodyRow(text) {
-  const row = element('tr', 'staff-empty')
-  const cell = element('td', null, text)
-  cell.colSpan = 3
-  row.append(cell)
-  return row
+/**
+ * Where the keyboard goes once a member's part is shut: back to the card it was opened from, as
+ * the slots are drawn again. Read before they are.
+ */
+function backToCard(body) {
+  const card = body.querySelector('.slot-holder[data-lit="open"]')
+  if (card === null) return () => {}
+  const slot = card.closest('[data-slot]').dataset.slot
+  const member = card.dataset.member
+  return () =>
+    body
+      .querySelector(
+        `[data-slot="${slot}"] .slot-holder[data-member="${CSS.escape(member)}"] .slot-open`,
+      )
+      ?.focus()
 }
 
 /** The name a harness's program goes by, which `models.get` and `missing` say: Claude Code's is `claude`. */
@@ -663,7 +729,7 @@ class ChiefPicker {
  * Add member and Edit member (T-1143), on the [`ModelPicker`] the chief's picker shares: a
  * harness installed here, a model that harness lists of itself and an effort it lists for that
  * model. The form is shut until a slot's Add, an Edit or a backup opens it, in sight, its harness
- * picked first. A slot's Add adds a member in that slot: its role and tier are the slot's, shown
+ * picked first; its dialog puts it in the slot's row it was opened from (`placed`, T-2341). A slot's Add adds a member in that slot: its role and tier are the slot's, shown
  * in the form's name and not asked (D8), and an image designer draws on Codex. Edit member moves
  * a member to another harness, model, effort or tier from its next window; its handle and roles
  * stay, and its tier picker says of each tier whose slot is in the way. Refresh reads the picked
@@ -684,8 +750,23 @@ class MemberPicker {
   #lists
   /** The member being edited, by handle: none while the form adds one. */
   editing = null
-  /** The owner and whether this form is replacing its backup; null for a member. */
+  /** What the member being edited is called, as the form's name says it. */
+  editingName = null
+  /**
+   * The member being edited, by the id it had as the form opened (a draft's number): a member
+   * that takes its name meanwhile is another (T-2341, round 3).
+   */
+  editingId = null
+  /**
+   * The owner, whether this form is replacing its backup, and the backup it was opened on (`of`,
+   * its handle, or none for an Add backup); null for a member.
+   */
   backup = null
+  /**
+   * Which opening of the form this is: each opening and each reset makes a new one, so that an
+   * answer to a save the person left behind acts on the form no more (T-2341, round 2).
+   */
+  generation = 0
   /** The slot the form adds a member in, `{ role, tier }`: none while it edits or is shut. */
   slot = null
   /** The name of the button that opened the form with the keyboard on it: it has the keyboard back at a Cancel. */
@@ -694,6 +775,8 @@ class MemberPicker {
   #missing = []
   /** Told of a refresh of `harness` (its kind): the staff's marks of gone models are drawn again. */
   #refreshed
+  /** Told the form opened, before it comes into sight: its dialog puts it where it was opened from. */
+  #placed
 
   /** What the add button says while the form adds a member. */
   #adds
@@ -727,8 +810,9 @@ class MemberPicker {
     return this.backup !== null || takesNoTier(this.#editedRoles ?? [this.#role.value])
   }
 
-  constructor(form, lists, refreshed) {
+  constructor(form, lists, refreshed, placed) {
     this.#fieldset = form.querySelector('.staff-add')
+    this.#placed = placed
     this.#legend = this.#fieldset.querySelector('legend')
     this.#role = form.elements.role
     this.#harness = form.elements.memberHarness
@@ -778,6 +862,11 @@ class MemberPicker {
     return !this.#fieldset.hidden
   }
 
+  /** The form itself, which its dialog places in the slot's row it was opened from. */
+  get fieldset() {
+    return this.#fieldset
+  }
+
   /**
    * After a Cancel, the form shut: the keyboard back on the button that opened it, as the
    * dialog draws it now, where it had the keyboard when it did.
@@ -792,15 +881,21 @@ class MemberPicker {
     again?.focus()
   }
 
+  /** The form's name, its legend. */
+  #name(words) {
+    this.#legend.textContent = words
+  }
+
   /** The form shut, as it is until a slot's Add, an Edit or a backup opens it: nothing picked. */
   reset(missing) {
+    this.generation += 1
     this.#fillRoles()
     this.#missing = missing
     this.editing = null
     this.backup = null
     this.slot = null
     this.#editedRoles = null
-    this.#legend.textContent = 'Add a member'
+    this.#name('Add a member')
     this.#role.disabled = false
     this.#submit.textContent = this.#adds
     this.#fillTiers([])
@@ -821,7 +916,7 @@ class MemberPicker {
     this.#role.value = role
     this.#fillTiers(tier === null ? [] : [tier])
     this.#tier.value = tier ?? ''
-    this.#legend.textContent = `Add the ${slotName(role, tier)}`
+    this.#name(`Add the ${slotName(role, tier)}`)
     this.#fillHarnesses()
     this.#reveal()
   }
@@ -848,14 +943,19 @@ class MemberPicker {
   /** Reuse the member's harness, model and effort picker for its backup. */
   async backupFor(owner, current = null) {
     this.reset(this.#missing)
-    this.backup = { owner, changing: current !== null }
+    this.backup = {
+      owner,
+      changing: current !== null,
+      of: current?.handle ?? null,
+      ofName: current && (current.label ?? `@${current.handle}`),
+    }
     if (current !== null) {
       await this.edit({ ...current, roles: ['worker'] })
       if (this.backup?.owner !== owner) return
     } else {
       this.#fillHarnesses(null)
     }
-    this.#legend.textContent = `${current ? 'Change' : 'Add'} backup for ${owner.label}`
+    this.#name(`${current ? 'Change' : 'Add'} backup for ${owner.label}`)
     this.#tier.closest('label').hidden = true
     this.#submit.textContent = current ? 'Save backup' : 'Add backup'
     this.#cancel.hidden = false
@@ -863,8 +963,9 @@ class MemberPicker {
   }
 
   /**
-   * Brings the form into sight, its harness picked first, once a staff row's action fills it:
-   * the staff above it can be longer than the dialog, and the form below would change unseen.
+   * Brings the form into sight, its harness picked first, once a slot's Add or a member's part
+   * fills it: placed first in the slot's row it was opened from, in a grid that can be longer
+   * than the dialog.
    */
   #reveal() {
     // What opened the form, by its name: a redraw may draw it anew while the form is open.
@@ -874,6 +975,7 @@ class MemberPicker {
     }
     this.#fieldset.hidden = false
     this.#cancel.hidden = false
+    this.#placed()
     const still = matchMedia('(prefers-reduced-motion: reduce)').matches
     this.#fieldset.scrollIntoView({ block: 'nearest', behavior: still ? 'auto' : 'smooth' })
     this.#harness.focus({ preventScroll: true })
@@ -886,14 +988,17 @@ class MemberPicker {
    * picked.
    */
   async edit(member, blocked = new Map()) {
+    this.generation += 1
     this.#fillRoles()
     this.editing = member.handle
+    this.editingName = member.label ?? `@${member.handle}`
+    this.editingId = member.id ?? member._id ?? null
     this.slot = null
     this.#editedRoles = member.roles
     this.#current = member.model ? { model: member.model, effort: member.effort ?? null } : null
     this.#origin = null
     this.#fillTiers(tiersFor(member.roles), blocked)
-    this.#legend.textContent = `Edit ${member.label ?? `@${member.handle}`}`
+    this.#name(`Edit ${member.label ?? `@${member.handle}`}`)
     this.#role.disabled = true
     this.#submit.textContent = 'Save member'
     this.#cancel.hidden = false
@@ -1068,8 +1173,8 @@ class MemberPicker {
  * the project's settings, the sections Project settings has (`ProjectSections`): the staff
  * (the last project's members, on the harnesses installed here, to start with), human
  * approval, wake-up calls and specs. The staff is drawn as Project settings draws it (D8):
- * every slot, from the draft, again after each Add, slot given, Remove or Edit, and each member
- * once with its own things. A slot's Add picks a new member as Add member picks one
+ * every slot, from the draft, again after each Add, slot given, Remove or Edit, and a member's
+ * own things in its part, opened from any of its slots (T-2341). A slot's Add picks a new member as Add member picks one
  * (`MemberPicker`): a harness, a model it lists and an effort, in the slot's role and tier. The
  * project starts with them all, in one request, once no slot holds several.
  */
@@ -1078,7 +1183,6 @@ export class NewProjectDialog {
   #form
   #slots
   #slotHead
-  #staff
   #refusal
   #sections
   #page
@@ -1102,6 +1206,10 @@ export class NewProjectDialog {
   #removing = null
   /** Whether the words beside Start are a crowded slot's: they follow the slot as it is mended. */
   #crowdSaid = false
+  /** The draft's member whose part is open, by its number, and the role of the slot it was opened from. */
+  #opened = null
+  /** Why a form was closed under the person, under the row it was open in: `{ role, words }`. */
+  #closedWhy = null
 
   /**
    * `page.onStart(project)` is told of the project the daemon opened. `page.daemon` asks the
@@ -1116,7 +1224,6 @@ export class NewProjectDialog {
     holdEnter(this.#form)
     this.#slots = dialog.querySelector('#new-project-slots')
     this.#slotHead = dialog.querySelector('table.slots thead')
-    this.#staff = dialog.querySelector('#new-project-staff')
     this.#refusal = dialog.querySelector('.dialog-refusal')
     this.#sections = new ProjectSections(
       dialog.querySelector('[data-project-sections]'),
@@ -1135,7 +1242,15 @@ export class NewProjectDialog {
     const lists = new ModelLists(page.daemon)
     this.#lists = lists
     this.#chief = new ChiefPicker(this.#form, lists)
-    this.#member = new MemberPicker(this.#form, lists, () => {})
+    this.#member = new MemberPicker(
+      this.#form,
+      lists,
+      () => {},
+      () => {
+        this.#closedWhy = null
+        this.#draw()
+      },
+    )
     // Computer use is shown for the harnesses the chief and the staff run on, as they are picked.
     this.#form.elements.chiefHarness.addEventListener('change', () => this.#drawComputerUse())
     this.#form.elements.memberAdd.addEventListener('click', () => this.#picked())
@@ -1166,6 +1281,8 @@ export class NewProjectDialog {
     this.#chief.fill(missing)
     this.#member.reset(missing)
     this.#removing = null
+    this.#opened = null
+    this.#closedWhy = null
     this.#pickLast(staff)
     this.#sections.reset()
     this.#say('')
@@ -1257,9 +1374,21 @@ export class NewProjectDialog {
     if (refused !== null) this.#say(refused)
   }
 
-  /** The words of the slots the draft names several members for, or none. */
+  /**
+   * The words of what holds the start back, or none: the slots the draft names several members
+   * for, and each member that holds only roles ConsensFlow no longer has, which the ledger would
+   * refuse (T-2341, round 3).
+   */
   #crowded() {
-    const words = crowded(this.#members(), true).map((slot) => slot.words)
+    const members = this.#members()
+    const words = crowded(members, true).map((slot) => slot.words)
+    for (const member of members) {
+      const gone = goneRoles(member)
+      if (gone.length === 0) continue
+      words.push(
+        `${member.name} holds only ${gone.length > 1 ? 'roles' : 'a role'} ConsensFlow no longer has (${together(gone)}): remove it, under No slot, and the project can start.`,
+      )
+    }
     return words.length === 0 ? null : words.join(' ')
   }
 
@@ -1310,19 +1439,38 @@ export class NewProjectDialog {
     return this.#draft.find((member) => member._id === id && member.backupOf == null)
   }
 
-  /** The draft's members that hold slots, as the slots read them. */
+  /** The draft's members that hold slots, as the slots read them, each with its backup's name. */
   #members() {
     return this.#draft
       .filter((member) => member.backupOf == null)
-      .map((member) => ({
-        key: member._id,
-        name: modelShown(member),
-        runs: [member.harness && harnessLabel(member), member.effort].filter(Boolean).join(' · '),
-        roles: member.roles,
-        tier: member.tier ?? null,
-        designer: member.designer || member.roles.some(isImageAgentRole),
-        marks: member.vacationSince ? [{ text: 'on Vacation', tone: 'rest' }] : [],
-      }))
+      .map((member) => {
+        const designer = member.designer || member.roles.some(isImageAgentRole)
+        const backup = this.#backupOf(member._id)
+        // A member whose role ConsensFlow no longer has is removed, not edited (T-2341, round 3).
+        const gone = goneRoles(member).length > 0
+        return {
+          key: member._id,
+          name: modelShown(member),
+          runs: [member.harness && harnessLabel(member), member.effort].filter(Boolean).join(' · '),
+          roles: member.roles,
+          tier: member.tier ?? null,
+          designer,
+          marks: member.vacationSince ? [{ text: 'on Vacation', tone: 'rest' }] : [],
+          backup: backup ? modelShown(backup) : null,
+          // A draft's member can only be brought back from a Vacation it was copied with.
+          opens: opensSaid({
+            edit: !designer && !gone,
+            vacation: Boolean(member.vacationSince),
+            backup: (!designer && !gone) || Boolean(backup),
+            remove: gone,
+          }),
+        }
+      })
+  }
+
+  /** The draft's backup of its member numbered `id`, or none. */
+  #backupOf(id) {
+    return this.#draft.find((member) => member.backupOf === id)
   }
 
   /**
@@ -1371,6 +1519,7 @@ export class NewProjectDialog {
     // A refusal of the start goes with the change; a crowded slot's words follow the slot (`#draw`).
     if (!this.#crowdSaid) this.#say('')
     this.#draw()
+    this.#member.refocus(this.#dialog)
   }
 
   /** Takes `role` from the draft's member `key`; with none left it goes, its backup with it. */
@@ -1405,15 +1554,22 @@ export class NewProjectDialog {
 
   #draw() {
     const members = this.#members()
+    const closing = this.#formGone(members)
     const slot = this.#member.slot
+    // A part whose member left the draft is shut; one whose slot went is drawn, and shut, at the
+    // slot it is drawn under.
+    const anchor = anchorOf(members, this.#opened)
+    this.#opened = anchor && { key: anchor.member.key, role: anchor.role }
     this.#slotHead.replaceChildren(slotHead())
-    redraw(
+    drawSlots(
       this.#slots,
       slotRows(members, {
         draft: true,
+        id: 'new-project',
         picking:
           slot === null ? null : slot.tier === null ? slot.role : `${slot.role}:${slot.tier}`,
         add: (role, tier) => {
+          this.#opened = null
           this.#member.forSlot(role, tier)
           this.#draw()
         },
@@ -1430,46 +1586,93 @@ export class NewProjectDialog {
         },
         confirm: (holder) => this.#removeMember(holder.key),
         confirmWords: (holder) => this.#removeWords(holder),
+        opened: this.#opened,
+        gone: this.#closedWhy,
+        formHere: this.#member.open && slot === null,
+        open: (role, holder) => this.#open(role, holder.key),
+        shut: () => this.#shut(),
+        part: (holder) => this.#part(holder, members),
       }),
+      this.#member.fieldset,
     )
+    if (closing) this.#slots.querySelector('tr.slot-form-gone td')?.focus()
     // A crowded slot's words beside Start follow the slot: the slot as it is now, or none.
     if (this.#crowdSaid) {
       const crowd = this.#crowded()
       this.#say(crowd ?? '')
       this.#crowdSaid = crowd !== null
     }
-    const backups = new Map(
-      this.#draft
-        .filter((member) => member.backupOf != null)
-        .map((member) => [member.backupOf, member]),
-    )
-    const groups = this.#draft
-      .filter((member) => member.backupOf == null)
-      .map((member) => ({
-        member,
-        role: inRoleOrder(member.roles)[0],
-        tier: member.tier,
-        name: modelShown(member),
-      }))
-      .sort(byRoleAndTier)
-      .map(({ member }) => this.#group(member, backups.get(member._id), members))
-    const rows = shaded(groups)
-    if (rows.length === 0) {
-      rows.push(nobodyRow('Nobody yet: Add fills an empty slot with a new member.'))
-    }
-    redraw(this.#staff, rows)
     this.#drawComputerUse()
   }
 
-  /** A member's group: its row, with its own things once, and its backup slot. */
-  #group(member, backup, members) {
+  /**
+   * The form shut where what it was opened for is gone or changed (T-2341, round 2): the member
+   * its Edit is for left the draft, the empty slot of its Add is held, or the backup its Change
+   * was opened on is not its member's now. The line under the row it was open in says why, and
+   * nothing was saved. Says whether the form had the keyboard, which the line takes.
+   */
+  #formGone(members) {
+    const form = this.#member
+    if (!form.open) return false
+    const why = formGoneWords(form, {
+      holder: (role, tier) => holdersOf(members, role, tier)[0],
+      // A draft's member is its number, called otherwise only by the person's own Edit, which
+      // shuts the form first.
+      now: (id) =>
+        members.some((one) => one.key === id)
+          ? (form.backup?.owner.label ?? form.editingName)
+          : null,
+      backup: (id) => {
+        const backup = this.#backupOf(id)
+        return backup ? String(backup._id) : null
+      },
+      backupName: (key) => modelShown(this.#draft.find((one) => String(one._id) === key) ?? {}),
+    })
+    if (why === null) return false
+    const had = form.fieldset.contains(document.activeElement)
+    this.#closedWhy = { role: form.slot?.role ?? this.#opened?.role ?? NO_SLOT, words: why }
+    form.reset(this.#missing)
+    return had
+  }
+
+  /** The part of the draft's member `key`, opened from its slot of `role`; open there already, it shuts. */
+  #open(role, key) {
+    if (this.#opened?.key === key && this.#opened.role === role) {
+      this.#shut()
+      return
+    }
+    // The form open for another member, or for a slot's Add, is left as a Cancel leaves it.
+    if (this.#member.open) this.#member.reset(this.#missing)
+    this.#opened = { key, role }
+    this.#draw()
+    showPart(this.#slots)
+  }
+
+  /** The open part shut, the form in it with it, and the keyboard back on its card. */
+  #shut() {
+    const back = backToCard(this.#slots)
+    if (this.#member.open && this.#member.slot === null) this.#member.reset(this.#missing)
+    this.#opened = null
+    this.#draw()
+    back()
+  }
+
+  /**
+   * A draft member's own part: what it runs on and its state, its Edit and the end of a Vacation
+   * it was copied with, and its backup, with that backup's own.
+   */
+  #part(holder, members) {
+    const member = this.#memberOf(holder.key)
     const id = member._id
-    const name = modelShown(member)
-    const designer = member.designer || member.roles.some(isImageAgentRole)
-    const who = whoCell(name, runsLabel(member, false))
-    const tools = []
-    if (!designer) {
-      tools.push(
+    const name = holder.name
+    const designer = holder.designer
+    // What it keeps, with no Edit and no backup to add or change: an image designer's, and one's
+    // whose role ConsensFlow no longer has, which its Remove takes out of the draft.
+    const gone = goneRoles(member).length > 0
+    const kept = designer || gone
+    const acts = []
+    if (!kept) {
+      acts.push(
         button(
           'Edit',
           'quiet-button',
@@ -1486,59 +1689,74 @@ export class NewProjectDialog {
       )
     }
     if (member.vacationSince) {
-      who.append(element('br'), element('span', 'member-meta', 'on Vacation'))
-      tools.push(
+      acts.push(
         vacationButton(name, true, () => {
           member.vacationSince = null
           this.#draw()
         }),
       )
     }
-    const row = memberRow(who, member.roles, tools)
-    row.dataset.member = String(id)
-    row.dataset.model = member.model ?? ''
-    // An image designer is offered no backup: one it has from before is shown, to keep or remove.
-    if (designer && !backup) return [row]
-    const owner = { key: id, label: name }
-    if (!backup) {
-      const { row: none } = backupSlot(name, null, [
-        addBackup(name, () => {
-          void this.#member.backupFor(owner)
+    if (gone) {
+      acts.push(
+        removeMember(name, () => {
+          this.#removing = { key: id, role: NO_SLOT }
           this.#draw()
         }),
-      ])
-      return [row, none]
+      )
     }
-    const said = whoCell(
-      modelShown(backup),
-      runsLabel({ ...backup, roles: member.roles, tier: member.tier }, false),
-    )
-    const actions = designer
+    const nodes = [aboutLines(runsLabel(member, false), { resting: Boolean(member.vacationSince) })]
+    if (acts.length > 0) nodes.push(actsOf(acts))
+    const backup = this.#backupOf(id)
+    // An image designer is offered no backup: one it has from before is shown, to keep or remove.
+    if (kept && !backup) return nodes
+    const owner = { key: id, label: name, id }
+    if (!backup) {
+      nodes.push(
+        backupPart(name, null, null, [
+          addBackup(name, () => {
+            void this.#member.backupFor(owner)
+            this.#draw()
+          }),
+        ]),
+      )
+      return nodes
+    }
+    const shown = modelShown(backup)
+    const backupActs = kept
       ? []
       : [
           changeBackup(name, () => {
-            void this.#member.backupFor(owner, { ...backup, handle: String(backup._id) })
+            void this.#member.backupFor(owner, {
+              ...backup,
+              handle: String(backup._id),
+              label: modelShown(backup),
+            })
             this.#draw()
           }),
         ]
     if (backup.vacationSince) {
-      said.append(element('br'), element('span', 'member-meta', 'on Vacation'))
-      actions.push(
-        vacationButton(modelShown(backup), true, () => {
+      backupActs.push(
+        // Said as the backup's: its member may run on the same model, and its Bring back is apart.
+        vacationButton(`backup ${shown}`, true, () => {
           backup.vacationSince = null
           this.#draw()
         }),
       )
     }
-    actions.push(
+    backupActs.push(
       removeBackup(name, () => {
         this.#draft = this.#draft.filter((kept) => kept.backupOf !== id)
         this.#draw()
       }),
     )
-    const { row: slot } = backupSlot(name, said, actions)
-    slot.dataset.model = backup.model ?? ''
-    return [row, slot]
+    const about = aboutLines(
+      runsLabel({ ...backup, roles: member.roles, tier: member.tier }, false),
+      { resting: Boolean(backup.vacationSince) },
+    )
+    const part = backupPart(name, shown, about, backupActs)
+    part.dataset.model = backup.model ?? ''
+    nodes.push(part)
+    return nodes
   }
 
   /** The draft as the daemon takes a staff: each member once, with its roles, its backups after their link. */
@@ -1654,7 +1872,6 @@ export class ProjectSettingsDialog {
   #form
   #slots
   #slotHead
-  #members
   #gate
   #page
   /** The project's wake-up calls, read when the dialog opens and saved as a whole. */
@@ -1680,6 +1897,18 @@ export class ProjectSettingsDialog {
    */
   #removing = null
   /**
+   * The member whose part is open, by its id (an Edit may rename it), and the role of the slot it
+   * was opened from (T-2341).
+   */
+  #opened = null
+  /** Why a form was closed under the person, under the row it was open in: `{ role, words }`. */
+  #closedWhy = null
+  /**
+   * The opening of the member form whose save is on its way (its `generation`): a redraw before
+   * its answer is the person's own change, which shuts no form.
+   */
+  #saving = null
+  /**
    * What the daemon refused of a slot the person changed (a give, a Remove), said under its
    * role's row until the next change of a slot (`{ role, words }`): the status line is behind
    * the dialog.
@@ -1687,6 +1916,8 @@ export class ProjectSettingsDialog {
   #slotRefusal = null
   /** Refusals beside the member whose Vacation button was pressed. */
   #vacationErrors = new Map()
+  /** Refusals of a Remove backup, by the member it was pressed for: said beside it, in its part. */
+  #backupErrors = new Map()
   /** Each harness's models, read once while the dialog is open (T-1143). */
   #lists
   /** Add member and Edit member. */
@@ -1713,7 +1944,6 @@ export class ProjectSettingsDialog {
     this.#form = dialog.querySelector('form')
     this.#slots = dialog.querySelector('#staff-slots')
     this.#slotHead = dialog.querySelector('table.slots thead')
-    this.#members = dialog.querySelector('#staff-members')
     this.#page = page
     // The sections save for the project the dialog is for, not for the one the page shows, and a
     // dialog that is shut is for none: what is answered after it is the status line's.
@@ -1757,9 +1987,17 @@ export class ProjectSettingsDialog {
       })
     })
     this.#lists = new ModelLists(page.daemon)
-    this.#member = new MemberPicker(this.#form, this.#lists, (kind) => {
-      void this.#markGone([kind])
-    })
+    this.#member = new MemberPicker(
+      this.#form,
+      this.#lists,
+      (kind) => {
+        void this.#markGone([kind])
+      },
+      () => {
+        this.#closedWhy = null
+        this.#draw()
+      },
+    )
     this.#form.elements.memberCancel.addEventListener('click', () => {
       this.#member.reset(this.#missing)
       this.#draw()
@@ -1777,7 +2015,12 @@ export class ProjectSettingsDialog {
       const editing = this.#member.editing
       const backup = this.#member.backup
       const slot = this.#member.slot
-      void page.act(async () => {
+      // Its answer is this opening's: one that comes once the person has left the form, or opened
+      // it for another, shuts nothing and says nothing there (the status line says a refusal).
+      const asked = this.#member.generation
+      const mine = () => this.#member.generation === asked
+      this.#saving = asked
+      const after = page.act(async () => {
         try {
           if (backup !== null) {
             const { member } = await page.daemon(backup.changing ? 'backup.change' : 'backup.add', {
@@ -1786,7 +2029,7 @@ export class ProjectSettingsDialog {
               ...picked,
             })
             page.note(`${backup.owner.label}'s backup is @${member.handle}.`)
-            this.#member.reset(this.#missing)
+            if (mine()) this.#member.reset(this.#missing)
             return
           }
           if (editing !== null) {
@@ -1801,7 +2044,7 @@ export class ProjectSettingsDialog {
                 ? `@${editing} runs ${modelName} from its next window.`
                 : `@${editing} is @${member.handle} now, and runs ${modelName} from its next window.`,
             )
-            this.#member.reset(this.#missing)
+            if (mine()) this.#member.reset(this.#missing)
             return
           }
           if (slot === null) return
@@ -1813,12 +2056,20 @@ export class ProjectSettingsDialog {
             roles: [slot.role],
           })
           page.note(`@${member.handle} joined the staff as ${roleLabel(slot.role)}.`)
-          this.#member.reset(this.#missing)
+          if (mine()) this.#member.reset(this.#missing)
         } catch (refused) {
           // The daemon's words go where the human picked, as well as on the status line.
-          this.#member.say(refused instanceof Error ? refused.message : String(refused))
+          if (mine()) this.#member.say(refused instanceof Error ? refused.message : String(refused))
           throw refused
+        } finally {
+          // Answered, refused or not: the redraw that follows judges the form against the staff
+          // as it is then, as any redraw does (T-2341, round 3).
+          if (this.#saving === asked) this.#saving = null
         }
+      })
+      // Saved, the keyboard is back on what opened the form, in the member's part.
+      void Promise.resolve(after).finally(() => {
+        if (dialog.open && !this.#member.open) this.#member.refocus(dialog)
       })
     })
     dialog.querySelector('[value="cancel"]').addEventListener('click', () => dialog.close())
@@ -1860,8 +2111,12 @@ export class ProjectSettingsDialog {
     this.#project = project
     this.#board = board
     this.#removing = null
+    this.#opened = null
+    this.#closedWhy = null
+    this.#saving = null
     this.#slotRefusal = null
     this.#vacationErrors.clear()
+    this.#backupErrors.clear()
     this.#missing = missing
     readEveryHarness(this.#lists, missing)
     this.#gone = new Map()
@@ -1934,7 +2189,10 @@ export class ProjectSettingsDialog {
     this.#draw()
   }
 
-  /** Draws the staff from the project's board, in place: every slot, then each member once. */
+  /**
+   * Draws the staff from the project's board, in place: every slot, and the part of the member
+   * opened from one of them (T-2341).
+   */
   #draw() {
     const board = this.#board
     // The members only: a member's sessions are lanes too, named after it.
@@ -1945,18 +2203,26 @@ export class ProjectSettingsDialog {
         .filter((member) => member.backupOf != null)
         .map((member) => [member.backupOf, member]),
     )
-    const holders = primaries.map((member) => this.#slotMember(member))
+    const holders = primaries.map((member) => this.#slotMember(member, backups.get(member.id)))
+    const closing = this.#formGone(primaries, backups, holders)
+    // A part whose member left the staff is shut; one renamed by an Edit stays open, and one whose
+    // slot went is drawn, and shut, at the slot it is drawn under.
+    const opened = primaries.find((member) => member.id === this.#opened?.id)
+    const anchor = opened && anchorOf(holders, { key: opened.handle, role: this.#opened.role })
+    this.#opened = anchor ? { id: opened.id, role: anchor.role } : null
     const slot = this.#member.slot
     this.#slotHead.replaceChildren(slotHead())
-    redraw(
+    drawSlots(
       this.#slots,
       slotRows(holders, {
         draft: false,
+        id: 'staff',
         picking:
           slot === null ? null : slot.tier === null ? slot.role : `${slot.role}:${slot.tier}`,
         confirming: this.#removing,
         refusal: this.#slotRefusal,
         add: (role, tier) => {
+          this.#opened = null
           this.#member.forSlot(role, tier)
           this.#draw()
         },
@@ -1967,37 +2233,79 @@ export class ProjectSettingsDialog {
           this.#draw()
         },
         confirm: (holder) => this.#removeMember(holder.key, this.#removing?.role),
+        opened: this.#opened && { key: opened.handle, role: this.#opened.role },
+        gone: this.#closedWhy,
+        formHere: this.#member.open && slot === null,
+        open: (role, holder) => this.#open(role, holder.key),
+        shut: () => this.#shut(),
+        part: (holder) => {
+          const member = primaries.find((one) => one.handle === holder.key)
+          return this.#part(member, backups.get(member.id))
+        },
       }),
+      this.#member.fieldset,
     )
-    const rows = shaded(
-      primaries
-        .map((member) => ({
-          member,
-          role: inRoleOrder(member.roles)[0],
-          tier: member.tier,
-          name: member.handle,
-        }))
-        .sort(byRoleAndTier)
-        .map(({ member }) => {
-          const row = this.#memberRow(member)
-          const backup = backups.get(member.id)
-          // An image designer is offered no backup: one it has from before is shown, to keep or remove.
-          if (member.designer && !backup) return [row]
-          return [row, backup ? this.#backupRow(member, backup) : this.#noBackupRow(member)]
-        }),
-    )
-    if (rows.length === 0) rows.push(nobodyRow('Nobody yet: add the members this project may use.'))
-    redraw(this.#members, rows)
+    if (closing) this.#slots.querySelector('tr.slot-form-gone td')?.focus()
     this.#gate.checked = board.project.gate ?? false
     this.#specs.draw(board.project)
     this.#computerUse.draw(harnessesOf(board))
   }
 
   /**
-   * A member as its slots show it: its name, what it runs on where its name does not say, and
-   * its state in a few words (on Vacation, out, needs an edit).
+   * The form shut where what it was opened for is gone or changed, by another window (T-2341,
+   * round 2): the member its Edit is for left the staff or was renamed, the empty slot of its Add
+   * is held, or the backup its Change was opened on is not its member's now. The line under the
+   * row it was open in says why, and nothing was saved. The person's own save on its way shuts
+   * nothing: what it changed is theirs. Says whether the form had the keyboard, which the line takes.
    */
-  #slotMember(member) {
+  #formGone(primaries, backups, holders) {
+    const form = this.#member
+    if (!form.open || form.generation === this.#saving) return false
+    const why = formGoneWords(form, {
+      holder: (role, tier) => holdersOf(holders, role, tier)[0],
+      now: (id) => {
+        const member = primaries.find((one) => one.id === id)
+        return member ? `@${member.handle}` : null
+      },
+      backup: (id) => backups.get(id)?.handle ?? null,
+      backupName: (handle) => `@${handle}`,
+    })
+    if (why === null) return false
+    const had = form.fieldset.contains(document.activeElement)
+    this.#closedWhy = { role: form.slot?.role ?? this.#opened?.role ?? NO_SLOT, words: why }
+    form.reset(this.#missing)
+    return had
+  }
+
+  /** The part of the member `handle`, opened from its slot of `role`; open there already, it shuts. */
+  #open(role, handle) {
+    const { id } = this.#memberNow({ handle })
+    if (this.#opened?.id === id && this.#opened.role === role) {
+      this.#shut()
+      return
+    }
+    // The form open for another member, or for a slot's Add, is left as a Cancel leaves it.
+    if (this.#member.open) this.#member.reset(this.#missing)
+    this.#opened = { id, role }
+    this.#draw()
+    showPart(this.#slots)
+  }
+
+  /** The open part shut, the form in it with it, and the keyboard back on its card. */
+  #shut() {
+    const back = backToCard(this.#slots)
+    if (this.#member.open && this.#member.slot === null) this.#member.reset(this.#missing)
+    this.#opened = null
+    this.#draw()
+    back()
+  }
+
+  /**
+   * A member as its slots show it: its name, what it runs on where its name does not say, its
+   * state in a few words (on Vacation, out, needs an edit), its backup's name, and what its part
+   * holds.
+   */
+  #slotMember(member, backup) {
     const marks = []
     if (member.needsEdit) marks.push({ text: 'needs an edit', tone: 'out' })
     else if (this.#modelGone(member)) marks.push({ text: 'model no longer listed', tone: 'out' })
@@ -2007,6 +2315,8 @@ export class ProjectSettingsDialog {
     )
     const out = lane ? outWords(lane, Date.now()) : null
     if (out !== null) marks.push({ text: out.split(/; |: /)[0], tone: 'out' })
+    const designer = Boolean(member.designer)
+    const gone = goneRoles(member).length > 0
     return {
       key: member.handle,
       name: `@${member.handle}`,
@@ -2018,8 +2328,15 @@ export class ProjectSettingsDialog {
         .join(' · '),
       roles: member.roles,
       tier: takesNoTier(member.roles) ? null : member.tier,
-      designer: Boolean(member.designer),
+      designer,
       marks,
+      backup: backup ? `@${backup.handle}` : null,
+      opens: opensSaid({
+        edit: !designer && !gone,
+        vacation: true,
+        backup: (!designer && !gone) || Boolean(backup),
+        remove: gone,
+      }),
     }
   }
 
@@ -2087,12 +2404,10 @@ export class ProjectSettingsDialog {
   }
 
   /**
-   * A member out of quota says so in its staff row, with the human's way to try it again now:
-   * the quota may have been renewed early, by hand (T-1357). A member not out says nothing.
+   * A member out of quota says so in its part, with the human's way to try it again now: the
+   * quota may have been renewed early, by hand (T-1357). A member not out says nothing.
    */
-  #sayOut(cell, member) {
-    if (member.vacationSince)
-      cell.append(element('br'), element('span', 'member-meta', 'on Vacation'))
+  #sayOut(about, member) {
     const lane = this.#board.lanes.find(
       (found) => found.participant.handle === member.handle && isMember(found.participant),
     )
@@ -2100,20 +2415,23 @@ export class ProjectSettingsDialog {
     if (words === null) return
     const page = this.#page
     const { participant } = lane
-    cell.append(element('br'), element('span', 'member-out', words))
+    const out = element('span', 'member-out-line')
+    out.append(element('span', 'member-out', words))
     // A busy model is tried again after a back-off no press shortens (T-1357).
-    if (lane.busy) return
-    cell.append(
-      tryAgain(participant, () =>
-        page.act(async () => {
-          await page.daemon('member.back', {
-            project: this.#project,
-            participant: participant.handle,
-          })
-          page.note(`Trying @${participant.handle} again: what waited for it goes on.`)
-        }),
-      ),
-    )
+    if (!lane.busy) {
+      out.append(
+        tryAgain(participant, () =>
+          page.act(async () => {
+            await page.daemon('member.back', {
+              project: this.#project,
+              participant: participant.handle,
+            })
+            page.note(`Trying @${participant.handle} again: what waited for it goes on.`)
+          }),
+        ),
+      )
+    }
+    about.append(out)
   }
 
   #vacation(member) {
@@ -2163,80 +2481,33 @@ export class ProjectSettingsDialog {
     )
   }
 
-  /** A backup has its own identity but takes its member's roles and tier. */
-  #backupRow(owner, backup) {
-    const name = `@${backup.handle}`
-    const of = `@${owner.handle}`
-    const runs = runsLabel(backup)
-    const who = backup.needsEdit
-      ? needsEditCell(name, runs, backup.agent)
-      : this.#modelGone(backup)
-        ? goneCell(name, modelShown(backup), runs, HARNESS_NAMES[backup.harness])
-        : whoCell(name, runs)
-    // An image designer's backup (an earlier version's) has nothing to change: it is kept or removed.
-    const change = owner.designer
-      ? []
-      : [
-          changeBackup(of, () => {
-            void this.#member.backupFor({ key: owner.handle, label: of }, this.#memberNow(backup))
-            this.#draw()
-          }),
-        ]
-    const { row, part } = backupSlot(of, who, [
-      ...change,
-      this.#vacation(backup),
-      removeBackup(
-        of,
-        () =>
-          void this.#page.act(async () => {
-            try {
-              await this.#page.daemon('backup.remove', {
-                project: this.#project,
-                member: owner.handle,
-              })
-              this.#page.note(`${of}'s backup left the staff.`)
-            } catch (refused) {
-              this.#member.say(refused instanceof Error ? refused.message : String(refused))
-              throw refused
-            }
-          }),
-      ),
-    ])
-    row.dataset.handle = backup.handle
-    this.#sayOut(part, backup)
-    return row
-  }
-
-  /** The slot of a member with no backup: the same place, with Add backup. */
-  #noBackupRow(owner) {
-    const of = `@${owner.handle}`
-    return backupSlot(of, null, [
-      addBackup(of, () => {
-        void this.#member.backupFor({ key: owner.handle, label: of })
-        this.#draw()
-      }),
-    ]).row
+  /** What a member's part, or its backup's, says under its name: what it runs on and its state. */
+  #about(member) {
+    const gone = this.#modelGone(member)
+    const about = aboutLines(runsLabel(member), {
+      gone: !member.needsEdit && gone ? modelShown(member) : null,
+      harness: HARNESS_NAMES[member.harness],
+      needsEdit: Boolean(member.needsEdit),
+      agent: member.agent,
+      resting: Boolean(member.vacationSince),
+    })
+    this.#sayOut(about, member)
+    return about
   }
 
   /**
-   * A member's row, its own things once however many slots it holds: its name and what it runs
-   * on, its state, the slots it holds, Edit and its Vacation. Each slot's Remove is the slot's.
+   * A member's own part (T-2341), the same whichever of its slots opened it: what it runs on and
+   * its state, Edit and its Vacation, and its backup with that backup's own. Each slot's Remove
+   * is the slot's.
    */
-  #memberRow(member) {
+  #part(member, backup) {
     const name = `@${member.handle}`
-    // A model its harness no longer lists is marked, and said (T-1143); ending its shift
-    // and its replacement are the staff chains' (CHN-11).
-    const gone = this.#modelGone(member)
-    // What the member runs on, its own (harness-models), and its tier: none where none of its
-    // roles has a tier.
-    const runs = runsLabel(member)
-    const who = member.needsEdit
-      ? needsEditCell(name, runs, member.agent)
-      : gone
-        ? goneCell(name, modelShown(member), runs, HARNESS_NAMES[member.harness])
-        : whoCell(name, runs)
-    // An image designer has nothing to edit: Codex's own model, no effort, no tier.
-    const edit = member.designer
+    // An image designer has nothing to edit: Codex's own model, no effort, no tier. A member whose
+    // role ConsensFlow no longer has can take no slot: it is removed, not edited (T-2341, round 3).
+    // Neither is given a backup to add or change.
+    const gone = goneRoles(member).length > 0
+    const kept = Boolean(member.designer) || gone
+    const edit = kept
       ? []
       : [
           button(
@@ -2255,10 +2526,73 @@ export class ProjectSettingsDialog {
             `Edit ${name}`,
           ),
         ]
-    this.#sayOut(who, member)
-    const row = memberRow(who, member.roles, [...edit, this.#vacation(member)])
-    row.dataset.handle = member.handle
-    if (gone) row.dataset.modelGone = member.model
-    return row
+    const about = this.#about(member)
+    if (this.#modelGone(member)) about.dataset.modelGone = member.model
+    const remove = gone
+      ? [
+          removeMember(name, () => {
+            this.#removing = { key: member.handle, role: NO_SLOT }
+            this.#draw()
+          }),
+        ]
+      : []
+    const nodes = [about, actsOf([...edit, this.#vacation(member), ...remove])]
+    // An image designer is offered no backup: one it has from before is shown, to keep or remove.
+    if (kept && !backup) return nodes
+    const owner = { key: member.handle, label: name, id: member.id }
+    if (!backup) {
+      nodes.push(
+        backupPart(name, null, null, [
+          addBackup(name, () => {
+            void this.#member.backupFor(owner)
+            this.#draw()
+          }),
+        ]),
+      )
+      return nodes
+    }
+    // An image designer's backup (an earlier version's) has nothing to change: it is kept or removed.
+    const change = kept
+      ? []
+      : [
+          changeBackup(name, () => {
+            void this.#member.backupFor(owner, this.#memberNow(backup))
+            this.#draw()
+          }),
+        ]
+    const project = this.#project
+    const acts = [
+      ...change,
+      this.#vacation(backup),
+      removeBackup(
+        name,
+        () =>
+          void this.#page.act(async () => {
+            try {
+              await this.#page.daemon('backup.remove', { project, member: member.handle })
+              this.#backupErrors.delete(member.handle)
+              this.#page.note(`${name}'s backup left the staff.`)
+            } catch (refused) {
+              // Said beside it, in the dialog: the status line is behind it.
+              if (this.#dialog.open && this.#project === project)
+                this.#backupErrors.set(
+                  member.handle,
+                  refused instanceof Error ? refused.message : String(refused),
+                )
+              throw refused
+            }
+          }),
+      ),
+    ]
+    const refused = this.#backupErrors.get(member.handle)
+    if (refused) {
+      const hint = element('span', 'staff-hint', refused)
+      hint.setAttribute('role', 'alert')
+      acts.push(hint)
+    }
+    const part = backupPart(name, `@${backup.handle}`, this.#about(backup), acts)
+    part.dataset.handle = backup.handle
+    nodes.push(part)
+    return nodes
   }
 }

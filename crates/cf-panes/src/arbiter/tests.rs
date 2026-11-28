@@ -12,9 +12,11 @@ use std::time::{Duration, Instant};
 #[cfg(unix)]
 use portable_pty::PtySize;
 
-use cf_proto::panes::SilentPaste;
+use cf_proto::panes::{Evidence, ReadEmpty, SilentPaste};
 
-use super::{sanitize, ArbiterError, Clock, EnterTiming, InputArbiter, OutputClock, SanitizeError};
+use super::{
+    sanitize, ArbiterError, Clock, EnterTiming, InputArbiter, OutputClock, Paste, SanitizeError,
+};
 #[cfg(unix)]
 use crate::pty::{serial_pty_test, OpenedPane};
 use crate::pty::{PaneError, PaneInputWriter, PaneKey, PaneTable};
@@ -479,7 +481,7 @@ fn the_human_s_keys_alone_start_the_quiet_the_pacing_waits_on() {
         .write_via(writer.as_ref(), &key, b"\x03")
         .expect("the daemon's key");
     arbiter
-        .write_paste_via(writer.as_ref(), &key, b"a message", None)
+        .write_paste_plain(writer.as_ref(), &key, b"a message", None)
         .expect("the daemon's paste");
     assert_eq!(
         quiet(),
@@ -510,7 +512,7 @@ fn unsent_typing_holds_a_paste_until_it_is_sent_but_never_a_claim() {
     assert!(unsent());
     arbiter.claim(&key).expect("a native send is admitted");
     assert!(matches!(
-        arbiter.write_paste_via(writer.as_ref(), &key, b"result", None),
+        arbiter.write_paste_plain(writer.as_ref(), &key, b"result", None),
         Err(ArbiterError::Unsent)
     ));
     arbiter
@@ -525,7 +527,7 @@ fn unsent_typing_holds_a_paste_until_it_is_sent_but_never_a_claim() {
         .write_typed_via(writer.as_ref(), &key, b"\r")
         .expect("send it");
     arbiter
-        .write_paste_via(writer.as_ref(), &key, b"result", None)
+        .write_paste_plain(writer.as_ref(), &key, b"result", None)
         .expect("a paste goes in once the text is sent");
     arbiter
         .write_via(writer.as_ref(), &key, b"x")
@@ -551,12 +553,12 @@ fn unsent_typing_holds_a_paste_until_it_is_sent_but_never_a_claim() {
 }
 
 /// Keys typed into a harness's dialog and left there with Escape count as
-/// unsent, though the input box is empty (T-288). A paste whose adapter read
-/// the box empty at the count of the human's keys it names goes in and
-/// clears the count; at any other count, or with no read, it is held: a key
-/// of the human's since the read may be text in the box.
+/// unsent, though the input box is empty (T-288). A paste that goes over them
+/// names evidence the host holds: a screen the pane has none of, as here, is
+/// none, and a paste with no evidence is held like one of a count of its own
+/// (N17).
 #[test]
-fn a_paste_read_empty_at_the_last_key_goes_in_over_the_count_and_clears_it() {
+fn a_paste_over_the_count_names_evidence_the_host_holds_or_is_held() {
     let key = PaneKey::new("dialog", 1);
     let (writer, _observed) = RecordingWriter::new(None);
     let arbiter = InputArbiter::new(EnterTiming::fixed(0));
@@ -583,30 +585,24 @@ fn a_paste_read_empty_at_the_last_key_goes_in_over_the_count_and_clears_it() {
     );
     assert!(read.typed_quiet_ms.is_some());
 
-    for read_empty in [None, Some(2), Some(4)] {
+    let held = |read_empty: Option<ReadEmpty>| {
         assert!(
             matches!(
-                arbiter.write_paste_via(writer.as_ref(), &key, b"held", read_empty),
+                arbiter.write_paste_plain(writer.as_ref(), &key, b"held", read_empty),
                 Err(ArbiterError::Unsent)
             ),
             "{read_empty:?}"
         );
+    };
+    held(None);
+    for by in [Evidence::Erased, Evidence::Elsewhere] {
+        for typed in [2, 3, 4] {
+            held(Some(ReadEmpty { typed, by }));
+        }
     }
-    arbiter
-        .write_paste_via(writer.as_ref(), &key, b"result", Some(3))
-        .expect("read empty at the last key, it goes in");
-    assert!(!snapshot().unsent, "and the count is cleared");
-
-    arbiter
-        .write_typed_via(writer.as_ref(), &key, b"new words")
-        .expect("type again");
-    assert!(matches!(
-        arbiter.write_paste_via(writer.as_ref(), &key, b"held", Some(3)),
-        Err(ArbiterError::Unsent)
-    ));
     assert_eq!(
         writer.records().last().map(|record| record.bytes.clone()),
-        Some(b"new words".to_vec()),
+        Some(b"x".to_vec()),
         "nothing held was written"
     );
 }
@@ -642,7 +638,7 @@ fn a_new_line_in_the_draft_is_part_of_the_draft_and_a_delivery_stays_held() {
     assert_eq!(kinds(), ["text"], "a new line is typed text, no Enter");
     assert!(unsent(), "the draft is still there");
     assert!(matches!(
-        arbiter.write_paste_via(writer.as_ref(), &key, b"result", None),
+        arbiter.write_paste_plain(writer.as_ref(), &key, b"result", None),
         Err(ArbiterError::Unsent)
     ));
 
@@ -659,7 +655,7 @@ fn a_new_line_in_the_draft_is_part_of_the_draft_and_a_delivery_stays_held() {
         .write_typed_via(writer.as_ref(), &key, b"\r")
         .expect("send it");
     arbiter
-        .write_paste_via(writer.as_ref(), &key, b"result", None)
+        .write_paste_plain(writer.as_ref(), &key, b"result", None)
         .expect("a paste goes in once the draft is sent");
 }
 
@@ -724,7 +720,8 @@ fn unsent_of(arbiter: &InputArbiter, key: &PaneKey) -> usize {
 /// A paste of the human's of 40,000 characters in 400 lines, as the page sends it: its
 /// opening marker and the first 32 KiB, then the rest and its closing marker.
 fn a_paste_in_chunks_of_lines() -> (Vec<Vec<u8>>, usize) {
-    let text = ("x".repeat(99) + "\n").repeat(400);
+    // A terminal's paste breaks its lines with carriage returns, the byte Enter sends.
+    let text = ("x".repeat(99) + "\r").repeat(400);
     let paste = [&b"\x1b[200~"[..], text.as_bytes(), b"\x1b[201~"].concat();
     let chunks = paste.chunks(32 * 1024).map(<[u8]>::to_vec).collect();
     (chunks, text.chars().count())
@@ -752,7 +749,7 @@ fn a_paste_in_chunks_with_line_breaks_leaves_every_character_of_it_unsent_and_ho
     assert!(arbiter.snapshot(&key).expect("snapshot").unsent);
     assert!(
         matches!(
-            arbiter.write_paste_via(writer.as_ref(), &key, b"result", None),
+            arbiter.write_paste_plain(writer.as_ref(), &key, b"result", None),
             Err(ArbiterError::Unsent)
         ),
         "a delivery goes in over text the human has not sent"
@@ -764,7 +761,7 @@ fn a_paste_in_chunks_with_line_breaks_leaves_every_character_of_it_unsent_and_ho
         .expect("the human's Enter");
     assert_eq!(unsent_of(&arbiter, &key), 0);
     arbiter
-        .write_paste_via(writer.as_ref(), &key, b"result", None)
+        .write_paste_plain(writer.as_ref(), &key, b"result", None)
         .expect("a delivery after the Enter");
 }
 
@@ -826,7 +823,7 @@ fn a_paste_cut_off_does_not_swallow_the_keys_typed_after_it() {
         "the Enter sent what was typed, and what was cut off with it"
     );
     arbiter
-        .write_paste_via(writer.as_ref(), &key, b"result", None)
+        .write_paste_plain(writer.as_ref(), &key, b"result", None)
         .expect("a delivery after the Enter");
 }
 
@@ -1106,7 +1103,7 @@ fn a_snapshot_says_how_long_since_a_paste_was_written_into_the_pane() {
     let pasted = || arbiter.snapshot(&key).expect("snapshot").paste_quiet_ms;
     assert_eq!(pasted(), None, "nothing pasted yet");
     arbiter
-        .write_paste_via(writer.as_ref(), &key, b"body", None)
+        .write_paste_plain(writer.as_ref(), &key, b"body", None)
         .expect("write paste");
     clock.advance(Duration::from_millis(20));
     assert_eq!(pasted(), Some(20));
@@ -1138,7 +1135,7 @@ fn t1813_the_delivery_retry_clock_is_not_set_before_enter() {
         sent.send(snapshot.paste_quiet_ms).expect("send snapshot");
     });
     arbiter
-        .write_paste_via(writer.as_ref(), &key, b"brief", None)
+        .write_paste_plain(writer.as_ref(), &key, b"brief", None)
         .expect("write brief and Enter");
     assert_eq!(
         received.recv().unwrap(),
@@ -1154,11 +1151,11 @@ fn t1813_a_refused_or_failed_brief_write_records_no_paste() {
     arbiter.register(&key).expect("register pane");
     let (writer, _observed) = RecordingWriter::new(Some(1));
     assert!(arbiter
-        .write_paste_via(writer.as_ref(), &key, b"brief", None)
+        .write_paste_plain(writer.as_ref(), &key, b"brief", None)
         .is_err());
     assert_eq!(arbiter.snapshot(&key).unwrap().paste_quiet_ms, None);
     assert!(arbiter
-        .write_paste_via(writer.as_ref(), &key, b"again", None)
+        .write_paste_plain(writer.as_ref(), &key, b"again", None)
         .is_err());
     assert_eq!(arbiter.snapshot(&key).unwrap().paste_quiet_ms, None);
 }
@@ -1174,7 +1171,7 @@ fn t1813_a_delayed_enter_keeps_the_full_delivery_retry_grace() {
     } = Rig::new(EnterTiming::fixed(25));
     arbiter.register(&key).expect("register pane");
     arbiter
-        .write_paste_via(writer.as_ref(), &key, b"brief", None)
+        .write_paste_plain(writer.as_ref(), &key, b"brief", None)
         .expect("write paste");
     assert_eq!(clock.elapsed(), Duration::from_millis(25));
     assert_eq!(
@@ -1196,7 +1193,7 @@ fn paste_is_bracketed_then_enter_is_a_delayed_separate_write() {
     arbiter.register(&key).expect("register pane");
 
     arbiter
-        .write_paste_via(writer.as_ref(), &key, b"body", None)
+        .write_paste_plain(writer.as_ref(), &key, b"body", None)
         .expect("write paste");
 
     let records = writer.records();
@@ -1215,7 +1212,7 @@ fn on_the_wall_clock_a_pastes_enter_waits_at_least_the_hosts_wait() {
     let arbiter = InputArbiter::new(EnterTiming::fixed(25));
     arbiter.register(&key).expect("register pane");
     arbiter
-        .write_paste_via(writer.as_ref(), &key, b"body", None)
+        .write_paste_plain(writer.as_ref(), &key, b"body", None)
         .expect("write paste");
     let records = writer.records();
     assert_eq!(records.len(), 2);
@@ -1235,7 +1232,7 @@ fn on_the_wall_clock_a_paste_nothing_echoes_gets_its_enter_at_the_most_and_not_b
     });
     arbiter.register(&key).expect("register pane");
     arbiter
-        .write_paste_via(writer.as_ref(), &key, b"body", None)
+        .write_paste_plain(writer.as_ref(), &key, b"body", None)
         .expect("write paste");
     let records = writer.records();
     assert_eq!(records.len(), 2);
@@ -1251,7 +1248,7 @@ fn enter_waited(enter: EnterTiming, silent_ms: u64, printing_ms: u64) -> Duratio
     let rig = Rig::new(enter);
     rig.window_showing(&key, None, printing_from(silent_ms, printing_ms), false);
     rig.arbiter
-        .write_paste_via(rig.writer.as_ref(), &key, b"body", None)
+        .write_paste_plain(rig.writer.as_ref(), &key, b"body", None)
         .expect("write paste");
     between(&rig.records())
 }
@@ -1792,7 +1789,7 @@ fn a_deliverys_enter_waits_for_the_window_to_have_read_the_paste_where_it_declar
     rig.window(&key, Some(silent), printing_from(0, 1_300));
     let body = vec![b'x'; 300];
     arbiter
-        .write_paste_via(writer.as_ref(), &key, &body, None)
+        .write_paste_plain(writer.as_ref(), &key, &body, None)
         .expect("the delivery");
 
     let records = rig.records();
@@ -1869,7 +1866,7 @@ fn a_deliverys_enter_in_a_window_that_declared_nothing_waits_only_the_hosts_wait
     } = &rig;
     rig.window(&key, None, printing_from(0, 1_300));
     arbiter
-        .write_paste_via(writer.as_ref(), &key, &vec![b'x'; 300], None)
+        .write_paste_plain(writer.as_ref(), &key, &vec![b'x'; 300], None)
         .expect("the delivery");
 
     assert_enter_at(
@@ -2044,7 +2041,7 @@ fn claims_and_pastes_refuse_a_stale_pane() {
     let stale = PaneKey::new(&key.id, key.generation + 1);
     assert!(matches!(arbiter.claim(&stale), Err(ArbiterError::Stale)));
     assert!(matches!(
-        arbiter.write_paste_via(writer.as_ref(), &stale, b"late", None),
+        arbiter.write_paste_plain(writer.as_ref(), &stale, b"late", None),
         Err(ArbiterError::Stale)
     ));
     assert!(writer.records().is_empty());
@@ -2085,7 +2082,7 @@ fn a_new_generation_cannot_cut_a_paste_short() {
     let paste_writer = Arc::clone(&writer);
     let paste_key = old_key.clone();
     let paste = thread::spawn(move || {
-        paste_arbiter.write_paste_via(paste_writer.as_ref(), &paste_key, b"body", None)
+        paste_arbiter.write_paste_plain(paste_writer.as_ref(), &paste_key, b"body", None)
     });
     first_write.wait();
     assert!(
@@ -2139,7 +2136,7 @@ fn a_paste_that_went_in_is_answered_as_it_went() {
     let paste_writer = Arc::clone(&writer);
     let paste_key = key.clone();
     let paste = thread::spawn(move || {
-        paste_arbiter.write_paste_via(paste_writer.as_ref(), &paste_key, b"body", None)
+        paste_arbiter.write_paste_plain(paste_writer.as_ref(), &paste_key, b"body", None)
     });
     first_write.wait();
     let poisoned = thread::spawn(move || {
@@ -2190,7 +2187,7 @@ fn generation_replacement_that_holds_the_cell_rejects_old_input_before_write() {
     let paste_writer = Arc::clone(&writer);
     let paste_key = old_key.clone();
     let paste = thread::spawn(move || {
-        paste_arbiter.write_paste_via(paste_writer.as_ref(), &paste_key, b"old", None)
+        paste_arbiter.write_paste_plain(paste_writer.as_ref(), &paste_key, b"old", None)
     });
     let clone_deadline = Instant::now() + Duration::from_secs(30);
     while Arc::strong_count(&cell) < 4 && Instant::now() < clone_deadline {
@@ -2214,6 +2211,7 @@ fn generation_replacement_that_holds_the_cell_rejects_old_input_before_write() {
     assert_eq!(
         arbiter.snapshot(&new_key).expect("new generation state"),
         super::ArbiterSnapshot {
+            unsent_at: None,
             generation: 2,
             paste_in_flight: false,
             input_failed: false,
@@ -2221,6 +2219,9 @@ fn generation_replacement_that_holds_the_cell_rejects_old_input_before_write() {
             typed: 0,
             typed_quiet_ms: None,
             output_quiet_ms: None,
+            output_read: 0,
+            output_drawn: 0,
+            output_caught_up: true,
             screen_quiet_ms: None,
             paste_quiet_ms: None,
             human_writes: Vec::new(),
@@ -2238,7 +2239,7 @@ fn a_failed_write_stops_the_pane_input_until_a_new_generation() {
     arbiter.register(&key).expect("register pane");
 
     assert!(matches!(
-        arbiter.write_paste_via(first_write_fails.as_ref(), &key, b"body", None),
+        arbiter.write_paste_plain(first_write_fails.as_ref(), &key, b"body", None),
         Err(ArbiterError::Pane(PaneError::Io(_)))
     ));
     assert!(
@@ -2312,7 +2313,16 @@ fn a_write_that_finds_its_pane_gone_is_refused_and_fails_nothing() {
         Err(ArbiterError::Stale)
     ));
     assert!(matches!(
-        arbiter.write_paste(&without_the_pane, &key, b"body", None),
+        arbiter.write_paste(
+            &without_the_pane,
+            &key,
+            Paste {
+                body: b"body",
+                at: None,
+                read_empty: None,
+                clear_first: None
+            }
+        ),
         Err(ArbiterError::Stale)
     ));
     let snapshot = arbiter.snapshot(&key).expect("the pane's input");
@@ -2326,7 +2336,7 @@ fn a_write_that_finds_its_pane_gone_is_refused_and_fails_nothing() {
         attempts: AtomicUsize::new(0),
     };
     assert!(matches!(
-        arbiter.write_paste_via(&gone_before_the_enter, &key, b"body", None),
+        arbiter.write_paste_plain(&gone_before_the_enter, &key, b"body", None),
         Err(ArbiterError::Pane(PaneError::NotFound(_)))
     ));
     assert!(
@@ -2584,7 +2594,7 @@ mod windows {
         };
         let pasted = Instant::now();
         arbiter
-            .write_paste(&table, &key, brief, None)
+            .write_paste_plain(table.as_ref(), &key, brief, None)
             .expect("the delivery");
         let entered = pasted.elapsed();
         // A paste its window did not send, having read it, is pressed Enter on again, as the
@@ -2712,7 +2722,7 @@ mod windows {
         read_until(&table, &key, &output, "READY");
 
         arbiter
-            .write_paste(&table, &key, b"pasted words", None)
+            .write_paste_plain(table.as_ref(), &key, b"pasted words", None)
             .expect("paste into the pane");
         let text = read_until(&table, &key, &output, "#");
         assert!(text.contains("GOT=[pasted words]"), "{text:?}");

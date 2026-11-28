@@ -4,16 +4,17 @@
 use std::os::unix::fs::PermissionsExt;
 
 use super::*;
+use crate::files;
 use crate::process::Run;
 
 #[test]
 fn t1700_login_only_trust_does_not_resolve_owner_claude() {
-    let owner = tempfile::tempdir().unwrap();
+    let owner = crate::door::made("t-").unwrap();
     let run_parent = crate::door::made("cf-parity-trust-parent-").unwrap();
     let config = crate::door::made_in(run_parent.path(), "config-").unwrap();
     // If seeding resolves this fabricated owner link, it mistakes the run's
     // own config for the owner's and refuses to seed it.
-    std::os::unix::fs::symlink(run_parent.path(), owner.path().join(".claude")).unwrap();
+    crate::door::symlink(run_parent.path(), owner.path().join(".claude")).unwrap();
     let login = Login::new(
         Source::File(owner.path().join("fake-login")),
         owner.path().to_path_buf(),
@@ -42,8 +43,8 @@ fn t1700_login_only_trust_does_not_resolve_owner_claude() {
     // A run-owned folder cannot write through a linked config file either.
     let guarded = crate::door::made_in(run_parent.path(), "guarded-").unwrap();
     let outside = stranger.path().join("outside.json");
-    std::fs::write(&outside, "{}\n").unwrap();
-    std::os::unix::fs::symlink(&outside, guarded.path().join(".claude.json")).unwrap();
+    crate::standin_process::foreign_write(&outside, "{}\n");
+    crate::door::symlink(&outside, guarded.path().join(".claude.json")).unwrap();
     assert!(login.seed_trust(guarded.path()).is_err());
     assert_eq!(std::fs::read_to_string(outside).unwrap(), "{}\n");
 
@@ -74,8 +75,8 @@ fn t1700_login_only_never_reads_owner_config_before_or_after() {
         assert!(login.owner_after(&before).is_empty());
         return;
     }
-    let home = tempfile::tempdir().unwrap();
-    std::fs::create_dir(home.path().join(".claude")).unwrap();
+    let home = crate::door::made("t-").unwrap();
+    crate::door::make_dir(home.path().join(".claude")).unwrap();
     for file in [
         home.path().join(".claude/settings.json"),
         home.path().join(".claude.json"),
@@ -87,7 +88,6 @@ fn t1700_login_only_never_reads_owner_config_before_or_after() {
         "live::login::tests::t1700_login_only_never_reads_owner_config_before_or_after",
         Duration::from_secs(5),
     )
-    .inheriting_env()
     .var(CHILD, home.path())
     .run()
     .unwrap();
@@ -154,7 +154,7 @@ fn hours(hours: u64) -> Duration {
 /// of `parent`.
 fn login(text: &str, home: &Path, parent: &Path) -> Login {
     let file = home.join("machine-login.json");
-    std::fs::write(&file, text).unwrap();
+    crate::door::write(&file, text).unwrap();
     Login::new(
         Source::File(file),
         home.to_path_buf(),
@@ -623,8 +623,8 @@ fn the_folders_earlier_runs_left_are_only_counted_and_none_is_taken() {
     child.wait(Duration::from_secs(10)).unwrap();
     let make = |name: String| {
         let folder = parent.path().join(name);
-        std::fs::create_dir(&folder).unwrap();
-        std::fs::write(folder.join(".credentials.json"), "{}").unwrap();
+        crate::door::make_dir(&folder).unwrap();
+        crate::door::write(folder.join(".credentials.json"), "{}").unwrap();
         folder
     };
     let left = make(format!("{PREFIX}{gone}-abc123"));
@@ -632,7 +632,7 @@ fn the_folders_earlier_runs_left_are_only_counted_and_none_is_taken() {
     let others = make("consensflow-integration-AAA".to_owned());
     let no_process = make(format!("{PREFIX}not-a-number-1"));
     let file = parent.path().join(format!("{PREFIX}{gone}-file"));
-    std::fs::write(&file, "").unwrap();
+    crate::door::write(&file, "").unwrap();
     // The copies of earlier runs: the one of a run that is gone and the one with no run's
     // number; not the one of this run, nor a rig's folder, nor a file. Said once.
     assert_eq!(crate::rig::sweep::say_copies(parent.path()), 2);
@@ -671,8 +671,7 @@ impl Person {
             ".claude/history.jsonl",
             "{\"display\":\"fix it\",\"project\":\"/Users/me/work\",\"sessionId\":\"s1\"}\n",
         );
-        std::fs::create_dir_all(person.home.path().join(".claude/projects/-Users-me-work"))
-            .unwrap();
+        crate::door::make_dir(person.home.path().join(".claude/projects/-Users-me-work")).unwrap();
         person
     }
 
@@ -681,10 +680,7 @@ impl Person {
     }
 
     fn append(&self, relative: &str, text: &str) {
-        let mut file = fs::OpenOptions::new()
-            .append(true)
-            .open(self.home.path().join(relative))
-            .unwrap();
+        let mut file = crate::door::append(self.home.path().join(relative)).unwrap();
         file.write_all(text.as_bytes()).unwrap();
     }
 }
@@ -711,7 +707,7 @@ fn what_the_persons_own_sessions_write_all_day_is_not_the_runs() {
         ".claude/history.jsonl",
         "{\"display\":\"more\",\"project\":\"/Users/me/other\",\"sessionId\":\"s2\"}\n",
     );
-    std::fs::create_dir_all(person.home.path().join(".claude/projects/-Users-me-other")).unwrap();
+    crate::door::make_dir(person.home.path().join(".claude/projects/-Users-me-other")).unwrap();
     assert_eq!(person.owner.changes_since(&before), Vec::<String>::new());
 }
 
@@ -725,7 +721,7 @@ fn a_run_that_rewrote_the_settings_file_is_found_out_whatever_it_changed() {
     // The same bytes are not a change; a file that is gone is.
     person.write(".claude/settings.json", r#"{"model":"opus"}"#);
     assert!(person.owner.changes_since(&before).is_empty());
-    std::fs::remove_file(person.home.path().join(".claude/settings.json")).unwrap();
+    crate::door::remove(person.home.path().join(".claude/settings.json")).unwrap();
     assert_eq!(person.owner.changes_since(&before).len(), 1);
 }
 
@@ -766,7 +762,7 @@ fn a_prompt_typed_in_a_folder_of_the_run_and_a_conversation_kept_of_it_are_found
          not JSON\n\
          {\"display\":\"c\",\"project\":\"/var/T/consensflow-integration-X/workspace\",\"sessionId\":\"s\"}\n",
     );
-    std::fs::create_dir_all(
+    crate::door::make_dir(
         person
             .home
             .path()
@@ -845,14 +841,14 @@ fn a_copy_that_was_refreshed_or_lost_fails_with_a_warning_that_the_machines_logi
     let credentials = folder.join(".credentials.json");
     let copied = std::fs::read_to_string(&credentials).unwrap();
     // Claude Code rewrote the file with the same login: not a refresh.
-    std::fs::write(&credentials, format!(" {copied}\n")).unwrap();
+    crate::door::write(&credentials, format!(" {copied}\n")).unwrap();
     assert!(login.finish().is_ok());
     // A refresh: another access token and another refresh token.
     let refreshed = json!({ "claudeAiOauth": {
         "accessToken": "sk-ant-oat01-NEW-ACCESS", "refreshToken": "sk-ant-ort01-NEW-REFRESH",
         "expiresAt": (NOW + 99_999) * 1000,
     } });
-    std::fs::write(&credentials, refreshed.to_string()).unwrap();
+    crate::door::write(&credentials, refreshed.to_string()).unwrap();
     let said = login.finish().unwrap_err().to_string();
     assert!(
         said.contains("THE RUN'S CLAUDE CODE REFRESHED ITS COPY OF THE LOGIN"),
@@ -866,7 +862,7 @@ fn a_copy_that_was_refreshed_or_lost_fails_with_a_warning_that_the_machines_logi
         assert!(!said.contains(secret), "{said}");
     }
     // A file that is gone.
-    std::fs::remove_file(&credentials).unwrap();
+    crate::door::remove(&credentials).unwrap();
     let said = login.finish().unwrap_err().to_string();
     assert!(said.contains("gone or no longer holds a login"), "{said}");
 }
@@ -880,11 +876,11 @@ fn a_file_backed_login_changed_while_the_run_went_on_is_said_by_its_metadata() {
     login.folder_at(at(NOW)).unwrap();
     let machine = person.home.path().join("machine-login.json");
     // Metadata cannot distinguish a changed MCP entry from a changed login entry.
-    std::fs::write(&machine, text.replace(MCP, "mcp-token-REFRESHED")).unwrap();
+    crate::door::write(&machine, text.replace(MCP, "mcp-token-REFRESHED")).unwrap();
     assert!(login.finish().is_err());
     // Their own Claude Code writes what it learns of the account beside the tokens
     // (`subscriptionTypeSource`, Claude Code 2.1.310): that changes the file metadata too.
-    std::fs::write(
+    crate::door::write(
         &machine,
         text.replace(
             "\"subscriptionType\":\"max\"",
@@ -894,7 +890,7 @@ fn a_file_backed_login_changed_while_the_run_went_on_is_said_by_its_metadata() {
     .unwrap();
     assert!(login.finish().is_err());
     // Their own Claude Code refreshed the login (or the run's rotated it): not as it was.
-    std::fs::write(&machine, text.replace(ACCESS, "sk-ant-oat01-ROTATED")).unwrap();
+    crate::door::write(&machine, text.replace(ACCESS, "sk-ant-oat01-ROTATED")).unwrap();
     let said = login.finish().unwrap_err().to_string();
     assert!(
         said.contains(&format!(
@@ -914,7 +910,7 @@ fn a_file_backed_login_changed_while_the_run_went_on_is_said_by_its_metadata() {
     );
     assert!(!said.contains("ROTATED") && !said_anywhere(&said), "{said}");
     // The login gone from where the machine keeps it is a change too.
-    std::fs::remove_file(&machine).unwrap();
+    crate::door::remove(&machine).unwrap();
     assert!(login
         .finish()
         .unwrap_err()
@@ -999,8 +995,8 @@ fn after_a_run(login: &Login) -> PathBuf {
         ("settings.json", "{}"),
     ] {
         let file = folder.join(name);
-        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
-        std::fs::write(file, text).unwrap();
+        crate::door::make_dir(file.parent().unwrap()).unwrap();
+        crate::door::write(file, text).unwrap();
     }
     folder
 }
@@ -1037,12 +1033,12 @@ fn a_kept_home_is_given_the_conversations_and_the_sessions_and_never_the_login()
     );
 
     // Asked again after the run went on, it is the same copy, grown.
-    std::fs::write(
+    crate::door::write(
         folder.join("projects/-Users-me-work/s1.jsonl"),
         "{\"type\":\"user\"}\n{\"type\":\"assistant\"}\n",
     )
     .unwrap();
-    std::fs::write(folder.join("projects/-Users-me-work/s2.jsonl"), "{}\n").unwrap();
+    crate::door::write(folder.join("projects/-Users-me-work/s2.jsonl"), "{}\n").unwrap();
     login.keep_records(&into).unwrap();
     assert_eq!(files_below(&into).len(), 4);
     assert_eq!(
@@ -1078,7 +1074,7 @@ fn a_link_in_the_folder_is_not_followed_out_of_it() {
     let login = login(&machine_text(hours(5)), home.path(), parent.path());
     let folder = after_a_run(&login);
     // A link to the login, in a place that is kept.
-    std::os::unix::fs::symlink(
+    crate::door::symlink(
         folder.join(".credentials.json"),
         folder.join("projects/-Users-me-work/link.jsonl"),
     )
@@ -1516,7 +1512,7 @@ fn a_run_is_given_the_access_token_and_nothing_that_renews_it_and_the_machines_l
     login.finish().unwrap();
     // The machine's file changed (its refresh token used by another): the run says so.
     let machine = person.home.path().join("machine-login.json");
-    std::fs::write(&machine, text.replace(REFRESH, "sk-ant-ort01-USED")).unwrap();
+    crate::door::write(&machine, text.replace(REFRESH, "sk-ant-ort01-USED")).unwrap();
     let said = login.finish().unwrap_err().to_string();
     assert!(said.contains("CHANGED THE OWNER'S CLAUDE SETUP"), "{said}");
     assert!(!said.contains("USED"), "{said}");

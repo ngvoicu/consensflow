@@ -47,12 +47,12 @@ pub fn seats() -> Vec<Scenario> {
                     |snapshot, bindings| since(snapshot, bindings, "A", "working")
                         .is_some_and(|seconds| seconds >= 5)
                 ),
-                // The pause's words are the worker's own call of `cf answer` (the question is m-2
-                // on this board): the Devin and Codex stand-ins run a `CF` line and do not answer
+                // The pause's words are the worker's own call of `cf answer` (the question is the next message of the
+                // board, `{m}`: the board's own notes take numbers before it): the Devin and Codex stand-ins run a `CF` line and do not answer
                 // questions by themselves.
                 run!(
                     "pause A",
-                    "task pause {A} :: CF answer m-2 :: TOLD",
+                    "task pause {A} :: CF answer m-{m} :: TOLD",
                     |snapshot, bindings| {
                         bindings.nth("A", 0).is_some_and(|number| {
                             snapshot.chief_inbox.iter().any(|message| {

@@ -23,11 +23,11 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use cf_harness::contract::{
-    Adapter, Admission, FirstMessage, Input, InputBox, Interrupt, Launch, LaunchId, NoDefault,
-    Opening, Over, Prepared, Readiness, Skill, Specs, Trusts, TurnLeft, Used, Waiting, Window,
-    Work,
+    Adapter, Admission, FirstMessage, Input, Interrupt, Launch, LaunchId, NoDefault, Opening, Over,
+    Prepared, Readiness, Skill, Specs, Trusts, TurnLeft, Used, Waiting, Window, Work,
 };
 use cf_harness::records::{Command, Item, LastCall, ModelMoved, Monitor, Pending, Quota, Role};
+use cf_harness::Look;
 use cf_proto::panes::{Servers, SilentPaste};
 use cf_proto::specs::{Variant, DEFAULT_FOLDER};
 use serde_json::{json, Value};
@@ -178,6 +178,11 @@ pub struct FakeAgent {
 /// What a test makes `ready` answer, where it gives the adapter one.
 pub type Ready = Rc<dyn Fn() -> Result<Readiness, String>>;
 
+/// What a test makes `ready_on` say of a look it is given, where it gives the adapter one: a
+/// readiness of its own, or none, which leaves the answer to [`Ready`] (a real adapter reads the
+/// look it is asked about and no other).
+pub type ReadyOnLook = Rc<dyn Fn(&Look) -> Option<Readiness>>;
+
 /// What a test makes `started` answer, where it gives the adapter one: why
 /// the window could not take its first message, if it could not.
 pub type Started = Rc<dyn Fn() -> Result<(), String>>;
@@ -237,6 +242,8 @@ pub struct FakeAdapter {
     /// A `ready` of the test's own; without one a window is ready, and
     /// nothing is asked (the JavaScript fake had none).
     pub ready: RefCell<Option<Ready>>,
+    /// A judgment of the test's own of each look `ready_on` is given.
+    pub ready_on_look: RefCell<Option<ReadyOnLook>>,
     /// What its windows' input boxes show (`unsent_words`): none, as an adapter
     /// with no reader of its harness's box.
     pub box_words: RefCell<Option<String>>,
@@ -282,6 +289,9 @@ pub struct FakeAdapter {
     /// Launches the test holds (`hold(adapter, 'prepare', ...)`): one let go
     /// fails with the reason, where the test gave one.
     pub prepare_holds: Holds<String>,
+    /// Whether a launch held and let go fails as production's steps do where the launch was
+    /// called off while it waited: by what [`cf_harness::launch_wanted`] says then.
+    pub honors_call_off: Cell<bool>,
     /// Looks the test holds: one let go fails with the reason, where the test
     /// gave one.
     pub observe_holds: Holds<String>,
@@ -318,10 +328,10 @@ pub struct FakeAdapter {
     /// told the conversation as `[session]`: what the harness says is its own
     /// when the ask is let go. Node's dispatcher asked nothing of the kind.
     pub resumable_holds: Holds,
-    /// Whether the host said, at each delivery in order, that the engine emptied
-    /// the window's input box just before it (`PaneHost::cleared`). Not written
-    /// down in the traces: Node's dispatcher emptied no box.
-    pub cleared: RefCell<Vec<bool>>,
+    /// Whether each delivery, in order, went with the key that empties the window's input box
+    /// of a paste of ours left in it first (`PasteLicence`'s `clear_first`). Not written down in
+    /// the traces: Node's dispatcher pressed that key on its own, before the paste.
+    pub clear_firsts: RefCell<Vec<bool>>,
     /// Looks at a record with no window open that the test holds, told the
     /// conversation as `[session]`: one let go reads the record as it is then.
     /// Node's dispatcher suite held none.
@@ -376,9 +386,6 @@ pub struct FakeAdapter {
     /// (`Window::idle_word`): every harness's but one with no such word, whose
     /// windows are read at rest by the pacing's fallback.
     pub idle_word: Cell<bool>,
-    /// What its windows' input box holds on their screen (`Window::input_box`): none,
-    /// as a window whose box no reader reads, unless a test says.
-    pub input_box: Cell<Option<InputBox>>,
     /// A window opened again on a conversation reads what the one before it ended in, as a
     /// harness's record keeps it: the failure of its last turn and the quota it said (a
     /// refusal stays in the record a Resume reads, T-841). Nothing of either, as Node's
@@ -434,6 +441,7 @@ impl FakeAdapter {
             default: RefCell::new(Ok(None)),
             items,
             ready: RefCell::new(None),
+            ready_on_look: RefCell::new(None),
             box_words: RefCell::new(None),
             human_input: RefCell::new(None),
             started: RefCell::new(None),
@@ -452,6 +460,7 @@ impl FakeAdapter {
             one_login: Cell::new(false),
             ready_while_drawing: Cell::new(false),
             prepare_holds: Holds::default(),
+            honors_call_off: Cell::new(false),
             observe_holds: Holds::default(),
             start_holds: Holds::default(),
             ready_holds: Holds::default(),
@@ -463,7 +472,7 @@ impl FakeAdapter {
             place_fails: RefCell::new(None),
             specmint_folders: RefCell::new(Vec::new()),
             resumable_holds: Holds::default(),
-            cleared: RefCell::new(Vec::new()),
+            clear_firsts: RefCell::new(Vec::new()),
             record_holds: Holds::default(),
             cut_holds: Holds::default(),
             last_call_holds: Holds::default(),
@@ -476,7 +485,6 @@ impl FakeAdapter {
             trusts: RefCell::new(None),
             says_places: Cell::new(true),
             idle_word: Cell::new(true),
-            input_box: Cell::new(None),
             rereads_failures: Cell::new(false),
             never_begins: Cell::new(None),
         })
@@ -552,6 +560,20 @@ impl FakeAdapter {
             })
             .unwrap_or_else(|| panic!("no window of {handle}"));
         change(&mut agents[at])
+    }
+
+    /// The latest window of `handle` (or of a session of its name), where it has had one.
+    pub fn try_agent(&self, handle: &str) -> Option<FakeAgent> {
+        let agents = self.agents.borrow();
+        agents
+            .iter()
+            .rfind(|agent| agent.handle == handle)
+            .or_else(|| {
+                agents
+                    .iter()
+                    .rfind(|agent| agent.handle.starts_with(&format!("{handle}-")))
+            })
+            .cloned()
     }
 
     /// The latest window of `handle`, as it is now.
@@ -1343,6 +1365,8 @@ impl Asked {
         fake.agents.borrow_mut().push(agent);
         let handle = launch.handle.to_owned();
         let window: Rc<dyn Window> = Rc::new(FakeWindow::new(
+            cf_proto::agents::Harness::from_kind(&self.harness)
+                .unwrap_or(cf_proto::agents::Harness::Claude),
             seam,
             id.clone(),
             native.clone(),
@@ -1442,6 +1466,9 @@ impl Adapter for Asked {
         Box::pin(async move {
             if let Some(reason) = wrapped.before().await {
                 return Err(reason);
+            }
+            if self.fake.honors_call_off.get() && !cf_harness::launch_wanted() {
+                return Err(cf_harness::CALLED_OFF.to_owned());
             }
             let prepared = self.made(launch, asked, at).await;
             wrapped.after().await;

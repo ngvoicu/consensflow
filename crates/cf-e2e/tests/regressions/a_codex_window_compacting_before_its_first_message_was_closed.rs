@@ -120,6 +120,7 @@ fn a_codex_window_compacting_past_its_first_message_s_time_takes_it_once_it_is_d
         .events()
         .into_iter()
         .filter(|event| event["kind"] == "delivery.failed" || event["kind"] == "delivery.retried")
+        .filter(|event| !cf_e2e::handed::refused_before_written(event))
         .collect();
     assert!(
         failed.is_empty(),

@@ -39,6 +39,7 @@ fn running(pid: u32, started: u64, ppid: u32, command: &str) -> Running {
         ppid,
         command: command.to_owned(),
         exe: None,
+        link: crate::live::members::Link::Number,
     }
 }
 
@@ -378,7 +379,7 @@ fn a_write_in_the_live_zone_goes_only_below_a_folder_this_run_made() {
     let other = live.join("bench");
     fs::create_dir_all(&other).unwrap();
     fs::write(other.join("AGENTS.md"), "another run's").unwrap();
-    let wrong = |path: &Path| crate::files::guard(path).is_err();
+    let wrong = |path: &Path| crate::door::writable(path, false).is_err();
 
     // Another run's folder, a name nobody made, and the live folder itself: refused.
     assert!(wrong(&other.join("AGENTS.md")));
@@ -522,6 +523,33 @@ fn a_link_in_a_folder_this_run_made_leads_no_write_out_of_it() {
     assert!(!theirs.path().join("new.txt").exists());
 }
 
+#[cfg(unix)]
+#[test]
+fn a_rename_moves_a_link_itself_and_writes_nothing_through_it() {
+    let (theirs, kept) = a_persons_folder();
+    let mine = made("own-").unwrap();
+    let link = mine.path().join("link");
+    std::os::unix::fs::symlink(&kept, &link).unwrap();
+    // The link is moved, and what it leads to is neither written nor moved.
+    let moved = mine.path().join("moved");
+    rename(&link, &moved).unwrap();
+    assert!(fs::symlink_metadata(&moved)
+        .unwrap()
+        .file_type()
+        .is_symlink());
+    assert!(fs::symlink_metadata(&link).is_err());
+    assert_eq!(fs::read_to_string(&kept).unwrap(), "theirs");
+    // A link over a link replaces the link, not what it leads to.
+    let other = mine.path().join("other");
+    std::os::unix::fs::symlink(&kept, &other).unwrap();
+    rename(&moved, &other).unwrap();
+    assert_eq!(fs::read_to_string(&kept).unwrap(), "theirs");
+    // A name that is not the run's is still refused, as a link or not.
+    let elsewhere = theirs.path().join("elsewhere");
+    assert!(rename(&other, &elsewhere).is_err());
+    assert!(fs::symlink_metadata(&other).is_ok());
+}
+
 #[test]
 fn a_file_a_caller_names_is_made_new_and_refused_where_it_is_there_and_is_then_this_runs() {
     let (theirs, kept) = a_persons_folder();
@@ -614,6 +642,8 @@ fn a_program_a_run_starts_writes_below_what_was_handed_down_to_it_and_nowhere_el
                 .env("CF_E2E_DOOR_WRITE_CHILD_HOME", mine.path())
                 .env("CF_E2E_DOOR_WRITE_CHILD_THEIRS", &kept)
                 .envs(handed)
+                // The roots a child must not write in come with the folders it may.
+                .envs(crate::door::account::child_vars().unwrap())
                 .output()
                 .unwrap();
             assert!(
@@ -884,4 +914,193 @@ fn a_test_run_again_under_audit_is_run_by_a_say_only_door_and_held_to_a_pass() {
         failed.to_string().contains("did not pass"),
         "a name that is no test passed: {failed}"
     );
+}
+
+/// T-2007 round 3 (N1): a renewal's record is in the account's own records folder, so on an
+/// account that is no test machine (no `CONSENSFLOW_TEST_MACHINE`: the owner's Mac, and zeewin2
+/// since its account is its owner's) the door takes it away nowhere; on a marked one it does.
+#[test]
+fn a_renewals_record_is_taken_away_only_on_a_marked_test_machine() {
+    let parent = tempfile::tempdir().unwrap();
+    let records = parent.path().join("records");
+    let own = made_in(parent.path(), "consensflow-door-own-").unwrap();
+    let record = Record::of(&records, own.path()).unwrap();
+    fs::create_dir_all(record.path()).unwrap();
+    let door = Door::acting();
+
+    let left = door.remove_record_on(&record, None);
+    assert!(
+        matches!(&left, Removed::Left(path, why) if *path == record.path() && why.contains("CONSENSFLOW_TEST_MACHINE")),
+        "{left:?}"
+    );
+    assert!(record.path().is_dir(), "taken on an unmarked account");
+
+    let marked = crate::live::renew::TestMachine::signalled(Some("zeewin"));
+    assert_eq!(
+        door.remove_record_on(&record, marked.as_ref()),
+        Removed::Removed(record.path())
+    );
+    assert!(!record.path().exists());
+}
+
+/// T-2002 finding 3: the renewal's record is taken whole, and goes through the write door's tree
+/// check: a record whose tree holds a protected root is left, as every removal is.
+#[test]
+fn a_renewals_record_whose_tree_holds_a_protected_root_is_not_taken() {
+    let parent = tempfile::tempdir().unwrap();
+    let records = parent.path().join("records");
+    let own = made_in(parent.path(), "consensflow-door-own-").unwrap();
+    let record = Record::of(&records, own.path()).unwrap();
+    let inner = record.path().join("memory");
+    fs::create_dir_all(&inner).unwrap();
+    let marked = crate::live::renew::TestMachine::signalled(Some("kit"));
+    let door = Door::acting();
+    let held = crate::door::account::TestRoot::add(&inner);
+    let left = door.remove_record_on(&record, marked.as_ref());
+    assert!(
+        matches!(&left, Removed::Left(path, why) if *path == record.path() && why.contains("holds")),
+        "{left:?}"
+    );
+    assert!(inner.is_dir(), "a tree that holds a root was taken");
+    drop(held);
+    assert_eq!(
+        door.remove_record_on(&record, marked.as_ref()),
+        Removed::Removed(record.path())
+    );
+}
+
+#[test]
+fn what_the_windows_tree_names_and_does_not_prove_is_said_as_left_running_never_ended() {
+    // The window 10 made 11, which a reader could not read (the system said nothing of what made
+    // it); 12 is 11's. The door ends neither, and says both, with why, for the case's verdict.
+    let unread = |process: Running| Running {
+        link: crate::live::members::Link::Unread,
+        ..process
+    };
+    let rows = vec![
+        running(10, 1, 1, "window"),
+        unread(running(11, 2, 10, "launcher")),
+        running(12, 3, 11, "worker"),
+    ];
+    let root = Identity {
+        pid: 10,
+        started: 1,
+    };
+    let chosen = Grounded::descending_from(&rows, root);
+    assert!(chosen.processes().is_empty());
+    assert_eq!(
+        chosen
+            .unproved()
+            .iter()
+            .map(|(process, _)| process.identity.pid)
+            .collect::<Vec<_>>(),
+        [11, 12]
+    );
+    let said = left_running(Ended::default(), &chosen);
+    assert_eq!(said.failed.len(), 2, "{said:?}");
+    assert!(
+        said.problems()[0].contains("process 11"),
+        "{:?}",
+        said.problems()
+    );
+    assert!(
+        said.problems()[0].contains("left running"),
+        "{:?}",
+        said.problems()
+    );
+    // A say-only door says them too.
+    let (door, _) = saying_in(tempfile::tempdir().unwrap().path());
+    assert_eq!(door.end(&chosen).failed.len(), 2);
+}
+
+/// A window runs a command (`--mark`) that the kit proves; a child of it, which the kit can't
+/// prove (the system won't say what made it) and whose command holds none of the command's words,
+/// is left running when the command is ended, and said so (T-2314, finding 1).
+fn under_a_chosen_command() -> (Vec<Running>, Identity) {
+    use crate::live::members::Link;
+    let forked = |own, forker| Link::Forked { own, forker };
+    let row = |pid, started, ppid, command: &str, link| Running {
+        link,
+        ..running(pid, started, ppid, command)
+    };
+    (
+        vec![
+            row(5000, 1_000_000, 1, "window", forked(100, 1)),
+            row(
+                5040,
+                2_000_000,
+                5000,
+                "node ./long --mark",
+                forked(200, 100),
+            ),
+            row(5080, 3_000_000, 5040, "sleep 99", Link::Unread),
+            row(
+                5090,
+                4_000_000,
+                5080,
+                "worker of the sleep",
+                forked(400, 300),
+            ),
+        ],
+        Identity {
+            pid: 5000,
+            started: 1_000_000,
+        },
+    )
+}
+
+#[test]
+fn what_is_under_a_chosen_command_and_not_proved_is_said_as_left_running() {
+    let (rows, window) = under_a_chosen_command();
+    let numbers = |chosen: &Grounded| {
+        chosen
+            .unproved()
+            .iter()
+            .map(|(process, _)| process.identity.pid)
+            .collect::<Vec<_>>()
+    };
+    let holding = Grounded::holding(&rows, window, "--mark");
+    assert_eq!(
+        holding
+            .processes()
+            .iter()
+            .map(|p| p.identity.pid)
+            .collect::<Vec<_>>(),
+        [5040]
+    );
+    assert_eq!(numbers(&holding), [5080, 5090]);
+    let where_ =
+        Grounded::in_window_where(&rows, window, |line| line.ends_with("--mark"), "--mark");
+    assert_eq!(numbers(&where_), [5080, 5090]);
+    let said = left_running(Ended::default(), &holding);
+    assert_eq!(said.problems().len(), 2, "{:?}", said.problems());
+}
+
+#[test]
+fn a_process_chosen_by_a_later_look_is_no_longer_said_as_left_running() {
+    // A look that could not prove 5040 named it; a later one proved it and chose it: it is ended
+    // or not, and no longer said as left (T-2314, finding 5).
+    let (rows, window) = under_a_chosen_command();
+    let mut chosen = Grounded::holding(&rows, window, "no such words");
+    let unread: Vec<Running> = rows
+        .iter()
+        .map(|row| Running {
+            link: if row.identity.pid == 5040 {
+                crate::live::members::Link::Unread
+            } else {
+                row.link
+            },
+            ..row.clone()
+        })
+        .collect();
+    chosen.add(Grounded::descending_from(&unread, window));
+    assert!(chosen
+        .unproved()
+        .iter()
+        .any(|(p, _)| p.identity.pid == 5040));
+    chosen.add(Grounded::descending_from(&rows, window));
+    assert!(!chosen
+        .unproved()
+        .iter()
+        .any(|(p, _)| p.identity.pid == 5040));
 }

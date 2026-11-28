@@ -96,6 +96,10 @@ pub struct Machine {
     pub shared: Option<Shared>,
     /// What the machine takes at once, where it takes less than all it has.
     pub limits: Option<Limits>,
+    /// Whether it is a test machine: an account and a login store of its own, which the live kit
+    /// may renew a login in (`CONSENSFLOW_TEST_MACHINE`). zeewin2 is none: since 2026-11-22 its
+    /// account is its owner's own (T-2007 round 3).
+    pub marked: bool,
 }
 
 /// A machine another project uses too, and whose disk is its owner's.
@@ -130,6 +134,7 @@ impl Machine {
                     floor_gib: FLOOR_GIB,
                 }),
                 limits: None,
+                marked: false,
             }),
             _ => None,
         }
@@ -143,6 +148,7 @@ impl Machine {
             node: PROGRAM_FILES_NODE.into(),
             shared: None,
             limits: None,
+            marked: true,
         }
     }
 

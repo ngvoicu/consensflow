@@ -160,6 +160,7 @@ impl Player {
                 Rc::new(NoAdapters),
                 self.world.env(),
             )),
+            halt: cf_daemon::halt::Halt::new(),
         });
         let (daemon_end, app_end) = duplex(256 * 1024);
         let (daemon_input, daemon_output) = split(daemon_end);

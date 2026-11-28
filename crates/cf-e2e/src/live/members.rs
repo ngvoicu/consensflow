@@ -48,7 +48,7 @@ use serde_json::{json, Value};
 
 use super::machine::{live_folder_in, Harness, Installed, ISOLATION};
 use super::window::trust_claude;
-use super::{agents, last_lines, rig, rig_with_stand_ins, Log};
+use super::{agents, last_lines, rig, rig_with_stand_in_seats, Log};
 use crate::process::Run;
 use crate::rig::{Config, Project, Rig};
 use crate::{Error, Result};
@@ -64,8 +64,9 @@ pub use command::{
     quiet_command, run_word, runs_command, shown, ticking_command, ticks_in, LongCommand, Moving,
 };
 pub use descent::{
-    descending_from, end_chosen, holding, orphans_in_folder, pause_chosen, with_cygwin_parents,
-    working_folder, Ended, Identity, Machine, Pause, RunFolder, Running, ThisMachine,
+    descending_from, end_chosen, holding, orphans_in_folder, pause_chosen, unproved_under,
+    with_cygwin_parents, working_folder, Ended, Identity, Link, Machine, Pause, RunFolder, Running,
+    ThisMachine, Unproved,
 };
 pub use door::{judge, moves, ms_of, waited_then_worked, Finding, Judged, Seen};
 pub use left::{Swept, Watch};
@@ -87,11 +88,35 @@ const GONE: Duration = Duration::from_secs(10);
 /// which plays the stand-in `stand_in` for the windows whose agent's model is
 /// `fake` or `fake-chief`; where none is, the stand-in is the Claude of every window.
 pub fn rig_for(installs: &[Installed], shims: &Path, stand_in: &Path) -> Result<Config> {
+    rig_for_seats(installs, shims, stand_in, &[])
+}
+
+/// The names of the roster's stand-in seats on Claude Code's kind: the rows whose model is a
+/// stand-in's, by their own name, which is the model a window of the seat is asked for on
+/// (`rig::member_body`). The shim routes these and no other name to the stand-in (B27).
+pub fn stand_in_seats(roster: &[Value]) -> Vec<String> {
+    roster
+        .iter()
+        .filter(|row| {
+            row["kind"] == "claude-code"
+                && row["model"].as_str().is_some_and(agents::is_stand_in_model)
+        })
+        .filter_map(|row| row["id"].as_str().map(str::to_owned))
+        .collect()
+}
+
+/// [`rig_for`], where the stand-in seats `names` ([`stand_in_seats`]) are the stand-in's too.
+pub fn rig_for_seats(
+    installs: &[Installed],
+    shims: &Path,
+    stand_in: &Path,
+    names: &[String],
+) -> Result<Config> {
     if installs
         .iter()
         .any(|install| install.harness() == Harness::Claude)
     {
-        rig_with_stand_ins(installs, shims, stand_in)
+        rig_with_stand_in_seats(installs, shims, stand_in, names)
     } else {
         Ok(rig(installs, stand_in))
     }
@@ -191,7 +216,12 @@ impl Members {
             source,
         })?;
         let config = plan.vars.iter().fold(
-            rig_for(&installs, shims.path(), stand_in)?,
+            rig_for_seats(
+                &installs,
+                shims.path(),
+                stand_in,
+                &stand_in_seats(&plan.roster),
+            )?,
             |config, (name, value)| config.var(name, value),
         );
         let config = plan
@@ -644,8 +674,7 @@ fn said(swept: &Swept) {
 /// files.
 fn prepare(rig: &Rig, plan: &Plan) -> Result<PathBuf> {
     let home = rig
-        .var("HOME")
-        .filter(|home| !home.is_empty())
+        .project_home()
         .ok_or_else(|| Error::Daemon("the rig gives its windows no home".to_owned()))?;
     let folder = live_folder_in(Path::new(home), &plan.folder)?;
     for name in ["AGENTS.md", "CLAUDE.md"] {
@@ -658,7 +687,6 @@ fn prepare(rig: &Rig, plan: &Plan) -> Result<PathBuf> {
         let made = Run::new(Path::new("git"))
             .args(["init", "-q"])
             .arg(&folder)
-            .inheriting_env()
             .run()?;
         if made.code != Some(0) {
             return Err(Error::Daemon(format!(

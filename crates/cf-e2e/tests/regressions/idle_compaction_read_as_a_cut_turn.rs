@@ -21,7 +21,6 @@
 //! 2.1 writes them), the human closes and resumes the project, and the window
 //! opened again is given nothing.
 
-use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::Path;
 
@@ -44,7 +43,7 @@ pub(crate) fn compacted_while_idle(config: &str, session: &str) -> std::io::Resu
         .join("projects")
         .join("integration")
         .join(format!("{session}.jsonl"));
-    write_compaction(&mut OpenOptions::new().append(true).open(file)?, session)
+    write_compaction(&mut cf_e2e::door::append(file)?, session)
 }
 
 /// The boundary and the summary of a compaction, to the record `out`, a line each

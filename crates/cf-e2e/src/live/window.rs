@@ -222,9 +222,16 @@ impl Window<'_> {
     }
 
     /// What the harness's own record says so far, as the daemon reads it: its
-    /// items, and whether its turn is over. None while there is no record, or none
-    /// can be read.
+    /// items, and whether its turn is over. None while there is no record; a record that cannot
+    /// be read ends the case ([`Window::read_record`] says why instead): no reader takes a failure
+    /// for a record with nothing in it (T-1997 finding 7).
     pub fn record(&self) -> Option<ask::Record> {
+        self.read_record()
+            .unwrap_or_else(|failed| panic!("{} window {}: {failed}", self.kind, self.id))
+    }
+
+    /// [`Window::record`], and why where the record could not be read.
+    pub fn read_record(&self) -> Result<Option<ask::Record>> {
         with_record_homes(self.harness, &self.env, || {
             let known = self.session.borrow().clone();
             let session = known.or_else(|| {
@@ -235,7 +242,10 @@ impl Window<'_> {
                 self.session.borrow_mut().clone_from(&found);
                 found
             });
-            session.and_then(|session| ask::records(&self.kind, &session, &self.env).ok().flatten())
+            match session {
+                Some(session) => ask::records(&self.kind, &session, &self.env),
+                None => Ok(None),
+            }
         })
     }
 
@@ -348,13 +358,14 @@ impl Window<'_> {
     }
 
     /// [`Window::send`], the paste telling the pane host that the input box read
-    /// empty when it had taken `typed` writes of the human's keys (`readEmpty`), as
-    /// an adapter that reads its harness's box sends one.
-    pub fn send_read_empty(&self, body: &str, answer: &str, typed: u64) -> Result<Sent> {
+    /// empty over the human's keys (`readEmpty`: their count and the evidence, as
+    /// `harness-ask unsent` answers it), as an adapter that reads its harness's box
+    /// sends one.
+    pub fn send_read_empty(&self, body: &str, answer: &str, read_empty: &Value) -> Result<Sent> {
         self.sent(answer, || {
             self.rig.host(
                 "pane.write_paste",
-                json!({ "id": self.id, "generation": 1, "body": body, "readEmpty": typed }),
+                json!({ "id": self.id, "generation": 1, "body": body, "readEmpty": read_empty }),
             )
         })
     }
@@ -389,10 +400,13 @@ impl Window<'_> {
 fn with_record_homes(
     harness: Harness,
     env: &[(String, String)],
-    read: impl FnOnce() -> Option<ask::Record>,
-) -> Option<ask::Record> {
+    read: impl FnOnce() -> Result<Option<ask::Record>>,
+) -> Result<Option<ask::Record>> {
     if !record_homes_safe(harness, env) {
-        return None;
+        return Err(crate::Error::Daemon(format!(
+            "{}'s records are outside the run's own roots, and are not read",
+            harness.name()
+        )));
     }
     read()
 }

@@ -532,10 +532,10 @@ runs = ["viewer-page"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/page/viewer.rs"
-find = '''            copies::place(&home, &found, kept_for)
+find = '''            copies::place_checked(&home, &found, kept_for, &*during, &halt, &*at_rename)
 '''
-replace = '''            copies::place(&home, &found, kept_for)
-                .map(|_| directory.join(&name).join(&read))
+replace = '''            copies::place_checked(&home, &found, kept_for, &*during, &halt, &*at_rename)
+            .map(|_| directory.join(&name).join(&read))
 '''
 
 [[plant]]
@@ -568,13 +568,13 @@ runs = ["viewer-folder"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/page/viewer/copies.rs"
-find = "        match root.new_child(&name) {"
+find = "        match root.new_child(&format!(\"{name}.part\")) {"
 replace = "        match root.new_child(if name.is_empty() { &name } else { \"copy\" }) {"
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/page/viewer/copies.rs"
 find = "            Ok(None) => {}"
-replace = "            Ok(None) => return root.child(\"copy\").map_err(|_| \"taken\".to_owned()),"
+replace = "            Ok(None) => return root.child(\"copy\").map(|folder| (folder, name.clone())).map_err(|_| \"taken\".to_owned()),"
 
 [[plant]]
 name = "specs viewer: the copies' folder is reached through a link"
@@ -649,13 +649,17 @@ file = "crates/cf-daemon/src/page/viewer.rs"
 find = '''            tokio::task::spawn_blocking(move || {
                 let _running = running;
                 before();
-                look()
+                let looked = look();
+                after();
+                looked
             })
             .await'''
 replace = '''            std::future::ready(Ok::<_, tokio::task::JoinError>({
                 let _running = running;
                 before();
-                look()
+                let looked = look();
+                after();
+                looked
             }))
             .await'''
 

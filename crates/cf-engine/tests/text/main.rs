@@ -12,6 +12,7 @@ mod goldens_handoff;
 mod goldens_roles;
 mod handoff;
 mod own_hands;
+mod role_leverage;
 mod roles;
 mod shells;
 mod skill;

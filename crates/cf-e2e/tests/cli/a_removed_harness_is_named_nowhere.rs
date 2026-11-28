@@ -105,8 +105,8 @@ mod what_the_check_is_for_planted_in_a_tree_of_its_own {
     }
 
     /// A tree of the `planted` files, as text, and the list of them.
-    fn on_tree(planted: &[(&str, Vec<u8>)]) -> Found<(tempfile::TempDir, Vec<String>)> {
-        let root = tempfile::tempdir()?;
+    fn on_tree(planted: &[(&str, Vec<u8>)]) -> Found<(cf_e2e::door::Made, Vec<String>)> {
+        let root = cf_e2e::door::made("t-")?;
         for (file, contents) in planted {
             files::write(&under(root.path(), file), contents)?;
         }
@@ -154,8 +154,8 @@ mod what_the_check_is_for_planted_in_a_tree_of_its_own {
 
     /// A git repository of its own, holding `tracked` files (added to its index) and `lying`
     /// ones beside them, which git does not track.
-    fn repository(tracked: &[(&str, &[u8])], lying: &[(&str, &[u8])]) -> Found<tempfile::TempDir> {
-        let root = tempfile::tempdir()?;
+    fn repository(tracked: &[(&str, &[u8])], lying: &[(&str, &[u8])]) -> Found<cf_e2e::door::Made> {
+        let root = cf_e2e::door::made("t-")?;
         for (file, contents) in tracked.iter().chain(lying) {
             files::write(&under(root.path(), file), contents)?;
         }
@@ -164,11 +164,7 @@ mod what_the_check_is_for_planted_in_a_tree_of_its_own {
             add.extend(tracked.iter().map(|(file, _)| *file));
             add
         }] {
-            let ran = Run::new("git")
-                .args(args)
-                .cwd(root.path())
-                .inheriting_env()
-                .run()?;
+            let ran = Run::new("git").args(args).cwd(root.path()).run()?;
             assert_eq!(ran.code, Some(0), "{}", ran.stderr);
         }
         Ok(root)

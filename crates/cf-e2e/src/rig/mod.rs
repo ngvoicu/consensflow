@@ -66,6 +66,11 @@ pub use route::{Held, Pasted};
 #[cfg(test)]
 pub(crate) use homes::clashing;
 pub(crate) use observe::events_of;
+/// The relay's routers, for the door's tests of its seal.
+#[cfg(all(test, unix))]
+pub(crate) mod route_tests {
+    pub(crate) use super::route::sinks_over;
+}
 
 use homes::Homes;
 use route::Shared;
@@ -76,6 +81,22 @@ const REQUEST: Duration = Duration::from_secs(10);
 
 /// How long the daemon and the pane host each have to end once their input has.
 const EXIT: Duration = Duration::from_secs(5);
+
+/// How long the daemon and the pane host each have to end once their input has, where the rig
+/// seats the installed Muse: its echo or live worker may be in a turn, and the pane host gives a
+/// program that does not leave ten seconds before it kills it, so a close that gives less than
+/// that fails on a window the host is still, rightly, waiting for (B22: Muse echo with a 60 s
+/// echo delay, the pane host gone 5.07 s after its input ended).
+const NATIVE_EXIT: Duration = Duration::from_secs(15);
+
+/// The bound [`Rig::close`] gives a rig that does (`native`) or does not seat a native program.
+fn exit_bound(native: bool) -> Duration {
+    if native {
+        NATIVE_EXIT
+    } else {
+        EXIT
+    }
+}
 
 /// Which of the two the rig ended did not leave within `exit` of its input's end: the failure
 /// of a close says it, as "process did not exit" alone says not which (CI run 42419505988, a
@@ -130,9 +151,20 @@ pub struct Config {
     homes: Option<PathBuf>,
     case: Option<String>,
     judged: bool,
+    /// The person's home, where a live case makes its project folders below: a field of the
+    /// rig's, in no environment ([`Config::project_home`]).
+    project_home: Option<PathBuf>,
 }
 
 impl Config {
+    /// With the project folders of a live case made below `home`, the person's: the rig keeps it
+    /// as a field, and no program of the rig is told it (T-2000 finding 1).
+    #[must_use]
+    pub fn project_home(mut self, home: impl Into<PathBuf>) -> Self {
+        self.project_home = Some(home.into());
+        self
+    }
+
     /// A rig whose windows run `stand_in`, the stand-in for a harness's terminal
     /// program (the `fake-agent` binary of this crate).
     pub fn new(stand_in: impl Into<PathBuf>) -> Self {
@@ -156,6 +188,7 @@ impl Config {
             homes: None,
             case: None,
             judged: false,
+            project_home: None,
         }
     }
 
@@ -433,6 +466,8 @@ pub struct Rig {
     /// The launcher a live Muse of the rig runs through ([`Config::muse_live`]), where it
     /// seats one.
     muse_launcher: Option<PathBuf>,
+    /// How long each of the daemon and the pane host has to end at the close ([`exit_bound`]).
+    exit: Duration,
     /// A process none of the windows' is, which nothing may have ended when they are.
     stranger: Stranger,
     /// The homes of real harnesses the windows run on, where a case gave any: its Claude
@@ -441,6 +476,8 @@ pub struct Rig {
     homes: Homes,
     /// Where its report is kept, where it is not beside its home ([`Config::reports_in`]).
     reports: Option<PathBuf>,
+    /// The person's home a live case's project folders are made below ([`Config::project_home`]).
+    project_home: Option<PathBuf>,
     /// The case that started it, as its report names it ([`Config::case`]).
     case: String,
     /// Whether its case is judged by what it returns, and whether it has failed
@@ -493,6 +530,16 @@ impl Rig {
     /// reads their output.
     pub fn host_pid(&self) -> u32 {
         self.host.id()
+    }
+
+    /// The folder a live case makes its project folders below: the person's home, which the
+    /// kit names for that and for nothing else ([`Config::project_home`]); the rig's own `HOME`
+    /// where none is named. It is in no environment, and a window's `HOME` is never the person's.
+    pub fn project_home(&self) -> Option<&str> {
+        self.project_home
+            .as_deref()
+            .and_then(Path::to_str)
+            .or_else(|| self.var("HOME").filter(|home| !home.is_empty()))
     }
 
     /// The value of the variable `name` in the environment of the daemon and
@@ -549,10 +596,51 @@ impl Rig {
     }
 
     /// What the desktop app asks the pane host: `op` with `body`, answered by
-    /// the body of the response. The app's requests are `n-test-N`.
+    /// the body of the response. The app's requests are `n-test-N`. A window is opened only
+    /// through [`Rig::open_pane`]: `pane.open` is refused here.
     pub fn host(&self, op: &str, body: Value) -> Result<Value> {
+        if op == "pane.open" {
+            return Err(Error::LiveApp(
+                "a window is opened through Rig::open_pane, which judges it first".to_owned(),
+            ));
+        }
         let id = self.shared.next_host_id();
         self.ask(&id, op, &body, self.host.sink(), "the pane host")
+    }
+
+    /// Opens the window `body` asks for (`pane.open`) on the rig's own pane host, the one sender
+    /// of it: only where the environment it will really have (the host's, the request's `env`
+    /// over it, its `dropEnv` out last) holds the seal and its program needs no door of its own
+    /// ([`crate::door::window_admitted`]), and sent so that no variable the account's registry
+    /// stores reaches it ([`crate::door::window_to_send`]). A window that does not is not opened,
+    /// and the refusal is the error.
+    pub fn open_pane(&self, body: Value) -> Result<Value> {
+        let body = match self.shared.window_to_send(&body) {
+            Ok(sent) => sent,
+            Err(why) => {
+                self.shared.seen().refused.push((body.clone(), why.clone()));
+                return Err(Error::LiveApp(format!("the rig refused the window: {why}")));
+            }
+        };
+        let id = self.shared.next_host_id();
+        self.ask(&id, "pane.open", &body, self.host.sink(), "the pane host")
+    }
+
+    /// The environment the window `body` asks for is judged on, on this rig's pane host: what the
+    /// window must have, whatever the account stores (T-2086 B1).
+    pub fn judged_environment(
+        &self,
+        body: &Value,
+    ) -> Result<Vec<(std::ffi::OsString, std::ffi::OsString)>> {
+        self.shared
+            .judged_environment(body)
+            .ok_or_else(|| Error::LiveApp("the rig has no pane host's environment".to_owned()))?
+            .map_err(Error::LiveApp)
+    }
+
+    /// Each window the rig refused to open, by the daemon's request or the case's, and why.
+    pub fn refused_windows(&self) -> Vec<(Value, String)> {
+        self.shared.seen().refused.clone()
     }
 
     fn ask(&self, id: &str, op: &str, body: &Value, to: Option<Sink>, whom: &str) -> Result<Value> {
@@ -682,7 +770,6 @@ impl Rig {
                 "CONSENSFLOW_TOKEN",
                 env["CONSENSFLOW_TOKEN"].as_str().unwrap_or_default(),
             )
-            .finding_programs()
             .cwd(checkout::root())
             .args(words)
             .run()
@@ -769,7 +856,7 @@ impl Rig {
     /// process that is none of any window's to run still). The home goes with
     /// it.
     pub fn close(mut self) -> Result<()> {
-        self.shutdown(EXIT)
+        self.shutdown(self.exit)
     }
 
     /// Begins the close without waiting for it: the daemon's input and the pane host's
@@ -799,7 +886,8 @@ impl Rig {
     /// [`Rig::close`], but the home is left, for a rig that resumes on it
     /// ([`Config::existing_root`]). Where it is.
     pub fn close_keeping_the_root(self) -> Result<PathBuf> {
-        self.close_keeping_the_root_within(EXIT)
+        let exit = self.exit;
+        self.close_keeping_the_root_within(exit)
     }
 
     /// [`Rig::close_keeping_the_root`], the daemon and the pane host each given
@@ -943,7 +1031,7 @@ impl Drop for Rig {
                 outcome::leave(verdict, move || left.say());
             }
         }
-        let _ = self.shutdown(EXIT);
+        let _ = self.shutdown(self.exit);
         self.daemon.kill();
         self.host.kill();
         // A rig that did not end by being closed (a case that failed) is still asked
@@ -999,6 +1087,16 @@ fn recorded(config: &str, session: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// B22: a rig that seats Muse closes within what the pane host gives a window before it kills
+    /// it, plus a margin; the stand-in agents' rigs keep the short bound.
+    #[test]
+    fn a_rig_with_a_native_muse_is_closed_within_the_pane_hosts_own_grace_and_a_margin() {
+        const HOST_GRACE: Duration = Duration::from_secs(10);
+        assert!(exit_bound(true) > HOST_GRACE);
+        assert_eq!(exit_bound(false), EXIT);
+        assert!(exit_bound(true) > exit_bound(false));
+    }
 
     /// The engine opens the window of a reopened member under the same pane id with a new
     /// generation, and the old window's process may have left what it ran: every process the host
@@ -1066,7 +1164,7 @@ mod tests {
 
     #[test]
     fn a_conversation_is_read_a_whole_record_at_a_time_while_the_agent_is_still_writing_it() {
-        let config = tempfile::tempdir().unwrap();
+        let config = crate::door::made("t-").unwrap();
         let file = config
             .path()
             .join("projects")

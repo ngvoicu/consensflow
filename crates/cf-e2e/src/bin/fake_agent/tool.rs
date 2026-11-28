@@ -64,7 +64,7 @@ fn run(command: &Command, window: &Window) -> Result<Reply, String> {
     // own group is its harness's and its servers'.
     let words = command.arguments.iter().map(OsString::from).collect();
     let mut program = in_a_shell(Path::new(command.program), words, false)?
-        .inheriting_window_env()
+        .as_this_window(cf_e2e::door::spawn::Window::this())
         .closed_input()
         .spawn()
         .map_err(|failed| failed.to_string())?;

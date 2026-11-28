@@ -237,15 +237,8 @@ runs = ["hm-e2e-wrapper"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/machine/wrapper.rs"
-find = '''
-        [
-            STAND_IN_WORKER_MODEL,
-            STAND_IN_CHIEF_MODEL,
-            STAND_IN_MEMBER_MODEL
-        ]
-        .join(" | "),'''
-replace = '''
-        [STAND_IN_WORKER_MODEL, STAND_IN_CHIEF_MODEL].join(" | "),'''
+find = '''        stand_in_words(names).join(" | "),'''
+replace = '''        stand_in_words(names).into_iter().filter(|word| word != "worker").collect::<Vec<_>>().join(" | "),'''
 
 [[plant]]
 name = "harness models: the chief's effort is not sent"

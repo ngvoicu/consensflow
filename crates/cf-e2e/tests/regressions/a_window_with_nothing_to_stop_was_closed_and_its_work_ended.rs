@@ -27,29 +27,26 @@
 use std::path::PathBuf;
 use std::thread::sleep;
 
+use cf_e2e::door::Made;
 use cf_e2e::process::is_alive;
 use cf_e2e::rig::{write_staff, Project, Rig, OPEN};
 use cf_e2e::{files, Error};
 use serde_json::{json, Value};
-use tempfile::TempDir;
 
 use crate::{config, secs, Outcome};
 
 /// The account the workers share: spent while its file is there (`CF_TEST_QUOTA_FILE`).
 struct Account {
-    folder: TempDir,
+    folder: Made,
 }
 
 impl Account {
     fn new() -> cf_e2e::Result<Self> {
-        let folder = tempfile::Builder::new()
-            .prefix("cf-account-")
-            .tempdir()
-            .map_err(|source| Error::File {
-                action: "make a folder in",
-                path: std::env::temp_dir(),
-                source,
-            })?;
+        let folder = cf_e2e::door::made("cf-account-").map_err(|source| Error::File {
+            action: "make a folder in",
+            path: std::env::temp_dir(),
+            source,
+        })?;
         Ok(Self { folder })
     }
 
@@ -171,7 +168,7 @@ fn an_accounts_limit_holds_its_windows_and_closes_none_that_left_work_running() 
     assert_eq!(closes_told(&rig, &project)?, Vec::<String>::new());
 
     // Quota is back: each task goes on in its own window.
-    let _ = std::fs::remove_file(account.file());
+    let _ = cf_e2e::door::remove(account.file());
     for member in ["worker", "worker2"] {
         let back = rig.page(
             "member.back",

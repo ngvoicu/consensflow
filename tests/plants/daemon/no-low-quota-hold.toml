@@ -586,11 +586,13 @@ runs = ["no-low-hold-page-holds"]
 [[plant.edit]]
 file = "app/ui/core/dialogs.js"
 find = '''
-    if (lane.busy) return
-'''
+    if (!lane.busy) {
+      out.append(
+        tryAgain('''
 replace = '''
-    if (false) return
-'''
+    if (true) {
+      out.append(
+        tryAgain('''
 
 [[plant]]
 name = "no low hold: a busy member's held task says it is out of quota"
@@ -613,11 +615,9 @@ runs = ["no-low-hold-page-holds"]
 
 [[plant.edit]]
 file = "app/ui/core/board.js"
-find = '''
-Logged in again, or paid? Press Try again now`
+find = '''      way: 'Logged in again, or paid? Press Try again now',
 '''
-replace = '''
-Press Try again now`
+replace = '''      way: 'Press Try again now',
 '''
 
 [[plant]]

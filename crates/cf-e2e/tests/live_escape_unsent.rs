@@ -188,6 +188,8 @@ struct Read {
     typed: u64,
     /// What the adapter reads of the input box: `empty`, `holds`, or none.
     reader: Option<String>,
+    /// The adapter's decision of a paste over the count (`harness-ask unsent`).
+    decision: Value,
     /// The longest a key of the step took to be drawn, in milliseconds: none where
     /// one was not drawn within [`DRAW_WAIT`].
     drew_ms: Option<u64>,
@@ -327,6 +329,9 @@ fn read(pane: &Pane, harness: Harness, step: Step, drew_ms: Option<u64>) -> Resu
         held: snapshot["unsent"] == true,
         typed: snapshot["typed"].as_u64().unwrap_or_default(),
         reader: reader(harness, &lines, &snapshot["cursor"])?,
+        decision: ask::question(
+            &json!({ "op": "unsent", "kind": harness.kind(), "snapshot": snapshot }),
+        )?,
         drew_ms,
         lines,
         cursor: snapshot["cursor"].clone(),
@@ -432,10 +437,21 @@ fn delivered(window: &Window, left: &Read) -> Result<Check> {
             format!("the box read {read}: the delivery is held"),
         ));
     }
+    let read_empty = &left.decision["readEmpty"];
+    if !read_empty.is_object() {
+        return Ok(Check::failed(
+            name,
+            WHAT,
+            format!(
+                "the adapter decided {}: the delivery is held",
+                left.decision
+            ),
+        ));
+    }
     let body = window.given(&format!(
         "Reply with exactly the word {ANSWERED} and nothing else."
     ))?;
-    let sent = window.send_read_empty(&body, ANSWERED, left.typed)?;
+    let sent = window.send_read_empty(&body, ANSWERED, read_empty)?;
     Ok(if sent.written["ok"] != true {
         Check::failed(
             name,
@@ -487,14 +503,11 @@ fn open_codex<'r>(rig: &'r Rig, install: &Installed, log: &Log) -> Result<Pane<'
     let env = rig.environment().to_vec();
     let argv = ask::program(&argv, &env)?;
     let id = "escape-codex".to_owned();
-    let opened = rig.host(
-        "pane.open",
-        json!({
-            "id": id, "generation": 1, "cwd": workspace, "argv": argv,
-            "env": {}, "dropEnv": [],
-            "size": { "rows": 40, "cols": 120 },
-        }),
-    )?;
+    let opened = rig.open_pane(json!({
+        "id": id, "generation": 1, "cwd": workspace, "argv": argv,
+        "env": {}, "dropEnv": [],
+        "size": { "rows": 40, "cols": 120 },
+    }))?;
     if opened["ok"] != true {
         return Err(Error::Daemon(format!("codex did not open: {opened}")));
     }

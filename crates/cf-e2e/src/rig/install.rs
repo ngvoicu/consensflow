@@ -162,13 +162,29 @@ pub(super) fn environment(
     env
 }
 
+/// The profile half `wanted` as `env` gives it, or as the rig's own home says it.
+fn other_half(env: &[(String, String)], defaults: &[(&str, PathBuf)], wanted: &str) -> String {
+    env.iter()
+        .rev()
+        .find(|(key, _)| same_environment_name(key, wanted))
+        .map(|(_, value)| value.clone())
+        .or_else(|| {
+            defaults
+                .iter()
+                .find(|(name, _)| *name == wanted)
+                .map(|(_, value)| value.to_string_lossy().into_owned())
+        })
+        .unwrap_or_default()
+}
+
 /// Bound every home variable the harnesses can consult in a stand-in rig.
 /// This is applied after the case's variables and harness homes have won.
 pub(super) fn bound_standin_homes(env: &mut Vec<(String, String)>, root: &Path, subject: &str) {
     if own_var("CF_E2E_STAND_IN").as_deref() != Some("1") {
         return;
     }
-    for (name, default) in crate::standin_process::home_vars(&root.join("home")) {
+    let defaults = crate::standin_process::home_vars(&root.join("home"));
+    for (name, default) in defaults.clone() {
         let value = env
             .iter()
             .rev()
@@ -179,8 +195,16 @@ pub(super) fn bound_standin_homes(env: &mut Vec<(String, String)>, root: &Path, 
                 !value.is_empty(),
                 "stand-in {subject} {name} lookup: empty path"
             );
+            // The profile's two halves (`C:`, `\Users\x`) name no folder each: each is held
+            // joined with the other, as the seal holds them (T-2007 round 3: every rig on
+            // Windows stopped here).
+            let judged = match name {
+                "HOMEDRIVE" => format!("{value}{}", other_half(env, &defaults, "HOMEPATH")),
+                "HOMEPATH" => format!("{}{value}", other_half(env, &defaults, "HOMEDRIVE")),
+                _ => value.clone(),
+            };
             crate::standin_process::require_home(
-                Path::new(&value),
+                Path::new(&judged),
                 &format!("stand-in {subject} {name} lookup"),
             );
             value
@@ -385,7 +409,7 @@ pub(super) fn give_muse_its_folders(
         }
         crate::door::make_dir(&moved)?;
         let link = moved.join("muse");
-        match std::fs::symlink_metadata(&link) {
+        match crate::door::reads::symlink_metadata(&link) {
             Ok(meta) if meta.file_type().is_symlink() => {
                 let removed = crate::door::Door::of_run().remove_in_made(&link);
                 if !removed.is_gone() {
@@ -408,13 +432,18 @@ pub(super) fn give_muse_its_folders(
 
 /// The command `name` in `dir`, which starts `program`: a script that runs the
 /// program the variable `var` names, or on Windows the shim of `program`.
+/// The door is told what the shim starts, so that a window of it is judged by that program
+/// (T-2086 C2).
 fn write_shim(dir: &Path, name: &str, var: &str, program: &Path) -> Result {
     let shim = dir.join(stand_in::program_name(name));
     if cfg!(windows) {
-        crate::door::write_executable(&shim, stand_in::window_command(program)?)
+        crate::door::write_executable(&shim, stand_in::window_command(program)?)?;
+        crate::door::register_shim(&shim, None, program);
     } else {
-        crate::door::write_executable(&shim, format!("#!/bin/sh\nexec \"${var}\" \"$@\"\n"))
+        crate::door::write_executable(&shim, format!("#!/bin/sh\nexec \"${var}\" \"$@\"\n"))?;
+        crate::door::register_shim(&shim, Some(var), program);
     }
+    Ok(())
 }
 
 /// The file of the stand-ins a case seats, in the rig's folder beside the home: the case's
@@ -450,7 +479,9 @@ mod tests {
     fn standin_isolation_window_path_refuses_a_foreign_harness_home() {
         const CHILD: &str = "CF_T1647_PATH_CHILD";
         const DECOY: &str = "CF_T1647_PATH_DECOY";
-        if let Some(foreign) = crate::process::own_var(DECOY) {
+        if let Some(said) = crate::process::own_var(DECOY) {
+            // Handed in a file of the run's: only `PATH` may name a store.
+            let foreign = files::read_string(std::path::Path::new(&said)).unwrap();
             let root = crate::door::made("window-path-").unwrap();
             let mut env = vec![("PATH".to_owned(), foreign)];
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -473,17 +504,22 @@ mod tests {
             .parent()
             .unwrap()
             .join(format!("synthetic-foreign-harness-{}", std::process::id()));
+        let held = crate::door::made("window-path-decoy-").unwrap();
+        let said = held.path().join("decoy.txt");
+        files::write(&said, decoy.to_string_lossy().as_bytes()).unwrap();
+        // The decoy is one of the run's protected roots, which the child reads from the run's
+        // file and never from its own environment.
+        let protected = crate::door::account::TestRoot::add(&decoy);
         let output = crate::process::case_of(
             std::env::current_exe().unwrap(),
             "rig::install::tests::standin_isolation_window_path_refuses_a_foreign_harness_home",
             std::time::Duration::from_secs(120),
         )
-        .inheriting_env()
         .var(CHILD, "1")
-        .var(DECOY, &decoy)
-        .var("CODEX_HOME", &decoy)
+        .var(DECOY, &said)
         .run()
         .unwrap();
+        drop(protected);
         assert_eq!(output.code, Some(0), "{}{}", output.stdout, output.stderr);
     }
 
@@ -558,9 +594,9 @@ mod tests {
     fn a_rig_that_runs_muse_names_its_data_folder_by_its_real_path() {
         let folder = crate::door::made("cf-test-").unwrap();
         let real = folder.path().join("real");
-        std::fs::create_dir_all(real.join("home").join(".local").join("share")).unwrap();
+        crate::door::make_dir(real.join("home").join(".local").join("share")).unwrap();
         let linked = folder.path().join("linked");
-        std::os::unix::fs::symlink(&real, &linked).unwrap();
+        crate::door::symlink(&real, &linked).unwrap();
         let muse = crate::muse::Installed {
             binary: PathBuf::from("/bin/muse-bin-1.4.14"),
             version: "1.4.14".to_owned(),
@@ -674,7 +710,9 @@ mod tests {
     fn the_programs_of_a_rig_are_told_the_temp_folder_of_the_test_that_runs_it() {
         // Whatever they write there (a socket's folder, a harness's scratch files) is in the
         // folder a plant run gave its test, with the homes and the reports, and goes with it.
-        let root = Path::new("root");
+        // A rig's folder of the run's own: the door starts nothing on another home.
+        let made = crate::door::made("rig-comspec-").unwrap();
+        let root = made.path();
         let env = environment(root, &root.join("fake-bin"), &config(), &[]);
         let temp = std::env::temp_dir().to_string_lossy().into_owned();
         let names: &[&str] = if cfg!(windows) {
@@ -756,7 +794,9 @@ mod tests {
     fn a_command_interpreter_in_the_rigs_environment_finds_powershell() {
         use crate::process::Run;
 
-        let root = Path::new("root");
+        // A rig's folder of the run's own: the door starts nothing on another home.
+        let made = crate::door::made("rig-comspec-").unwrap();
+        let root = made.path();
         let env = environment(root, &root.join("fake-bin"), &config(), &[]);
         let comspec = var(&env, "ComSpec");
         assert!(!comspec.is_empty(), "the rig passes ComSpec on Windows");
@@ -948,7 +988,9 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn the_path_is_the_stand_ins_folder_then_the_systems_own_and_no_package_managers() {
-        let root = Path::new("root");
+        // A rig's folder of the run's own: the door starts nothing on another home.
+        let made = crate::door::made("rig-comspec-").unwrap();
+        let root = made.path();
         let env = environment(root, &root.join("fake-bin"), &config(), &[]);
         assert_eq!(
             var(&env, "PATH"),

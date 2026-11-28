@@ -60,7 +60,6 @@ fn program(
         Duration::from_secs(240),
     )
     .args(["--nocapture", "--test-threads=1"])
-    .inheriting_env()
     .var(cf_e2e::cf::BUILT, built)
     .var(CASE, case)
     .var(SIGNALS, layout.signals())
@@ -151,7 +150,7 @@ fn the_program_a_case_of_the_layout_runs() -> Outcome {
         .with_var("HOME", &home);
     let mut members = Members::open(&plan, Path::new(FAKE_AGENT), &log)?;
     let folder = members.folder().to_path_buf();
-    std::fs::write(
+    cf_e2e::door::write(
         folder.join("evidence.txt"),
         format!("the evidence of the {case} case\n"),
     )?;
@@ -185,7 +184,7 @@ fn the_program_a_case_of_the_layout_runs() -> Outcome {
     }
     if case == "hold" {
         // Another invocation of the same case runs while this one is up.
-        std::fs::write(
+        cf_e2e::door::write(
             signals.join("held"),
             format!(
                 "{}\n{}\n{}\n",
@@ -249,9 +248,9 @@ fn audit_case(case: &str, signals: &Path) -> Outcome {
     }
     let root = own_var(CHILD_ROOT).ok_or("the child was given no folder of the run's own")?;
     let sessions = Path::new(&root).join("child-config").join("sessions");
-    std::fs::create_dir_all(&sessions)?;
+    cf_e2e::door::make_dir(&sessions)?;
     let status = sessions.join(format!("{}.json", std::process::id()));
-    std::fs::write(&status, "{}")?;
+    cf_e2e::door::write(&status, "{}")?;
     let door = cf_e2e::door::Door::of_run();
     println!("CHILD-REMOVED {}", door.remove_in_made(&status));
     println!("CHILD-STATUS-LEFT {}", status.is_file());
@@ -347,7 +346,7 @@ fn a_second_invocation_of_the_same_case_beside_the_first_has_folders_of_its_own_
     );
     layout.untouched()?;
 
-    std::fs::write(layout.signals().join("release"), "go\n")?;
+    cf_e2e::door::write(layout.signals().join("release"), "go\n")?;
     let ended = first.wait(secs(120))?;
     assert!(
         ended.is_some_and(|status| status.success()),
@@ -428,7 +427,7 @@ fn a_say_only_run_changes_nothing_below_another_runs_folders() -> Outcome {
         }
         // A rehearsal keeps what a stand-in case said, to be read.
         if let (Some(keep), "whole") = (own_var("CF_LAYOUT_KEEP_AUDIT"), case) {
-            std::fs::copy(&audit, keep)?;
+            cf_e2e::door::copy_keeping_mode(&audit, keep)?;
         }
     }
     Ok(())
@@ -478,7 +477,7 @@ fn the_programs_a_say_only_run_starts_say_into_the_same_file_whole() -> Outcome 
 fn a_say_only_run_that_cannot_make_its_file_stops_before_it_does_anything() -> Outcome {
     let layout = layout();
     let older = layout.signals().join("older.txt");
-    std::fs::write(&older, "an older run's audit\n")?;
+    cf_e2e::door::write(&older, "an older run's audit\n")?;
     let nowhere = layout.signals().join("no-such-folder").join("audit.txt");
     let (older_name, nowhere_name) = (
         older.to_string_lossy().into_owned(),
@@ -626,7 +625,7 @@ fn sweep(
     layout: &Layout,
     words: &[&str],
 ) -> Result<cf_e2e::process::Ran, Box<dyn std::error::Error>> {
-    let mut run = Run::new(SWEEP).args(words).inheriting_env();
+    let mut run = Run::new(SWEEP).args(words);
     for (name, value) in layout.vars().iter() {
         run = run.var(name, value);
     }
@@ -697,7 +696,7 @@ fn live_sweep_has_no_word_that_takes_a_folder() -> Outcome {
 #[test]
 fn live_sweep_under_a_say_only_switch_lists_and_is_no_pass() -> Outcome {
     let layout = layout();
-    let mut run = Run::new(SWEEP).inheriting_env().var("CF_LIVE_AUDIT", "1");
+    let mut run = Run::new(SWEEP).var("CF_LIVE_AUDIT", "1");
     for (name, value) in layout.vars().iter() {
         run = run.var(name, value);
     }

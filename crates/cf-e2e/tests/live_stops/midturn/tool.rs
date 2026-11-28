@@ -661,7 +661,7 @@ mod tests {
 
     #[test]
     fn a_file_under_another_runs_name_that_keeps_growing_is_no_running_command_of_this_run() {
-        let folder = tempfile::tempdir().unwrap();
+        let folder = cf_e2e::door::made("t-").unwrap();
         let this = Command::here();
         // Another run's command (an earlier one, still writing its file each second): its file
         // has the name of its own run, so this run's command never reads it.
@@ -671,7 +671,7 @@ mod tests {
         let theirs = earlier.ticks.as_deref().unwrap();
         let mut moving = Moving::default();
         for count in 1..=4 {
-            std::fs::write(folder.path().join(theirs), count.to_string()).unwrap();
+            cf_e2e::door::write(folder.path().join(theirs), count.to_string()).unwrap();
             let seen = this
                 .ticks
                 .as_deref()
@@ -679,7 +679,7 @@ mod tests {
             assert_eq!(moving.moved(seen), None, "look {count}");
         }
         // The old fixed names are no part of it either.
-        std::fs::write(folder.path().join("tool-ticks.txt"), "9").unwrap();
+        cf_e2e::door::write(folder.path().join("tool-ticks.txt"), "9").unwrap();
         assert_eq!(ticks(folder.path(), this.ticks.as_deref().unwrap()), None);
         let background = Command::after_background();
         let file = background
@@ -717,7 +717,7 @@ mod tests {
             "notes.txt",
         ];
         for name in own.iter().map(String::as_str).chain(others) {
-            std::fs::write(folder.path().join(name), "60").unwrap();
+            cf_e2e::door::write(folder.path().join(name), "60").unwrap();
         }
         let cleared = clear_ticks(folder.path(), &command);
         assert_eq!(cleared, own);
@@ -733,11 +733,11 @@ mod tests {
 
     #[test]
     fn a_tick_file_says_how_many_seconds_its_command_ran_and_none_before_it_is_written() {
-        let folder = tempfile::tempdir().unwrap();
+        let folder = cf_e2e::door::made("t-").unwrap();
         assert_eq!(ticks(folder.path(), "tool-ticks.txt"), None);
-        std::fs::write(folder.path().join("tool-ticks.txt"), "7").unwrap();
+        cf_e2e::door::write(folder.path().join("tool-ticks.txt"), "7").unwrap();
         assert_eq!(ticks(folder.path(), "tool-ticks.txt"), Some(7));
-        std::fs::write(folder.path().join("tool-ticks.txt"), "").unwrap();
+        cf_e2e::door::write(folder.path().join("tool-ticks.txt"), "").unwrap();
         assert_eq!(
             ticks(folder.path(), "tool-ticks.txt"),
             None,

@@ -307,6 +307,10 @@ pub(crate) struct WindowPart {
     /// Whether its last look said its turn settled.
     pub(crate) settled: bool,
     pub(crate) relaunch: Option<Relaunch>,
+    /// How many moves of its task to another member wait for this participant's step: a launch
+    /// in progress is called off by one, and a window it ends gives back what it was handed
+    /// instead of failing it (T-2307).
+    pub(crate) moving: u32,
     /// The model a chief's launch asked for, which its harness said it no longer has: the
     /// next launch starts on the harness's default (CHF-06).
     pub(crate) gone: Option<String>,
@@ -437,6 +441,7 @@ impl Default for WindowPart {
             hidden: false,
             settled: false,
             relaunch: None,
+            moving: 0,
             gone: None,
             starts_given_up: 0,
             took: false,
@@ -845,6 +850,18 @@ impl Dispatcher {
             Err(cause) => {
                 // An adapter may fail after writing the launch's files; no window will read them.
                 self.seams.launch_files.forget(&launch_id);
+                // A launch the plan found called off (a Close, a pause, a cancel, a move, the
+                // daemon's stop) failed nothing: no failure is written or told, no back-off
+                // is counted, and what it was to deliver waits for the next ask.
+                if cf_harness::called_off(&cause.to_string()) {
+                    return self.ended_called_off(
+                        record,
+                        project,
+                        participant,
+                        failing,
+                        asked_before,
+                    );
+                }
                 // What the adapter said is its own: the log has it, and a note says the stage.
                 let why = if cause.refusal().code == "no-adapter" {
                     Why::NoAdapter
@@ -1202,10 +1219,24 @@ impl Dispatcher {
         // conversation, or afresh where its harness held it no more. It is told once that
         // message has arrived.
         self.relaunched_back(record, resumed);
+        // The window is open: a task handed on while its open was asked (to a backup, to another
+        // member) is no task of this member's, and the window is given nothing and closed as a
+        // launch called off is, with the brief it may have opened with its own to answer for
+        // (T-2307).
+        let first_id = delivering.as_ref().map(|first| first.message);
+        // Not wanted for another reason (a Close, a move) is the exit's to settle, which gives
+        // the message back; one handed on is cancelled already and has nothing to give back.
+        let handed_on = !self.launch_still_wanted(record, participant, first_id)
+            && first_id.is_some_and(|message| !self.first_message_held(participant, message));
         {
             let mut delivery = record.delivery.borrow_mut();
-            delivery.delivering = delivering;
-            delivery.prelude = prelude;
+            delivery.delivering = if handed_on { None } else { delivering };
+            delivery.prelude = if handed_on { None } else { prelude };
+        }
+        if handed_on {
+            self.retire(record).await?;
+            self.changed();
+            return Ok(());
         }
         // A window that exited before its open was answered goes as any exit does.
         if let Some(shown) = exited {
@@ -1519,8 +1550,9 @@ impl Dispatcher {
         // Its steps made off the thread ask between them whether it is still wanted, so that
         // a Close waits for one of them at most (T-2263).
         let wanted = {
-            let (this, held, id) = (Rc::clone(self), Rc::clone(record), project.id);
-            Rc::new(move || !this.forgotten(&held) && this.in_open_project(id).unwrap_or(true))
+            let (this, held, who) = (Rc::clone(self), Rc::clone(record), participant.clone());
+            let first = first.map(|message| message.id);
+            Rc::new(move || this.launch_still_wanted(&held, &who, first))
         };
         let prepared = cf_harness::while_wanted(wanted, returning(adapter.prepare(&launch)))
             .await
@@ -1882,6 +1914,80 @@ impl Dispatcher {
         }
         self.changed();
         Ok(())
+    }
+
+    /// A launch whose plan found it called off: over, as a pause or a withdrawal that came while
+    /// the plan was made ends it ([`Dispatcher::over_though_failed`]), else as a project's Close
+    /// does ([`Dispatcher::ended_closed`]), whatever the project's state is by now.
+    fn ended_called_off(
+        &self,
+        record: &Rc<Record>,
+        project: &ProjectView,
+        participant: &ParticipantView,
+        failing: Option<Delivering>,
+        asked_before: Option<Option<Stop>>,
+    ) -> Result<(), EngineError> {
+        if self.forgotten(record) {
+            return Ok(());
+        }
+        if self.in_open_project(project.id)?
+            && self.over_though_failed(record, participant, failing.as_ref(), asked_before)?
+        {
+            return Ok(());
+        }
+        self.ended_closed(record, participant, failing)
+    }
+
+    /// Whether a launch of `participant`'s window is still wanted, which is the one question
+    /// every step of it asks, a step of the adapter's, the window's open and the first message
+    /// going in: its record is not forgotten, no move of its task waits for it, its project is
+    /// open, and the first message it was to give is still held for it ([`first_message_held`]).
+    pub(crate) fn launch_still_wanted(
+        &self,
+        record: &Rc<Record>,
+        participant: &ParticipantView,
+        first: Option<i64>,
+    ) -> bool {
+        !self.forgotten(record)
+            && record.window.borrow().moving == 0
+            && self.in_open_project(participant.project_id).unwrap_or(true)
+            && first.is_none_or(|message| self.first_message_held(participant, message))
+    }
+
+    /// Whether the message a launch was to give first still stands for `participant`: not
+    /// cancelled or failed, and, of a brief or words that go on with a task (kind `task`), for a task that is still the member's and still
+    /// wants a window (not handed to a backup or moved to another member, done, accepted,
+    /// cancelled or failed). A ledger that cannot be read holds it.
+    fn first_message_held(&self, participant: &ParticipantView, message: i64) -> bool {
+        let ledger = self.seams.ledger.borrow();
+        let Ok(found) = ledger.message(message) else {
+            return true;
+        };
+        let Some(found) = found else {
+            return false;
+        };
+        if ["cancelled", "failed"].contains(&found.state.as_str()) {
+            return false;
+        }
+        // Only what starts or goes on with the task's work for this member is judged by the
+        // task: a tell, a question's answer or a note for its window goes whatever the task
+        // (the ledger's `next_delivery`), and is the window's to read.
+        let (Some(number), true, true) = (
+            found.task_number,
+            participant.role != "chief",
+            found.kind == "task",
+        ) else {
+            return true;
+        };
+        match ledger.task(participant.project_id, number) {
+            Ok(Some(thread)) => {
+                thread.task.assignee.as_deref() == Some(participant.handle.as_str())
+                    && !["done", "accepted", "cancelled", "failed"]
+                        .contains(&thread.task.state.as_str())
+            }
+            Ok(None) => false,
+            Err(_) => true,
+        }
     }
 
     /// A launch that ended after its project closed: its message goes back to its queue with

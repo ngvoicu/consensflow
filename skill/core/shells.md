@@ -11,15 +11,15 @@ Look for files inside the project folder, never over the home folder or in `~/Mu
 <!-- posix: chief_input -->
 Any "…" can be `-`: the text then comes from standard input, as written. Pass a brief that holds backticks, `$` or quotes in a heredoc whose word is quoted, `<<'BRIEF'`, always: in double quotes or an unquoted heredoc the shell runs backticks and `$( )` as commands before ConsensFlow sees them. To put a value in, write it out.
 
-    {{cf}} task add --tier standard - <<'BRIEF'
-    The brief, as long as it needs, `code` and all.
+    {{cf}} task reopen T-3 - <<'BRIEF'
+    What must change, as long as it needs, `code` and all.
     BRIEF
 
 Write a long brief to a file with your file tool and pass it with `--file brief.md` instead: a shell can cut a long heredoc.
 <!-- powershell: chief_input -->
 Any "…" can be `--file brief.md`: the text then comes from that file, as written. Write a brief that holds backticks, `$` or quotes to it with your file tool, never with `>` (Windows PowerShell 5.1 writes UTF-16) or a pipe into `-` (it loses non-ASCII there). In double quotes PowerShell evaluates `$( )`, expands `$name` and treats a backtick as an escape before ConsensFlow sees the text, and 5.1 splits it at an inner `"`; to put a value in, write it out:
 
-    {{cf}} task add --tier standard --file brief.md
+    {{cf}} task reopen T-3 --file brief.md
 <!-- posix: member_input -->
 Any "…" can be `-`, with the text in a quoted heredoc, taken as written (in double quotes the shell runs backticks and `$( )`): `{{cf}} ask - <<'TEXT'`, the text, then a line `TEXT`.
 <!-- powershell: member_input -->

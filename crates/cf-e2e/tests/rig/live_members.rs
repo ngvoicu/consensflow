@@ -242,7 +242,7 @@ fn a_chief_that_has_written_nothing_stays_when_its_empty_folder_of_conversations
 
     use crate::kept_config::Kept;
 
-    let machine = tempfile::tempdir()?;
+    let machine = cf_e2e::door::made("t-")?;
     let shims = cf_e2e::door::made("cf-live-members-")?;
     let kept = cf_e2e::door::made("cf-live-members-")?;
     let config = Kept::new(kept.path().join("claude-config"), None);
@@ -258,7 +258,7 @@ fn a_chief_that_has_written_nothing_stays_when_its_empty_folder_of_conversations
         Path::new(FAKE_AGENT),
     )?)?;
     let work = rig.workspace().join("live-folder");
-    std::fs::create_dir_all(&work)?;
+    cf_e2e::door::make_dir(&work)?;
     let project = Project::open(&rig, "chief", json!({ "directory": work }))?;
     rig.wait_for("the chief to be idle", secs(60), || {
         Ok(project.lane("chief")?["activity"]["state"] == "idle")
@@ -268,7 +268,7 @@ fn a_chief_that_has_written_nothing_stays_when_its_empty_folder_of_conversations
     assert!(records.is_dir() && std::fs::read_dir(&records)?.next().is_none());
 
     // Something takes the folder, which is empty.
-    std::fs::remove_dir(&records)?;
+    cf_e2e::door::remove(&records)?;
 
     // The chief hears something: it writes it, and stays.
     rig.tell(project.id(), "Reply with exactly: AGAIN")?;
@@ -303,7 +303,7 @@ fn a_chief_that_cannot_write_what_it_heard_ends_itself_and_the_refusal_says_how_
         .first()
         .map(|chief| chief.session.clone())
         .ok_or("the chief started nothing")?;
-    std::fs::create_dir_all(config.join(format!("{session}.jsonl")))?;
+    cf_e2e::door::make_dir(config.join(format!("{session}.jsonl")))?;
     members
         .rig()
         .tell(members.project_id(), "Reply with exactly: RECORDS_OK")?;

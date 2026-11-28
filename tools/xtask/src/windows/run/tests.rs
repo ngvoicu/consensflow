@@ -265,6 +265,7 @@ fn a_run_sends_the_tree_then_runs_the_script_there_and_answers_what_the_command_
             env: &env,
             node: r"C:\Program Files\nodejs",
             machine: "zeewin",
+            marked: true,
             limits: None,
         })
     );
@@ -304,6 +305,7 @@ fn a_run_sends_the_tree_then_runs_the_script_there_and_answers_what_the_command_
             env: &env,
             node: r"C:\Program Files\nodejs",
             machine: "zeewin",
+            marked: true,
             limits: None,
         })
     );
@@ -386,11 +388,7 @@ fn a_run_gives_its_command_the_name_of_the_machine_it_is_sent_to() {
         ],
         wait: 0,
     };
-    for machine in [
-        Machine::named("zeewin2").unwrap(),
-        Machine::named("zeewin").unwrap(),
-        Machine::at("lab-pc"),
-    ] {
+    for machine in [Machine::named("zeewin").unwrap(), Machine::at("lab-pc")] {
         let plan = Plan::new(&machine, &options, "0000abcd-12345678").unwrap();
         assert!(
             plan.script.contains(&format!(
@@ -402,6 +400,18 @@ fn a_run_gives_its_command_the_name_of_the_machine_it_is_sent_to() {
             plan.script
         );
     }
+    // zeewin2's account is its owner's own (T-2007 round 3): no marker there.
+    let plan = Plan::new(
+        &Machine::named("zeewin2").unwrap(),
+        &options,
+        "0000abcd-12345678",
+    )
+    .unwrap();
+    assert!(
+        !plan.script.contains("$env:CONSENSFLOW_TEST_MACHINE ="),
+        "{}",
+        plan.script
+    );
 }
 
 #[test]
@@ -453,6 +463,7 @@ fn a_run_on_zeewin2_goes_through_its_own_ssh_server_as_zeewins_does_with_ci_s_no
         env: &env,
         node: r"$env:USERPROFILE\cf-tools\node",
         machine: "zeewin2",
+        marked: false,
         limits: None,
     };
     assert_eq!(script_of(encoded), remote_script(&script));

@@ -158,6 +158,9 @@ pub(super) struct Seen {
     /// The `pane.open` requests the pane host has not answered yet, by the
     /// request's id: the window each is for.
     opening: HashMap<String, Value>,
+    /// The key a `pane.write_paste` asks the host to press first (`clearFirst`), by the request's
+    /// id, until the host answers: it is pressed once the host admits the paste (N10).
+    clears: HashMap<String, (String, Vec<u8>)>,
     /// The process each window was opened on, as the pane host answered its
     /// `pane.open`: `{ id, generation, pid }`, in the order they were answered.
     pub pids: Vec<Value>,
@@ -182,6 +185,9 @@ pub(super) struct Seen {
     pub roots: Vec<Root>,
     /// Lines a program wrote that are no frame, which a failure shows.
     pub stray: Vec<String>,
+    /// Each window the rig refused to open, by the daemon's request or the case's, and why: its
+    /// environment broke the seal, or its program needs a door of its own.
+    pub refused: Vec<(Value, String)>,
 }
 
 /// Where the paste a case catches goes ([`crate::rig::Rig::catch_paste`]).
@@ -264,7 +270,7 @@ pub(super) struct OpenHold {
 
 /// What the routers share with the case.
 #[derive(Debug, Default)]
-pub(super) struct Shared {
+pub(crate) struct Shared {
     seen: Mutex<Seen>,
     pub pending: Pending,
     /// The numbers of the requests made of the daemon and of the pane host.
@@ -275,10 +281,72 @@ pub(super) struct Shared {
     /// The daemon's looks at a window's screen are refused here while it is set.
     refusing_snapshots: AtomicBool,
     open_hold: Mutex<OpenHold>,
+    /// The pane host's whole environment, as the door gave it: every window it opens is judged
+    /// over it before the host is asked ([`crate::door::window_admitted`]). None for routers a
+    /// test makes without a host, which judge nothing.
+    host_env: Option<Vec<(std::ffi::OsString, std::ffi::OsString)>>,
+    /// Where the names the account's registry stores are read from: the door's own
+    /// ([`crate::door::stored_names`]) but in a test, which says its own.
+    names: Option<StoredNames>,
 }
 
+/// A read of the names the account's registry stores.
+pub(crate) type StoredNames = fn() -> std::result::Result<Vec<std::ffi::OsString>, String>;
+
 impl Shared {
-    pub fn seen(&self) -> MutexGuard<'_, Seen> {
+    /// The routers of a rig whose pane host has `host_env`.
+    pub fn over(host_env: Vec<(std::ffi::OsString, std::ffi::OsString)>) -> Shared {
+        Shared {
+            host_env: Some(host_env),
+            ..Shared::default()
+        }
+    }
+
+    /// These routers reading the registry's names from `names`, for a test of what a window is
+    /// sent (T-2119 B1-b: the Mac's registry stores none).
+    #[cfg(all(test, unix))]
+    pub(crate) fn naming(self, names: StoredNames) -> Shared {
+        Shared {
+            names: Some(names),
+            ..self
+        }
+    }
+
+    /// How many windows the rig refused to open.
+    #[cfg(all(test, unix))]
+    pub(crate) fn refused_count(&self) -> usize {
+        self.seen().refused.len()
+    }
+
+    /// The environment the window `body` asks for is judged on: the pane host's, the request's
+    /// `env` over it, its `dropEnv` out ([`crate::door::spawn::pane_environment`]). None for
+    /// routers a test makes without a host.
+    pub fn judged_environment(
+        &self,
+        body: &Value,
+    ) -> Option<std::result::Result<Vec<(std::ffi::OsString, std::ffi::OsString)>, String>> {
+        self.host_env
+            .as_ref()
+            .map(|host| crate::door::spawn::pane_environment(host, body, cfg!(windows)))
+    }
+
+    /// The window `body` asks for, as this rig's pane host is sent it, where it may open: why not,
+    /// where not ([`crate::door::window_to_send`], over the names the account's registry stores
+    /// now, [`crate::door::stored_names`]).
+    pub fn window_to_send(&self, body: &Value) -> std::result::Result<Value, String> {
+        match &self.host_env {
+            Some(host) => {
+                let stored = match self.names {
+                    Some(read) => read()?,
+                    None => crate::door::stored_names()?,
+                };
+                crate::door::window_to_send(host, body, &stored)
+            }
+            None => Ok(body.clone()),
+        }
+    }
+
+    pub(super) fn seen(&self) -> MutexGuard<'_, Seen> {
         self.seen.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
@@ -503,6 +571,30 @@ impl Shared {
             return;
         };
         let id = frame["id"].as_str().unwrap_or_default();
+        // The daemon's windows are judged as the case's are, before the pane host has them: one
+        // that breaks the seal is not opened, and the daemon is answered as refused.
+        let mut sent: Option<String> = None;
+        if frame["kind"] == "req" && frame["op"] == "pane.open" {
+            match self.window_to_send(&frame["body"]) {
+                Err(why) => {
+                    let mut seen = self.seen();
+                    seen.daemon += 1;
+                    seen.refused.push((frame["body"].clone(), why.clone()));
+                    drop(seen);
+                    let refused = json!({ "ok": false, "error": format!("the rig refused the window: {why}") });
+                    daemon.send(wire::response(id, "pane.open", &refused));
+                    return;
+                }
+                // The host is sent the window as the door made it, not as the daemon asked it.
+                Ok(body) if body != frame["body"] => {
+                    let mut rewritten = frame.clone();
+                    rewritten["body"] = body;
+                    sent = Some(rewritten.to_string());
+                }
+                Ok(_) => {}
+            }
+        }
+        let line = sent.as_deref().unwrap_or(line);
         {
             let mut seen = self.seen();
             seen.daemon += 1;
@@ -530,6 +622,24 @@ impl Shared {
                         at_ms: jiff::Timestamp::now().as_millisecond(),
                     });
                 }
+            }
+            // The key that empties the box a stale paste is in goes with the paste, as its
+            // `clearFirst` (N17), and is a press as `pane.input`'s are (N5).
+            if frame["kind"] == "req" && frame["op"] == "pane.write_paste" {
+                if let Some(keys) = frame["body"]["clearFirst"].as_str() {
+                    let pane = frame["body"]["id"].as_str().unwrap_or_default().to_owned();
+                    seen.clears
+                        .insert(id.to_owned(), (pane, keys.as_bytes().to_vec()));
+                }
+            }
+            // An Enter of a delivery that is not a paste's first goes as `pane.enter` (N17): the
+            // key it presses, once the host has checked the look it was licensed by.
+            if frame["kind"] == "req" && frame["op"] == "pane.enter" {
+                seen.presses.push(Press {
+                    pane: frame["body"]["id"].as_str().unwrap_or_default().to_owned(),
+                    bytes: vec![13],
+                    at_ms: jiff::Timestamp::now().as_millisecond(),
+                });
             }
         }
         if frame["kind"] == "res"
@@ -578,6 +688,17 @@ impl Shared {
                 seen.roots.push(root);
             }
             if frame["kind"] == "res" {
+                // The paste's clearing key is pressed once the host has admitted the paste, not
+                // when the daemon asks (N10): one it refused pressed nothing.
+                if let Some((pane, bytes)) = seen.clears.remove(id) {
+                    if frame["body"]["ok"] == true {
+                        seen.presses.push(Press {
+                            pane,
+                            bytes,
+                            at_ms: jiff::Timestamp::now().as_millisecond(),
+                        });
+                    }
+                }
                 if let Some(mut window) = seen.opening.remove(id) {
                     if let Some(pid) = frame["body"]["pid"].as_u64() {
                         window["pid"] = json!(pid);
@@ -672,6 +793,28 @@ fn bytes_of(list: &Value) -> Option<Vec<u8>> {
 }
 
 /// The tests start `cat` for the programs on the other side of the rig.
+/// Routers over a pane host whose environment is `host_env`, with the two sinks of
+/// `tests::sinks` and what each was sent: for the door's tests of the relay's seal.
+#[cfg(all(test, unix))]
+pub(crate) fn sinks_over(
+    host_env: Vec<(std::ffi::OsString, std::ffi::OsString)>,
+) -> (
+    Shared,
+    Sink,
+    std::sync::mpsc::Receiver<String>,
+    Sink,
+    std::sync::mpsc::Receiver<String>,
+) {
+    let (host, host_lines, daemon, daemon_lines) = tests::sinks();
+    (
+        Shared::over(host_env),
+        host,
+        host_lines,
+        daemon,
+        daemon_lines,
+    )
+}
+
 #[cfg(test)]
 #[cfg(unix)]
 mod tests {
@@ -682,7 +825,7 @@ mod tests {
     use crate::process::Run;
 
     /// Two sinks whose lines come out of a `cat` each, which the test reads.
-    fn sinks() -> (Sink, mpsc::Receiver<String>, Sink, mpsc::Receiver<String>) {
+    pub(super) fn sinks() -> (Sink, mpsc::Receiver<String>, Sink, mpsc::Receiver<String>) {
         fn cat() -> (Sink, mpsc::Receiver<String>, crate::process::Spawned) {
             let mut process = Run::new("/bin/cat").spawn().unwrap();
             let sink = process.sink().unwrap();
@@ -869,6 +1012,56 @@ mod tests {
             .iter()
             .all(|press| (before..=after).contains(&press.at_ms)));
         assert!(seen.presses[0].at_ms <= seen.presses[2].at_ms);
+    }
+
+    /// N5: the key that empties a box a stale paste is in goes with the paste, as its
+    /// `clearFirst`; the rig counts it as the key it presses, as it does `pane.input`'s.
+    #[test]
+    fn the_key_that_goes_with_a_paste_as_its_clear_first_is_kept_as_a_press_once_the_host_admits_it(
+    ) {
+        let shared = Shared::default();
+        let (host, host_lines, daemon, _daemon_lines) = sinks();
+        for (id, body) in [
+            (
+                "n-3",
+                json!({"id":"p1-zeus","generation":1,"body":"words","clearFirst":"\u{3}"}),
+            ),
+            (
+                "n-4",
+                json!({"id":"p1-zeus","generation":1,"body":"words","clearFirst":"\u{3}"}),
+            ),
+            ("n-5", json!({"id":"p1-zeus","generation":1,"body":"words"})),
+        ] {
+            let line =
+                json!({"v":1,"id":id,"kind":"req","op":"pane.write_paste","body":body}).to_string();
+            shared.route_daemon(&line, &host, &daemon);
+            assert_eq!(
+                host_lines.recv_timeout(Duration::from_secs(10)).unwrap(),
+                line
+            );
+        }
+        assert!(
+            shared.seen().presses.is_empty(),
+            "nothing is pressed until the host admits the paste"
+        );
+        // The host admits the first and refuses the second; the third had no key.
+        for (id, ok) in [("n-3", true), ("n-4", false), ("n-5", true)] {
+            let answer =
+                json!({"v":1,"id":id,"kind":"res","op":"pane.write_paste","body":{"ok":ok}})
+                    .to_string();
+            shared.route_host(&answer, &host, &daemon);
+        }
+        let seen = shared.seen();
+        let kept: Vec<(&str, &[u8])> = seen
+            .presses
+            .iter()
+            .map(|press| (press.pane.as_str(), press.bytes.as_slice()))
+            .collect();
+        assert_eq!(
+            kept,
+            [("p1-zeus", &[3][..])],
+            "one press, of the paste the host admitted"
+        );
     }
 
     #[test]

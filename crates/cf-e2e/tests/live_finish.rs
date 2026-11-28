@@ -197,6 +197,11 @@ fn a_devin_worker_whose_turn_devin_compacts_finishes_its_task_and_its_result_rea
         log.say("no Devin worker is named: this step is Devin's alone");
         return Ok(());
     }
+    // Before any harness is asked its version or any login is read.
+    if let Some(why) = compacted::skipped(cfg!(windows)) {
+        log.say(format!("SKIP: {why}"));
+        return Ok(());
+    }
     let who = Who::Harness(Harness::Devin);
     let before = who.version();
     let finished = compacted::run(Path::new(FAKE_AGENT), &log).unwrap_or_else(Finished::failed);

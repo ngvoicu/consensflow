@@ -31,6 +31,7 @@
 use std::cell::{OnceCell, RefCell};
 use std::future::Future;
 use std::rc::Rc;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use cf_bridge::local::Ended;
@@ -41,6 +42,7 @@ use tokio::sync::watch;
 use crate::api::Api;
 use crate::errors::{contain, contain_now, Errors};
 use crate::files::SETTLE;
+use crate::halt::Halt;
 use crate::pass::PassLoop;
 
 /// How long a stop waits, all of it together.
@@ -49,6 +51,7 @@ pub const DEADLINE: Duration = Duration::from_secs(1);
 /// The reason the daemon stops, said once: the first to trip it wins.
 pub struct Latch {
     reason: watch::Sender<Option<String>>,
+    halt: Arc<Halt>,
 }
 
 impl Latch {
@@ -56,11 +59,35 @@ impl Latch {
     pub fn new() -> Rc<Self> {
         Rc::new(Self {
             reason: watch::Sender::new(None),
+            halt: Halt::new(),
         })
+    }
+
+    /// A latch over a halt that another already reads (a test's page).
+    #[cfg(test)]
+    pub(crate) fn over(halt: Arc<Halt>) -> Rc<Self> {
+        Rc::new(Self {
+            reason: watch::Sender::new(None),
+            halt,
+        })
+    }
+
+    /// What every effect asks before it acts, and the log before it writes.
+    pub fn halt(&self) -> Arc<Halt> {
+        Arc::clone(&self.halt)
+    }
+
+    /// The ledger cannot save: the daemon stops for it, and its process ends with
+    /// [`crate::broken::EXIT`] whatever stop is under way already and whichever reason came
+    /// first.
+    pub fn trip_broken(&self) {
+        self.halt.break_ledger();
+        self.trip(crate::broken::WHY);
     }
 
     /// Asks the daemon to stop, for `why`; a daemon already asked is asked once.
     pub fn trip(&self, why: &str) {
+        self.halt.stop();
         self.reason.send_if_modified(|reason| {
             if reason.is_some() {
                 return false;
@@ -100,12 +127,22 @@ pub struct Stopping {
     pub ledger: Rc<RefCell<Ledger>>,
     /// How the process ends: the daemon's own exits; a test's is told it.
     pub exit: Rc<dyn Fn(i32)>,
+    /// Admits no new frame from the peer (the bridge's `fence`): a stop ends what is
+    /// begun and begins nothing.
+    pub fence: Rc<dyn Fn()>,
+    /// Whether the ledger broke, read at the tail: the process's status is the break's
+    /// whatever reason began the stop.
+    pub halt: Arc<Halt>,
 }
 
 impl Stopping {
     /// The stop, for `why`: ends with the process's exit.
     pub async fn run(&self, why: &str) {
-        let began = Instant::now();
+        // The deadline of the waiting starts here, before any log: a line of the stop goes to
+        // the log's own thread, which a log that is held (another process has its lock) keeps
+        // from stopping anything, and the tail waits for it only what the deadline has left.
+        let deadline = Instant::now() + DEADLINE;
+        (self.fence)();
         let size = rss().map_or(0, megabytes);
         self.errors
             .log()
@@ -118,23 +155,44 @@ impl Stopping {
             };
             tokio::join!(passes, self.api.close());
         };
-        if tokio::time::timeout(DEADLINE, waiting).await.is_err() {
+        if tokio::time::timeout_at(deadline.into(), waiting)
+            .await
+            .is_err()
+        {
             // What did not end in time is dropped: the connections with
             // their requests, and the pass left behind, whose work is
             // settled at the next start.
             self.api.drop_connections();
         }
-        self.tail_within(DEADLINE.saturating_sub(began.elapsed()).max(SETTLE));
+        let code = self.code(why);
+        let log_within = deadline
+            .saturating_duration_since(Instant::now())
+            .max(SETTLE);
+        self.tail_within(code, log_within);
+    }
+
+    /// How the process ends: 74 for a ledger that cannot save, wherever the stop began.
+    fn code(&self, why: &str) -> i32 {
+        if self.halt.broke() {
+            crate::broken::EXIT
+        } else {
+            exit_code(why)
+        }
     }
 
     /// What is left to do, with no wait in it. Each step is its own: one that
-    /// fails or panics leaves the rest, and the process ends.
-    pub(crate) fn tail(&self) {
-        self.tail_within(SETTLE);
+    /// fails or panics leaves the rest, and the process ends with `code`.
+    pub(crate) fn tail(&self, code: i32) {
+        self.tail_within(code, SETTLE);
     }
 
     /// [`Stopping::tail`], waiting `log_within` at most for the log.
-    fn tail_within(&self, log_within: Duration) {
+    fn tail_within(&self, code: i32, log_within: Duration) {
+        let code = if self.halt.broke() {
+            crate::broken::EXIT
+        } else {
+            code
+        };
         if let Err(panicked) = contain_now(|| (self.ends_children)()) {
             self.errors.caught("the children did not end", &panicked);
         }
@@ -147,22 +205,33 @@ impl Stopping {
             let closed = contain_now(|| self.ledger.borrow_mut().close_in_place());
             match closed {
                 Ok(Ok(())) => {}
-                Ok(Err(failed)) => self
-                    .errors
-                    .log()
-                    .error("the ledger did not close", Some(&failed.to_string())),
+                Ok(Err(failed)) => self.errors.log().error_within(
+                    "the ledger did not close",
+                    Some(&failed.to_string()),
+                    SETTLE,
+                ),
                 Err(panicked) => self.errors.caught("the ledger did not close", &panicked),
             }
         } else {
-            self.errors.log().warn(
+            self.errors.log().warn_within(
                 "the trace was not written in time; its last lines may be missing",
-                None,
+                SETTLE,
             );
         }
-        self.errors.log().keep("exit 0");
+        self.errors.log().keep(&format!("exit {code}"));
         // What was said is written before the process goes, if the log's file lets it in time.
         let _ = self.errors.log().written(log_within);
-        (self.exit)(0);
+        (self.exit)(code);
+    }
+}
+
+/// How the process ends for a stop of this reason: 0 as at a quit, or the status a ledger
+/// that cannot save ends with ([`crate::broken::EXIT`]).
+fn exit_code(why: &str) -> i32 {
+    if why == crate::broken::WHY {
+        crate::broken::EXIT
+    } else {
+        0
     }
 }
 
@@ -195,7 +264,7 @@ pub(crate) fn arm(
         // The tail must be reached whatever goes wrong before it.
         if let Err(panicked) = contain(stopping.run(&why)).await {
             stop_errors.caught("the stop failed", &panicked);
-            stopping.tail();
+            stopping.tail(stopping.code(&why));
         }
         done.send_replace(true);
     });

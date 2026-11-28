@@ -109,7 +109,7 @@ pub(crate) fn cancelled_question_handoff(tracked: bool) -> Outcome {
         rig.wait_for_daemon_exit(secs(10))?;
         let root = rig.close_keeping_the_root()?;
         {
-            let db = rusqlite::Connection::open(file)?;
+            let db = cf_e2e::door::database::write(file)?;
             assert_eq!(
                 db.execute(
                     "DELETE FROM question_binding WHERE question_id = ?",

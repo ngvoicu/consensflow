@@ -3,7 +3,6 @@
 
 use std::thread;
 
-use rusqlite::Connection;
 use serde_json::Value;
 
 use super::*;
@@ -205,6 +204,52 @@ fn a_background_line_leaves_a_command_running_that_long_and_does_what_the_words_
     );
 }
 
+/// How long a command the cases leave runs if the case does not end it: far past any
+/// wait of a case on a loaded machine, so that no case depends on it running out, and
+/// short enough that the `sleep` the case's end leaves is soon gone.
+const LEFT_RUNNING: &str = "BACKGROUND 30";
+
+/// The command a window left, by the pid its job file holds, which the case held on to
+/// by the start it had then: ended by the case when it is done with it, not by a clock.
+struct Left {
+    pid: u32,
+    began: Option<String>,
+}
+
+impl Left {
+    fn of(jobs: &std::path::Path) -> Left {
+        let pid: u32 = std::fs::read_to_string(jobs.join("job-4242-1.pid"))
+            .unwrap()
+            .trim()
+            .parse()
+            .unwrap();
+        Left {
+            pid,
+            began: cf_e2e::process::started(pid),
+        }
+    }
+
+    /// Ends it, if it is the process the case found (a number is no process), and waits
+    /// until it is gone.
+    fn end(&self) {
+        assert!(self.began.is_some(), "its command runs");
+        assert_eq!(
+            cf_e2e::process::started(self.pid),
+            self.began,
+            "it is the process the window started"
+        );
+        cf_e2e::process::end_all(&[self.pid]);
+        let waited = std::time::Instant::now();
+        while cf_e2e::process::is_alive(self.pid) {
+            assert!(
+                waited.elapsed() < Duration::from_secs(20),
+                "the command is ended"
+            );
+            thread::sleep(Duration::from_millis(100));
+        }
+    }
+}
+
 /// A window on a store and a wire of a folder of its own, and what it said on its screen.
 struct Case {
     window: Window<Vec<u8>>,
@@ -225,7 +270,7 @@ fn case_at(pace: Pace) -> Case {
 
 impl Case {
     fn nodes(&self) -> Vec<Value> {
-        let db = Connection::open(self.folder.path().join("sessions.db")).unwrap();
+        let db = cf_e2e::door::database::write(self.folder.path().join("sessions.db")).unwrap();
         let mut rows = db
             .prepare("SELECT chat_message FROM message_nodes ORDER BY row_id")
             .unwrap();
@@ -278,15 +323,12 @@ fn a_turn_that_leaves_a_command_running_ends_and_the_command_goes_on_reporting_o
         .window
         .leaving_jobs_in(jobs.clone(), 4242, Duration::ZERO);
     case.window
-        .take("BACKGROUND 2 Reply with exactly: LEFT_IT")
+        .take(&format!("{LEFT_RUNNING} Reply with exactly: LEFT_IT"))
         .unwrap();
-    // The command's shell is a job of the window, as the rig finds one.
-    let pid: u32 = std::fs::read_to_string(jobs.join("job-4242-1.pid"))
-        .unwrap()
-        .trim()
-        .parse()
-        .unwrap();
-    assert!(cf_e2e::process::is_alive(pid), "its command runs");
+    // The command's shell is a job of the window, as the rig finds one. It runs until
+    // this case ends it.
+    let left = Left::of(&jobs);
+    assert!(cf_e2e::process::is_alive(left.pid), "its command runs");
     let updates = |wire: &[Value]| {
         wire.iter()
             .filter(|record| record["update"]["sessionUpdate"] == "tool_call_update")
@@ -301,11 +343,17 @@ fn a_turn_that_leaves_a_command_running_ends_and_the_command_goes_on_reporting_o
     assert!(wire[..ended]
         .iter()
         .any(|record| record["update"]["sessionUpdate"] == "tool_call"));
-    let gone = (0..100).any(|_| {
-        thread::sleep(Duration::from_millis(100));
-        !cf_e2e::process::is_alive(pid)
-    });
-    assert!(gone, "the command ran its two seconds");
+    // It goes on saying what it prints while it runs.
+    let waited = std::time::Instant::now();
+    while updates(&case.wire()[ended + 1..]) <= 3 {
+        assert!(
+            waited.elapsed() < Duration::from_secs(20),
+            "{:?}",
+            case.wire()
+        );
+        thread::sleep(Duration::from_millis(50));
+    }
+    left.end();
     // Nothing is said once it has ended, which the thread that says it sees within a
     // look.
     thread::sleep(Duration::from_millis(600));
@@ -445,7 +493,7 @@ fn a_turn_that_leaves_a_command_runs_it_once_the_model_has_spoken_and_the_agent_
         .leaving_jobs_in(jobs.clone(), 4242, Duration::ZERO);
     let taking = thread::spawn(move || {
         case.window
-            .take("BACKGROUND 2 Reply with exactly: LEFT_IT")
+            .take(&format!("{LEFT_RUNNING} Reply with exactly: LEFT_IT"))
             .unwrap();
         case
     });
@@ -495,17 +543,8 @@ fn a_turn_that_leaves_a_command_runs_it_once_the_model_has_spoken_and_the_agent_
         order.windows(2).all(|pair| pair[0] < pair[1]),
         "the prompt, the thought, the tool, the answer, its end and the command's words, in that order: {order:?}"
     );
-    // Its command ran its two seconds, and is gone with them.
-    let pid: u32 = std::fs::read_to_string(jobs.join("job-4242-1.pid"))
-        .unwrap()
-        .trim()
-        .parse()
-        .unwrap();
-    let gone = (0..100).any(|_| {
-        thread::sleep(Duration::from_millis(100));
-        !cf_e2e::process::is_alive(pid)
-    });
-    assert!(gone, "the command ran its two seconds");
+    // Its command ran until the case ended it, and is gone.
+    Left::of(&jobs).end();
 }
 
 /// `/new`: the turns after it go into the conversation it opened, on the wire and in the
@@ -517,7 +556,7 @@ fn the_turns_after_a_new_conversation_go_into_it_and_the_ones_before_stay_in_the
     let opened = Store::open(&case.folder.path().join("sessions.db"), "bright-dune").unwrap();
     case.window.switch(opened, "bright-dune");
     case.window.take("Reply with exactly: AFTER").unwrap();
-    let db = Connection::open(case.folder.path().join("sessions.db")).unwrap();
+    let db = cf_e2e::door::database::write(case.folder.path().join("sessions.db")).unwrap();
     let said_in = |session: &str| -> Vec<String> {
         db.prepare("SELECT chat_message FROM message_nodes WHERE session_id = ? ORDER BY row_id")
             .unwrap()

@@ -39,7 +39,6 @@
 //! with a notification queued leaves no sign of itself at all: no turn is cut, and
 //! ConsensFlow's settings run no hook as Claude resumes.
 
-use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::Path;
 
@@ -108,7 +107,7 @@ fn left(config: &str, session: &str, records: &[Value]) -> std::io::Result<()> {
         .join("projects")
         .join("integration")
         .join(format!("{session}.jsonl"));
-    let mut record = OpenOptions::new().append(true).open(file)?;
+    let mut record = cf_e2e::door::append(file)?;
     for line in records {
         writeln!(record, "{line}")?;
     }

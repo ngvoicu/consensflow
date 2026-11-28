@@ -42,7 +42,7 @@ use crate::background::leaving;
 use crate::chief_model::held_for_no_default;
 use crate::chief_switch::SwitchTo;
 use crate::computer_use::ComputerUseState;
-use crate::pacing;
+use crate::pacing::{self, Frontier};
 use crate::privacy::PrivacyState;
 use crate::record::Record;
 use crate::resume::{Closing, Closings, Coming, ResumeState};
@@ -61,6 +61,16 @@ use crate::windows::{Activity, ActivityState, WindowsState};
 pub enum SwitchWhen {
     Now,
     Turn,
+}
+
+/// A move of a task that waits for its holder's step: counted for as long as it does.
+struct Moved(Rc<Record>);
+
+impl Drop for Moved {
+    fn drop(&mut self) {
+        let mut window = self.0.window.borrow_mut();
+        window.moving = window.moving.saturating_sub(1);
+    }
 }
 
 /// A closed project starts and changes no work, whatever asks: it is resumed first.
@@ -183,6 +193,15 @@ impl Dispatcher {
                 .borrow()
                 .next_delivery(participant)?
                 .is_some())
+    }
+
+    /// Whether that wait is for keys of theirs that nothing shows are gone
+    /// ([`Held::Unproven`]): the board says to press Ctrl+U.
+    pub fn holding_unproven(&self, participant: i64) -> Result<bool, EngineError> {
+        Ok(self
+            .record(participant)
+            .is_some_and(|record| record.delivery.borrow().unproven)
+            && self.holding(participant)?)
     }
 
     /// Whether the human hid this window and it has not closed yet: Show
@@ -340,13 +359,6 @@ impl Dispatcher {
         because: Option<&str>,
     ) -> Result<Vec<String>, EngineError> {
         let _burst = self.stalls.begin_burst();
-        // A box the engine emptied counts as empty no more: what the human types into
-        // a window the close could not close goes unseen until the Resume, and an
-        // interrupt of ours may put a prompt back there. The human's Close and the
-        // chief's own exit alike (Calliope's reviews of 2026-10-21, rounds 13 and 14).
-        for participant in participants {
-            self.record_of(participant.id).delivery.borrow_mut().emptied = None;
-        }
         let parts: Vec<Closing> = participants
             .iter()
             .map(|_| self.closings.begin(project))
@@ -700,8 +712,13 @@ impl Dispatcher {
             return self.release(project, number);
         };
         let record = self.record_of(holder.id);
+        // The move is asked for now: a launch of the holder's that is under way is called off
+        // by it, and a window it opened meanwhile ends with nothing failed (T-2307).
+        record.window.borrow_mut().moving += 1;
+        let asked = Moved(Rc::clone(&record));
         let (this, held) = (Rc::clone(self), Rc::clone(&record));
         let work = async move {
+            let _asked = asked;
             let pinned = std::mem::replace(&mut held.window.borrow_mut().pinned, false);
             let open = held.window.borrow().pane.is_some();
             if open && !this.retire(&held).await? {
@@ -1243,7 +1260,11 @@ impl Dispatcher {
                 // T-523 left out: the alpha.1 release check T-1068 saw its brief and task
                 // fail at a Close, T-1076). One whose window ended by itself in an open
                 // project fails, as a launch that did not come up does.
-                let closed_with_project = project.state != "open" || resume_member_failed;
+                // A move of its task to another member ends the window the same way: the
+                // task goes on with the new member, and fails nothing (T-2307).
+                let closed_with_project = project.state != "open"
+                    || resume_member_failed
+                    || record.window.borrow().moving > 0;
                 // A paste its harness's record shows it took is confirmed (`in_flight`).
                 let (this, told) = (Rc::clone(self), because.clone());
                 let settled = self
@@ -1932,14 +1953,20 @@ impl Dispatcher {
             .as_ref()
             .is_some_and(|delivering| delivering.owed.is_some());
         if owed {
+            // A stale "at work" word of the harness's is asked again for a first message too.
+            self.recheck_if_due(record, &observed, !drawing).await;
             // A launch's first message keeps `settled`: a window opened again on a record that
             // ends in the old process's interrupt has a new Claude whose busy status says
             // nothing of its prompt (T-1985).
             if !drawing && observed.settled && observed.waiting.is_none() && project.state == "open"
             {
                 let (this, held) = (Rc::clone(self), Rc::clone(record));
-                self.act(record, async move { this.hand_first(&held).await })
-                    .await;
+                let frontier = Frontier::of(&observed);
+                self.act(
+                    record,
+                    async move { this.hand_first(&held, &frontier).await },
+                )
+                .await;
             }
             return Ok(());
         }
@@ -1994,6 +2021,8 @@ impl Dispatcher {
                     part.held = None;
                     part.for_human = None;
                     part.unsent = false;
+                    part.unproven = false;
+                    part.settling_since = None;
                 }
             }
             if let Some(next) = next {

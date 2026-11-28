@@ -182,6 +182,6 @@ runs = ["a4-start"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/stop.rs"
-find = '''        self.tail_within(DEADLINE.saturating_sub(began.elapsed()).max(SETTLE));'''
+find = '''        let code = self.code(why);'''
 replace = '''        tokio::time::sleep(Duration::from_millis(1_400)).await;
-        self.tail_within(DEADLINE.saturating_sub(began.elapsed()).max(SETTLE));'''
+        let code = self.code(why);'''

@@ -49,6 +49,7 @@ fn plain(text: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(unix)]
     use std::fs;
 
     use super::*;
@@ -56,11 +57,11 @@ mod tests {
     const RELATIVE: &str = "images/honey.png";
 
     /// A project folder with the image in it.
-    fn project() -> (tempfile::TempDir, std::path::PathBuf) {
-        let folder = tempfile::tempdir().unwrap();
+    fn project() -> (cf_e2e::door::Made, std::path::PathBuf) {
+        let folder = cf_e2e::door::made("t-").unwrap();
         let saved = folder.path().join("images").join("honey.png");
-        fs::create_dir_all(saved.parent().unwrap()).unwrap();
-        fs::write(&saved, "").unwrap();
+        cf_e2e::door::make_dir(saved.parent().unwrap()).unwrap();
+        cf_e2e::door::write(&saved, "").unwrap();
         (folder, saved)
     }
 
@@ -86,9 +87,9 @@ mod tests {
     #[test]
     fn a_path_spelled_as_the_system_does_is_the_same_path_when_the_folder_is_a_link() {
         let (real, _) = project();
-        let links = tempfile::tempdir().unwrap();
+        let links = cf_e2e::door::made("t-").unwrap();
         let link = links.path().join("link");
-        std::os::unix::fs::symlink(real.path(), &link).unwrap();
+        cf_e2e::door::symlink(real.path(), &link).unwrap();
         // The test names the file through the link; the designer, whose folder
         // the system had made whole, names it as the system spells it.
         let saved = link.join("images").join("honey.png");

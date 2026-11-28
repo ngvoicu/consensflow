@@ -320,7 +320,10 @@ runs = ["lm-start"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/start.rs"
-find = "    ledger.borrow_mut().forget_model_listings()?;"
+find = """    ledger
+        .borrow_mut()
+        .forget_model_listings()
+        .map_err(|failed| at_start(&ledger_file, failed))?;"""
 replace = "    let _ = &ledger;"
 
 [[plant]]
@@ -516,8 +519,16 @@ runs = ["lm-page"]
 
 [[plant.edit]]
 file = "app/ui/core/dialogs.js"
-find = "    this.#member = new MemberPicker(this.#form, lists, () => {})"
-replace = "    this.#member = new MemberPicker(this.#form, new ModelLists(page.daemon), () => {})"
+find = '''    this.#member = new MemberPicker(
+      this.#form,
+      lists,
+      () => {},
+'''
+replace = '''    this.#member = new MemberPicker(
+      this.#form,
+      new ModelLists(page.daemon),
+      () => {},
+'''
 
 [[plant]]
 name = "live models: Settings reads only what its form was left open for"

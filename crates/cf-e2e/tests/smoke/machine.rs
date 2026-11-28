@@ -73,6 +73,20 @@ pub struct Machine {
     patience: Duration,
 }
 
+/// Takes away `root`, the folder of a machine, which this run made through the door
+/// ([`cf_e2e::door::made`]): `door::remove` takes only what is below such a folder, never the
+/// folder itself, which `remove_made` does.
+fn take_away(root: &Path) -> Result {
+    match cf_e2e::door::Door::of_run().remove_made(root) {
+        cf_e2e::door::Removed::Left(path, why) => Err(Error::File {
+            action: "remove",
+            path,
+            source: std::io::Error::other(why),
+        }),
+        _ => Ok(()),
+    }
+}
+
 impl Machine {
     /// A new machine in a folder of its own, with the stand-in harness (as
     /// `claude`) on its PATH. `paste_reader` is the program the harness runs to
@@ -84,9 +98,7 @@ impl Machine {
 
     /// A new machine as [`Machine::new`] makes one, with `script` as its harness.
     pub fn with_harness(paste_reader: &Path, patience: Duration, script: &str) -> Result<Self> {
-        let root = tempfile::Builder::new()
-            .prefix("cf-smoke-")
-            .tempdir()
+        let root = cf_e2e::door::made("cf-smoke-")
             .map_err(|source| Error::File {
                 action: "make a folder in",
                 path: std::env::temp_dir(),
@@ -182,11 +194,7 @@ impl Machine {
 
     /// Takes the machine away, once the run it was for has passed.
     pub fn cleanup(self) -> Result {
-        std::fs::remove_dir_all(&self.root).map_err(|source| Error::File {
-            action: "remove",
-            path: self.root.clone(),
-            source,
-        })
+        take_away(&self.root)
     }
 
     /// Says where the machine is kept to `out`, if it is to be: the run is
@@ -402,7 +410,7 @@ mod tests {
         // A failed run drops its machine without cleaning it up: the evidence is there.
         drop(kept);
         assert!(root.is_dir());
-        std::fs::remove_dir_all(&root).unwrap();
+        take_away(&root).unwrap();
 
         let tidied = machine();
         let root = tidied.root.clone();

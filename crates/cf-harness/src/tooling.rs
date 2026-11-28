@@ -61,13 +61,14 @@ use cf_base::env::Env;
 use cf_base::text::{console_text, window_text};
 use cf_base::time::{Clock, SystemClock};
 use cf_proto::agents::Harness;
+use cf_proto::panes::ReadEmpty;
 use cf_proto::specs::{Variant, DEFAULT_FOLDER};
 use serde_json::{json, Value};
 
 use crate::claude::install;
 use crate::contract::{Agent, Input, Interrupt, LaunchId, Question, Records, Skill, TurnLeft};
 use crate::launch::adapter;
-use crate::records::{self, Options};
+use crate::records::{self, Options, Reading};
 use crate::shared::input_box::{self, InputBox};
 use crate::shared::record_state::record_state;
 use crate::shared::{trust, window_args};
@@ -237,18 +238,29 @@ fn input_box(question: &Value) -> Result<Value, String> {
     )
 }
 
-/// What an adapter makes of a window whose pane host counts the human's keys as left
-/// unsent, from the host's `snapshot` (with its `bottom` and `cursor`): the count of
-/// the human's writes at which the box read empty (`{"readEmpty": n}`, a paste told
-/// so goes in), or `"held"` ([`input_box::read_unsent`]).
+/// What a window whose pane host counts the human's keys as left unsent is licensed by the
+/// look `snapshot` is (with its `bottom`, `cursor`, `seen` and `unsentAt`): what a paste told
+/// the box read empty says (`{"readEmpty": {"typed": n, "by": "erased" | "elsewhere"}, "at":
+/// seen}`), `"held"` where the look reads it holding anything, the keys are too young or no
+/// evidence shows where they went, or `"nolook"`
+/// where the snapshot is no look ([`crate::licence_paste`]).
 fn unsent(question: &Value) -> Result<Value, String> {
     let snapshot = question
         .get("snapshot")
         .ok_or("the question names no snapshot")?;
+    let harness = harness(text(question, "kind")?)?;
+    let Ok(look) = crate::Look::of(snapshot) else {
+        return Ok(json!("nolook"));
+    };
     Ok(
-        match input_box::read_unsent(harness(text(question, "kind")?)?, snapshot) {
-            input_box::Unsent::ReadEmpty(typed) => json!({ "readEmpty": typed }),
-            input_box::Unsent::Held => json!("held"),
+        match crate::licence_paste(&look, harness, crate::BoxState::default(), &[]) {
+            crate::PasteLicence::Go {
+                at,
+                read_empty: Some(by),
+                ..
+            } => json!({ "readEmpty": ReadEmpty { typed: at.typed, by }, "at": at.seen }),
+            crate::PasteLicence::Go { .. } => json!({ "readEmpty": null }),
+            crate::PasteLicence::Wait(_) => json!("held"),
         },
     )
 }
@@ -264,7 +276,14 @@ fn read_record(question: &Value) -> Result<Value, String> {
         SystemClock.now_ms(),
     );
     let settled = record_state(reading.clone()).settled;
-    Ok(json!({ "reading": &*reading, "settled": settled }))
+    // Which of the adapter's three states the read came to: a reader that takes a failure for
+    // an empty record reads a conversation as having said nothing (T-1997 finding 7).
+    let read = match &*reading {
+        Reading::Known(_) => "held",
+        Reading::Missing(_) => "absent",
+        Reading::Unknown(_) => "failed",
+    };
+    Ok(json!({ "reading": &*reading, "settled": settled, "read": read }))
 }
 
 /// Whether the turn of the conversation the question names was cut, as the human's

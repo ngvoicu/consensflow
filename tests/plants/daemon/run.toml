@@ -203,7 +203,7 @@ runs = ["daemon-lib-stop", "stop"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/stop.rs"
-find = "        (self.exit)(0);"
+find = "        (self.exit)(code);"
 replace = "        (self.exit)(1);"
 
 [[plant]]
@@ -252,8 +252,9 @@ runs = ["daemon-lib-start", "stop"]
 [[plant.edit]]
 file = "crates/cf-daemon/src/start.rs"
 find = '''
-    if started.is_err() {
-        log.info("exit 1");
+    if let Err(failed) = &started {
+        announce(true);
+        log.info_within(&format!("exit {}", failed.exit_code()), SETTLE);
     }
 '''
 replace = '''
@@ -281,8 +282,8 @@ runs = ["daemon-lib-start", "stop"]
 [[plant.edit]]
 file = "crates/cf-daemon/src/start.rs"
 find = '''
-                log.error("the bridge failed", Some(&cause.to_string()));
-                latch.trip("the bridge failed");'''
+                latch.trip("the bridge failed");
+                log.error("the bridge failed", Some(&cause.to_string()));'''
 replace = '                log.error("the bridge failed", Some(&cause.to_string()));'
 
 [[plant.edit]]
@@ -307,5 +308,8 @@ runs = ["daemon-lib-start"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/start.rs"
-find = "    ledger.borrow_mut().suspend_for_restart()?;"
+find = """    ledger
+        .borrow_mut()
+        .suspend_for_restart()
+        .map_err(|failed| at_start(&ledger_file, failed))?;"""
 replace = ""

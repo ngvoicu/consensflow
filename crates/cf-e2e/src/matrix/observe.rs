@@ -65,6 +65,31 @@ impl Snapshot {
         })
     }
 
+    /// The number the next message of the board takes (see [`Bindings::next_message`]).
+    pub fn next_message(&self) -> i64 {
+        let in_threads = self
+            .tasks
+            .iter()
+            .filter_map(|task| task["messages"].as_array())
+            .flatten();
+        self.chief_inbox
+            .iter()
+            .chain(in_threads)
+            .filter_map(|message| message["id"].as_i64())
+            .max()
+            .unwrap_or(0)
+            + 1
+    }
+
+    /// The oldest question the chief's inbox holds.
+    pub fn chief_question(&self) -> Option<i64> {
+        self.chief_inbox
+            .iter()
+            .filter(|message| message["kind"] == "question")
+            .filter_map(|message| message["id"].as_i64())
+            .min()
+    }
+
     /// The task `number`.
     pub fn task(&self, number: i64) -> Option<&Value> {
         self.tasks.iter().find(|task| task["number"] == number)
@@ -173,14 +198,19 @@ impl Snapshot {
 
     /// [`Snapshot::turns`], by seat: each participant's counted for the seat of its agent,
     /// the chief's for the chief's.
-    pub fn turns_by_seat(&self, seating: &Seating, asks: u32) -> BTreeMap<&'static str, u32> {
+    pub fn turns_by_seat(
+        &self,
+        seating: &Seating,
+        asks: u32,
+        joined: &dyn Fn(&str) -> Option<String>,
+    ) -> BTreeMap<&'static str, u32> {
         let mut by_seat: BTreeMap<&'static str, u32> = BTreeMap::new();
         for (handle, count) in self.turns(asks) {
             let role = if handle == "chief" {
                 Some(Role::Chief)
             } else {
                 self.agent_of(&handle)
-                    .and_then(|agent| seating.of_agent(&agent))
+                    .and_then(|member| seating.of_member(&member, joined))
                     .map(|seat| seat.role)
             };
             let name = role.map_or("unseated", Role::name);
@@ -244,6 +274,14 @@ pub const SMOKE: [Bind; 4] = [
 pub struct Bindings {
     /// The logical name of each task and its numbers, oldest first.
     pub found: BTreeMap<&'static str, Vec<i64>>,
+    /// The number the next message of the board takes: after the newest the chief's inbox or a
+    /// task's thread holds. A line that must name the question a window is about to ask (the
+    /// pause's, a worker's `cf ask`) writes it `{m}`, because the messages before it are the
+    /// board's own as much as the scenario's (the note that tells the chief its staff's roles
+    /// changed is one), and a scenario never counts them.
+    pub next_message: i64,
+    /// The oldest question the chief's inbox holds, where there is one: `{q}`.
+    pub question: Option<i64>,
 }
 
 impl Bindings {
@@ -255,7 +293,11 @@ impl Bindings {
     /// The tasks of `snapshot`, bound by `binds`, in their order: a follow-up's is read
     /// after the task it follows is bound.
     pub fn by(snapshot: &Snapshot, binds: &[Bind]) -> Self {
-        let mut bound = Self::default();
+        let mut bound = Self {
+            next_message: snapshot.next_message(),
+            question: snapshot.chief_question(),
+            ..Self::default()
+        };
         for bind in binds {
             let numbers: Vec<i64> = snapshot
                 .tasks
@@ -521,7 +563,7 @@ mod tests {
         assert_eq!(snapshot.turns(0)["chief"], 2);
         assert_eq!(snapshot.total_turns(1), 6);
         assert_eq!(
-            snapshot.turns_by_seat(&Seating::stand_ins(), 1),
+            snapshot.turns_by_seat(&Seating::stand_ins(), 1, &|_| None),
             BTreeMap::from([("chief", 3), ("worker", 2), ("unseated", 1)])
         );
     }

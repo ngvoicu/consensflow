@@ -259,7 +259,7 @@ fn listed(root: &Path, untracked: bool) -> Found<Vec<String>> {
     if untracked {
         args.extend(["--others", "--exclude-standard"]);
     }
-    let listed = Run::new("git").args(args).cwd(root).inheriting_env().run();
+    let listed = Run::new("git").args(args).cwd(root).run();
     match listed {
         Ok(ran) if ran.code == Some(0) => Ok(ran
             .stdout
@@ -385,7 +385,7 @@ mod what_the_checks_are_for_planted_in_a_tree_of_their_own {
     /// A tree of the shape the checks read (a script in each root, a host
     /// extension and the module beside it that it loads) with the `planted` files
     /// besides, or in place of those, on disk: the tree and the files it holds.
-    fn on_tree(planted: &[(&str, &str)]) -> Found<(tempfile::TempDir, Vec<String>)> {
+    fn on_tree(planted: &[(&str, &str)]) -> Found<(cf_e2e::door::Made, Vec<String>)> {
         let extension = "import { ask } from './helper.mjs'\n".to_owned();
         let example = "import { ask } from '../hosts/pi-extension/helper.mjs'\n".to_owned();
         let mut tree: BTreeMap<String, String> = BTreeMap::from([
@@ -401,7 +401,7 @@ mod what_the_checks_are_for_planted_in_a_tree_of_their_own {
         for (file, text) in planted {
             tree.insert((*file).to_owned(), (*text).to_owned());
         }
-        let root = tempfile::tempdir()?;
+        let root = cf_e2e::door::made("t-")?;
         for (file, text) in &tree {
             files::write(&under(root.path(), file), text)?;
         }
@@ -436,14 +436,14 @@ mod what_the_checks_are_for_planted_in_a_tree_of_their_own {
             "tests/revived.mjs",
             "export const cf = join(root, 'bin/cf.mjs')\n",
         )])?;
-        let linked = tempfile::tempdir()?;
+        let linked = cf_e2e::door::made("t-")?;
         let links = ["node_modules", "app/.cache", "app/src-tauri/resources"];
         for link in links {
             let folder = linked.path().join(link.replace('/', "_"));
             files::write(&folder.join("held.js"), "export {}\n")?;
             let at = under(root.path(), link);
             files::make_dir(at.parent().unwrap())?;
-            std::os::unix::fs::symlink(&folder, &at)?;
+            cf_e2e::door::symlink(&folder, &at)?;
         }
         let listed = tree(root.path())?;
         for link in links {
@@ -508,7 +508,7 @@ mod what_the_checks_are_for_planted_in_a_tree_of_their_own {
     #[test]
     fn a_deleted_folder_emptied_of_its_files_is_not_put_back() -> Outcome {
         let (root, _) = on_tree(&[])?;
-        std::fs::create_dir_all(under(root.path(), "src/core"))?;
+        cf_e2e::door::make_dir(under(root.path(), "src/core"))?;
         assert_eq!(revived(root.path())?, Vec::<String>::new());
         Ok(())
     }

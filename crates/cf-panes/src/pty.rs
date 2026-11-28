@@ -8,10 +8,11 @@ use std::time::{Duration, Instant};
 
 use portable_pty::{Child, MasterPty, PtySize};
 
+use crate::arbiter::ArbiterError;
 use crate::background::Baseline;
 use crate::ended::EndedSlot;
-use crate::journal::Journal;
-use crate::screen::{Drawn, PaneScreen};
+use crate::journal::{Journal, SizeRecord};
+use crate::screen::{Drawn, PaneScreen, Screen};
 
 mod close;
 #[cfg(windows)]
@@ -41,6 +42,8 @@ pub use close::CLOSE_GRACE;
 pub use error::PaneError;
 #[cfg(all(test, unix))]
 use flow::terminal_of;
+#[cfg(test)]
+pub(crate) use flow::ActivityReader;
 use flow::OutputFlow;
 pub(crate) use output_end::Handed;
 pub use owed::ExitOwed;
@@ -119,6 +122,9 @@ pub struct StreamedPane {
     pub output: mpsc::Receiver<PaneOutput>,
     /// What the window's screen shows: whoever reads `output` feeds it.
     pub screen: Arc<PaneScreen>,
+    /// The bytes of the window's output the pty has given and the screen shows: the thread that
+    /// reads the pty advances the first, whoever reads `output` the second.
+    pub counts: Arc<crate::arbiter::OutputCount>,
     /// The window's journal, where the table keeps them ([`PaneTable::keep_journals`]).
     pub journal: Option<Arc<Journal>>,
     /// How the window's program ended, once anyone read its status.
@@ -147,15 +153,135 @@ impl<'a> PaneEnvironment<'a> {
     }
 }
 
+/// What a gate is given to look at the pane's screen with, with the pane's writer held: it runs
+/// `under` with the screen's lock held, given what the screen shows of the input box then
+/// ([`Seen`]; none where the pane has no screen). The pane's table is not asked for it: the
+/// writer and the screen were taken in one lookup of it, before the writer was held.
+pub(crate) type Screening<'a> = &'a dyn Fn(&mut dyn FnMut(Option<&Screen>));
+
 pub(crate) trait PaneInputWriter {
     fn write(&self, key: &PaneKey, bytes: &[u8]) -> Result<(), PaneError>;
+
+    /// [`PaneInputWriter::write`], with the pane's writer held and `gate` asked there, given
+    /// the means to look at the pane's screen. Go: the bytes are written. Wait: the writer is
+    /// let go for 2 ms and `gate` is asked again. Refuse: nothing is written, and the refusal is
+    /// the answer. Every write of a delivery's that looks at the window is made so: the check and
+    /// the write are of one hold.
+    fn write_gated(
+        &self,
+        key: &PaneKey,
+        bytes: &[u8],
+        gate: &mut dyn FnMut(Screening<'_>) -> Gate,
+    ) -> Result<(), Gated> {
+        let screening = |under: &mut dyn FnMut(Option<&Screen>)| self.with_screen(key, under);
+        loop {
+            match gate(&screening) {
+                Gate::Go => return self.write(key, bytes).map_err(Gated::Pane),
+                Gate::Wait => std::thread::sleep(GATE_REST),
+                Gate::Refuse(refused) => return Err(Gated::Refused(refused)),
+            }
+        }
+    }
+
+    /// Runs `under` with the pane's screen's lock held, given the screen now; none where the
+    /// pane has no screen. The pane table's lock is let go before.
+    fn with_screen(&self, key: &PaneKey, under: &mut dyn FnMut(Option<&Screen>)) {
+        let _ = key;
+        under(None);
+    }
+}
+
+/// What a write's gate says, asked with the pane's writer held.
+pub(crate) enum Gate {
+    Go,
+    Wait,
+    Refuse(ArbiterError),
+}
+
+/// Why a gated write did not go.
+pub(crate) enum Gated {
+    /// The gate said no: nothing was written.
+    Refused(ArbiterError),
+    Pane(PaneError),
+}
+
+/// How long the writer is let go between two asks of a gate that said wait.
+const GATE_REST: Duration = Duration::from_millis(2);
+
+/// Writes `bytes` into `writer` with its lock held and `gate` asked there
+/// ([`PaneInputWriter::write_gated`]); `rest` is how the wait between two asks is spent.
+pub(crate) fn write_gated_in(
+    writer: &Mutex<Box<dyn Write + Send>>,
+    bytes: &[u8],
+    gate: &mut dyn FnMut() -> Gate,
+    rest: &dyn Fn(Duration),
+) -> Result<(), Gated> {
+    let mut held = loop {
+        let held = lock_writer(writer)?;
+        crate::sync::point("writer.locked");
+        let gated = gate();
+        crate::sync::point("gate.asked");
+        match gated {
+            Gate::Go => break held,
+            Gate::Wait => {
+                drop(held);
+                rest(GATE_REST);
+            }
+            Gate::Refuse(refused) => return Err(Gated::Refused(refused)),
+        }
+    };
+    held.write_all(bytes)
+        .map_err(|error| Gated::Pane(error.into()))?;
+    held.flush().map_err(|error| Gated::Pane(error.into()))?;
+    crate::sync::point("writer.written");
+    Ok(())
+}
+
+fn lock_writer(
+    writer: &Mutex<Box<dyn Write + Send>>,
+) -> Result<MutexGuard<'_, Box<dyn Write + Send>>, Gated> {
+    crate::sync::lock(writer).map_err(|_| Gated::Pane(PaneError::LockPoisoned))
+}
+
+/// A window's terminal master. Its lock is the window's own: a size is taken under it, one at a
+/// time, and nothing of any other window, nor the pane table, the page or the journal, waits on
+/// it. A terminal slow to resize holds up that window's next size and no more.
+struct PaneMaster {
+    /// A handle of the console's output of the window's own, made when it opened (Windows): the
+    /// output's copies are made from it, which needs no lock. **Declared before the terminal**,
+    /// so that it is let go first: our end of the console's output has to go before the console
+    /// closes, which waits for ever on a read end that is still held (before Windows 11 24H2,
+    /// `conpty`).
+    #[cfg(windows)]
+    watch: Option<conpty::Watch>,
+    terminal: Mutex<Box<dyn MasterPty + Send>>,
+    /// The descriptor of the terminal, taken when the window opened (Unix): what the output's
+    /// own copy is made from, which needs no lock.
+    #[cfg(unix)]
+    fd: Option<std::os::fd::RawFd>,
+}
+
+impl PaneMaster {
+    fn new(terminal: Box<dyn MasterPty + Send>) -> Arc<Self> {
+        Arc::new(Self {
+            #[cfg(windows)]
+            watch: conpty::watch(&*terminal).ok(),
+            #[cfg(unix)]
+            fd: terminal.as_raw_fd(),
+            terminal: Mutex::new(terminal),
+        })
+    }
+
+    fn locked(&self) -> Result<std::sync::MutexGuard<'_, Box<dyn MasterPty + Send>>, PaneError> {
+        self.terminal.lock().map_err(|_| PaneError::LockPoisoned)
+    }
 }
 
 struct Pane {
     /// Before the master, so that the terminal's input is let go before the master closes
     /// it: on Windows a console that waits on its input is then told it has ended (`conpty`).
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
-    master: Box<dyn MasterPty + Send>,
+    master: Arc<PaneMaster>,
     child: Box<dyn Child + Send + Sync>,
     process_group_id: Option<i32>,
     #[cfg(target_os = "macos")]
@@ -172,6 +298,8 @@ struct Pane {
     active_writes: Arc<AtomicU64>,
     alive: bool,
     last_activity: Arc<Mutex<Instant>>,
+    /// The bytes the window printed, read and drawn.
+    counts: Arc<crate::arbiter::OutputCount>,
     screen: Arc<PaneScreen>,
     ended: Arc<EndedSlot>,
 }
@@ -194,12 +322,19 @@ pub struct PaneTable {
     close_grace: Duration,
     /// Whether windows opened from now on keep a journal.
     journals: AtomicBool,
+    /// The page that subscribed last ([`PaneTable::attach_page`]): the only one a pull of
+    /// history answers.
+    subscribed: Mutex<Option<String>>,
     /// The journals of windows that have ended, the last [`ENDED_JOURNALS_KEPT`], until their
-    /// page forgets them ([`PaneTable::forget_ended_journal`]).
+    /// page forgets them ([`PaneTable::forget_consumed_journal`]).
     ended_journals: Mutex<VecDeque<(PaneKey, Arc<Journal>)>>,
     /// A test's hold on the opens that reach the table ([`PaneTable::hold_opens`]).
     #[cfg(any(test, feature = "test-support"))]
     open_hold: Mutex<Option<Arc<HoldState>>>,
+    /// A test's stand-in for a terminal that is slow to resize: called as a window's native
+    /// resize begins ([`PaneTable::on_native_resize`]).
+    #[cfg(any(test, feature = "test-support"))]
+    native_resize: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
 }
 
 /// What is left of the windows a table has held: the panes in it, the closes that took a pane
@@ -252,10 +387,23 @@ impl PaneTable {
             exits: Arc::new(owed::ExitsOwed::default()),
             close_grace: grace,
             journals: AtomicBool::new(false),
+            subscribed: Mutex::new(None),
             ended_journals: Mutex::new(VecDeque::new()),
             #[cfg(any(test, feature = "test-support"))]
             open_hold: Mutex::new(None),
+            #[cfg(any(test, feature = "test-support"))]
+            native_resize: Mutex::new(None),
         }
+    }
+
+    /// Call `hook` as each window's native resize begins, after the checks and before the
+    /// terminal is touched: a test makes the resize as slow as it needs.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn on_native_resize(&self, hook: Arc<dyn Fn() + Send + Sync>) {
+        *self
+            .native_resize
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(hook);
     }
 
     pub fn begin_update(self: &Arc<Self>) -> Result<UpdatePermit, PaneError> {
@@ -298,24 +446,60 @@ impl PaneTable {
     }
 
     pub(crate) fn write(&self, key: &PaneKey, bytes: &[u8]) -> Result<(), PaneError> {
-        let (writer, last_activity, active_writes) = {
-            let panes = self.lock_panes()?;
+        match self.write_gated(key, bytes, &mut |_| Gate::Go) {
+            Ok(()) => Ok(()),
+            Err(Gated::Pane(error)) => Err(error),
+            Err(Gated::Refused(_)) => unreachable!("a gate that always goes refuses nothing"),
+        }
+    }
+
+    /// [`PaneTable::write`], with `gate` asked with the writer held ([`PaneInputWriter::
+    /// write_gated`]).
+    pub(crate) fn write_gated(
+        &self,
+        key: &PaneKey,
+        bytes: &[u8],
+        gate: &mut dyn FnMut(Screening<'_>) -> Gate,
+    ) -> Result<(), Gated> {
+        // The writer and the screen in one lookup of the table: the gate asks the table for
+        // nothing while the writer is held (a resize, or the opening of another pane, holds the
+        // table through a native call).
+        let (writer, screen, last_activity, active_writes) = {
+            let panes = self.lock_panes().map_err(Gated::Pane)?;
             let pane = panes
                 .get(key)
-                .ok_or_else(|| PaneError::NotFound(key.clone()))?;
+                .ok_or_else(|| Gated::Pane(PaneError::NotFound(key.clone())))?;
             pane.active_writes.fetch_add(1, Ordering::AcqRel);
             (
                 Arc::clone(&pane.writer),
+                Arc::clone(&pane.screen),
                 Arc::clone(&pane.last_activity),
                 Arc::clone(&pane.active_writes),
             )
         };
         let _active_write = ActiveWrite(active_writes);
-        let mut writer = writer.lock().map_err(|_| PaneError::LockPoisoned)?;
-        writer.write_all(bytes)?;
-        writer.flush()?;
-        *last_activity.lock().map_err(|_| PaneError::LockPoisoned)? = Instant::now();
+        let screening = |under: &mut dyn FnMut(Option<&Screen>)| {
+            screen.with_screen(&mut |screen| under(Some(screen)));
+        };
+        write_gated_in(
+            &writer,
+            bytes,
+            &mut || gate(&screening),
+            &std::thread::sleep,
+        )?;
+        *last_activity
+            .lock()
+            .map_err(|_| Gated::Pane(PaneError::LockPoisoned))? = Instant::now();
         Ok(())
+    }
+
+    /// The pane's writer, for a test that holds it as a slow write would.
+    #[cfg(all(test, unix))]
+    // A test's own reach into the table.
+    #[allow(clippy::unwrap_used, clippy::expect_used)]
+    pub(crate) fn writer_of(&self, key: &PaneKey) -> Arc<Mutex<Box<dyn Write + Send>>> {
+        let panes = self.lock_panes().unwrap();
+        Arc::clone(&panes.get(key).expect("the pane").writer)
     }
 
     /// How many writes into the pane are in flight, counted from before the write waits for the
@@ -334,8 +518,14 @@ impl PaneTable {
     }
 
     /// [`PaneTable::resize`] of a window whose page's emulator took the size once it had
-    /// parsed `at` bytes of the window's output (`None`: the size is not the current page's,
-    /// and takes the journal's end).
+    /// parsed `at` bytes of the window's output (`None`: the journal's end).
+    ///
+    /// A window whose journal holds 4,096 sizes with output unacknowledged takes no more
+    /// ([`PaneError::SizesHeld`]), and its terminal keeps its size. The check, the terminal's
+    /// resize and the record are one: the pane table's lock keeps another size out, and the
+    /// journal's, held across all three, keeps a read from being taken in between. The screen is
+    /// told afterwards, with no journal lock held, since taking a read in locks the screen and
+    /// then the journal.
     pub fn resize_at(
         &self,
         key: &PaneKey,
@@ -343,27 +533,92 @@ impl PaneTable {
         cols: u16,
         at: Option<u64>,
     ) -> Result<(), PaneError> {
-        let mut panes = self.lock_panes()?;
-        let pane = panes
-            .get_mut(key)
-            .ok_or_else(|| PaneError::NotFound(key.clone()))?;
-        pane.master
-            .resize(PtySize {
-                rows,
-                cols,
-                pixel_width: 0,
-                pixel_height: 0,
-            })
-            .map_err(|error| PaneError::Pty(error.to_string()))?;
-        pane.screen.resize(rows, cols);
-        if let Some(journal) = &pane.journal {
-            journal.resize(at, (rows, cols));
+        self.resize_while(key, rows, cols, at, &|| true)
+    }
+
+    /// [`PaneTable::resize_at`] of a size that only the page `current` still names may take: it
+    /// is asked as the size is recorded, and if the page has gone by then the terminal goes back
+    /// to the size it had ([`PaneError::PageGone`]).
+    ///
+    /// Only this window's own lock is held while its terminal resizes: the table's is let go
+    /// once the window's parts are found, and so are the page's and the journal's, so that a
+    /// terminal that is slow to resize (a console that waits on its own pipe) holds up nothing
+    /// but the window's next size. The journal is locked for the check of room and again for
+    /// the record, which asks the room and the page once more: what was checked first may have
+    /// changed by then, and the terminal is put back where it was if it has.
+    pub fn resize_while(
+        &self,
+        key: &PaneKey,
+        rows: u16,
+        cols: u16,
+        at: Option<u64>,
+        current: &dyn Fn() -> bool,
+    ) -> Result<(), PaneError> {
+        let (master, journal, screen, last_activity) = {
+            let panes = self.lock_panes()?;
+            let pane = panes
+                .get(key)
+                .ok_or_else(|| PaneError::NotFound(key.clone()))?;
+            (
+                Arc::clone(&pane.master),
+                pane.journal.clone(),
+                Arc::clone(&pane.screen),
+                Arc::clone(&pane.last_activity),
+            )
+        };
+        let terminal = master.locked()?;
+        if journal
+            .as_ref()
+            .is_some_and(|journal| !journal.has_room_for_size())
+        {
+            return Err(PaneError::SizesHeld(key.clone()));
         }
-        *pane
-            .last_activity
-            .lock()
-            .map_err(|_| PaneError::LockPoisoned)? = Instant::now();
+        let size = PtySize {
+            rows,
+            cols,
+            pixel_width: 0,
+            pixel_height: 0,
+        };
+        let before = terminal.get_size().ok();
+        #[cfg(any(test, feature = "test-support"))]
+        {
+            let hook = self
+                .native_resize
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .clone();
+            if let Some(hook) = hook {
+                hook();
+            }
+        }
+        terminal
+            .resize(size)
+            .map_err(|error| PaneError::Pty(error.to_string()))?;
+        if let Some(journal) = &journal {
+            let taken = journal.record_size(at, (rows, cols), current);
+            if taken != SizeRecord::Taken {
+                if let Some(before) = before {
+                    let _ = terminal.resize(before);
+                }
+                return Err(match taken {
+                    SizeRecord::NoRoom => PaneError::SizesHeld(key.clone()),
+                    _ => PaneError::PageGone,
+                });
+            }
+        }
+        screen.resize(rows, cols);
+        *last_activity.lock().map_err(|_| PaneError::LockPoisoned)? = Instant::now();
         Ok(())
+    }
+
+    /// The window's terminal as it is sized now, rows and columns.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn terminal_size(&self, key: &PaneKey) -> Option<(u16, u16)> {
+        let panes = self.lock_panes().ok()?;
+        let master = Arc::clone(&panes.get(key)?.master);
+        drop(panes);
+        let size = master.locked().ok()?.get_size().ok()?;
+        Some((size.rows, size.cols))
     }
 
     /// The last `max` lines a pane's screen shows (see
@@ -377,6 +632,17 @@ impl PaneTable {
                 .screen,
         );
         Ok(screen.tail(max))
+    }
+
+    /// A pane's screen, to read with its clocks at one moment ([`PaneScreen::observe`]).
+    pub(crate) fn screen(&self, key: &PaneKey) -> Result<Arc<PaneScreen>, PaneError> {
+        Ok(Arc::clone(
+            &self
+                .lock_panes()?
+                .get(key)
+                .ok_or_else(|| PaneError::NotFound(key.clone()))?
+                .screen,
+        ))
     }
 
     /// The last `max` lines of a pane's screen as it is drawn ([`PaneScreen::bottom`]).
@@ -442,24 +708,46 @@ impl PaneInputWriter for PaneTable {
     fn write(&self, key: &PaneKey, bytes: &[u8]) -> Result<(), PaneError> {
         PaneTable::write(self, key, bytes)
     }
+
+    fn write_gated(
+        &self,
+        key: &PaneKey,
+        bytes: &[u8],
+        gate: &mut dyn FnMut(Screening<'_>) -> Gate,
+    ) -> Result<(), Gated> {
+        PaneTable::write_gated(self, key, bytes, gate)
+    }
+
+    fn with_screen(&self, key: &PaneKey, under: &mut dyn FnMut(Option<&Screen>)) {
+        match self.screen(key) {
+            Ok(screen) => screen.with_screen(&mut |screen| under(Some(screen))),
+            Err(_) => under(None),
+        }
+    }
 }
 
 /// A paste in brackets, then its Enter as a write of its own, once
 /// `before_enter` returns: a harness takes an Enter that arrives with the
 /// paste into it.
+#[cfg(test)]
 pub(crate) fn write_paste_via<W: PaneInputWriter + ?Sized>(
     writer: &W,
     key: &PaneKey,
     body: &[u8],
     before_enter: impl FnOnce(),
 ) -> Result<(), PaneError> {
+    writer.write(key, &bracketed(body))?;
+    before_enter();
+    writer.write(key, b"\r")
+}
+
+/// `body` as a bracketed paste.
+pub(crate) fn bracketed(body: &[u8]) -> Vec<u8> {
     let mut bracketed = Vec::with_capacity(12 + body.len());
     bracketed.extend_from_slice(b"\x1b[200~");
     bracketed.extend_from_slice(body);
     bracketed.extend_from_slice(b"\x1b[201~");
-    writer.write(key, &bracketed)?;
-    before_enter();
-    writer.write(key, b"\r")
+    bracketed
 }
 
 struct ActiveWrite(Arc<AtomicU64>);

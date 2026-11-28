@@ -165,6 +165,9 @@ pub(crate) struct Sent<'a> {
     /// What a note of ConsensFlow's own says on its task's line where it is shown, not
     /// typed: to a chief only ([`SHOWN`]); to anyone else it is queued as any note.
     pub(crate) shown: Option<&'a str>,
+    /// The ended turn of a window that a note reports (T-2197): the identity of the turn's last
+    /// complete item, written into the note's `message.sent` event as `report`.
+    pub(crate) report: Option<&'a str>,
 }
 
 /// Queues a message by handle, and logs it.
@@ -210,6 +213,9 @@ pub(crate) fn send(
             "from": sender.map(|sender| sender.handle),
             "to": recipient.handle,
         });
+        if let Some(turn) = message.report {
+            sent["report"] = json!(turn);
+        }
         if shown.is_some() {
             sent[SHOWN] = json!(true);
         }

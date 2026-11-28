@@ -486,7 +486,7 @@ fn a_window_whose_harness_says_it_is_at_work_is_given_nothing_whatever_its_recor
 fn a_box_that_still_holds_words_takes_no_paste() {
     let context = paced();
     let project = chief_at_rest(&context);
-    context.adapter.input_box.set(Some(InputBox::Holds));
+    context.host.shows_box(Some(InputBox::Holds));
     let note = context.note(project, "zeus", "chief", "One");
     for _ in 0..3 {
         context.advance(SETTLE);
@@ -494,7 +494,33 @@ fn a_box_that_still_holds_words_takes_no_paste() {
     }
     assert_eq!(pasted(&context, "chief"), Vec::<i64>::new());
     assert_eq!(context.message(note.id).attempts, 0, "no attempt is spent");
-    context.adapter.input_box.set(Some(InputBox::Empty));
+    context.host.shows_box(Some(InputBox::Empty));
+    context.pass().unwrap();
+    context.advance(SETTLE);
+    context.pass().unwrap();
+    assert_eq!(pasted(&context, "chief"), [note.id]);
+}
+
+/// N17 (T-2150 note 2): a box that cannot be read because the screen lacks bytes the window
+/// printed is no box that holds nothing. On main the reader said "holds" and the paste
+/// waited; here it waits until the screen is current, then reads the box.
+#[test]
+fn a_box_that_cannot_be_read_off_a_screen_that_lacks_output_takes_no_paste() {
+    let context = paced();
+    let project = chief_at_rest(&context);
+    context
+        .host
+        .set_snapshot(json!({ "outputRead": 5, "outputDrawn": 4 }));
+    let note = context.note(project, "zeus", "chief", "One");
+    for _ in 0..3 {
+        context.advance(SETTLE);
+        context.pass().unwrap();
+    }
+    assert_eq!(pasted(&context, "chief"), Vec::<i64>::new());
+    assert_eq!(context.message(note.id).attempts, 0, "no attempt is spent");
+    context
+        .host
+        .set_snapshot(json!({ "outputRead": 5, "outputDrawn": 5 }));
     context.pass().unwrap();
     context.advance(SETTLE);
     context.pass().unwrap();
@@ -659,7 +685,7 @@ fn a_box_holding_a_paste_whose_enter_was_withheld_is_emptied_and_the_next_paste_
     });
     assert_eq!(crate::deliveries::enters(&context), 0, "no key that sends");
     // The box holds the paste whose Enter was withheld.
-    context.adapter.input_box.set(Some(InputBox::Holds));
+    context.host.shows_box(Some(InputBox::Holds));
     context.resume_task(project, 1, "Carry on");
     let next = tiers.task(1).messages.last().cloned().expect("the words");
     for _ in 0..4 {
@@ -1128,4 +1154,52 @@ fn a_hold_the_windows_readiness_made_says_what_its_harness_read_of_the_humans_in
     context.pass().unwrap();
     let inputs = held_inputs(&context, note.id);
     assert_eq!(inputs.last(), Some(&Some(read)), "{inputs:?}");
+}
+
+/// N17 (T-2198 finding 1): the look a paste carries is the one its window's own readiness
+/// approved. A window ready on the look that opened the gate, whose screen shows a picker by the
+/// time the message is to go (the Muse resume picker, which its adapter refuses), is asked about
+/// that screen again, and nothing is pasted into it.
+#[test]
+fn a_paced_paste_goes_only_on_a_look_its_window_approved() {
+    let context = paced();
+    let project = chief_at_rest(&context);
+    let picker = json!({
+        "bottom": ["", "  that session is already open in another window - pick another session"],
+    });
+    let prompt = json!({ "screenQuietMs": 60_000 });
+    context.host.set_snapshot(prompt.clone());
+    let host = Rc::downgrade(&context.host);
+    let asked = Rc::new(std::cell::Cell::new(0));
+    let counted = Rc::clone(&asked);
+    *context.adapter.ready_on_look.borrow_mut() = Some(Rc::new(move |look| {
+        counted.set(counted.get() + 1);
+        let picked = look
+            .lines()
+            .iter()
+            .any(|line| line.contains("pick another session"));
+        if picked {
+            return Some(Readiness::Unfit(
+                "the session is open in another window".to_owned(),
+            ));
+        }
+        // The screen changes to the picker after the readiness that opened the gate.
+        host.upgrade().unwrap().set_snapshot(picker.clone());
+        Some(Readiness::Ready)
+    }));
+    let note = context.note(project, "zeus", "chief", "One");
+    for _ in 0..4 {
+        context.advance(SETTLE);
+        context.pass().unwrap();
+    }
+    assert_eq!(
+        pasted(&context, "chief"),
+        Vec::<i64>::new(),
+        "nothing goes into a screen its window refuses"
+    );
+    assert_eq!(context.message(note.id).attempts, 0, "no attempt is spent");
+    assert!(
+        asked.get() >= 2,
+        "the look the paste carries was asked about again"
+    );
 }

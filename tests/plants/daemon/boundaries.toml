@@ -21,13 +21,13 @@ builds = true
 [[plant.edit]]
 file = "crates/cf-daemon/src/seams.rs"
 find = '''        let mut env = self.terminal.clone();
-        env.extend(['''
+        // A root the terminal was given that the guard's replaces.'''
 replace = '''        let _ = std::fs::write(
             std::path::Path::new(&project.directory).join(format!("d-{}.md", participant.handle)),
             "a delivery",
         );
         let mut env = self.terminal.clone();
-        env.extend(['''
+        // A root the terminal was given that the guard's replaces.'''
 
 [[plant]]
 name = "boundaries rig: a window's launch writes into the owner's home"
@@ -38,9 +38,9 @@ builds = true
 [[plant.edit]]
 file = "crates/cf-daemon/src/seams.rs"
 find = '''        let mut env = self.terminal.clone();
-        env.extend(['''
+        // A root the terminal was given that the guard's replaces.'''
 replace = '''        if let Some(home) = std::env::home_dir() {
             let _ = std::fs::write(home.join(".consensflow-launched"), &participant.handle);
         }
         let mut env = self.terminal.clone();
-        env.extend(['''
+        // A root the terminal was given that the guard's replaces.'''

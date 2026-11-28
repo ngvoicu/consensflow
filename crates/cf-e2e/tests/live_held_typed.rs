@@ -101,7 +101,7 @@ struct Read {
     typed: u64,
     /// What the adapter reads of the box: `empty`, `holds`, or none.
     reader: Option<String>,
-    /// The adapter's decision: `readEmpty N` or `held`.
+    /// The adapter's decision: `readEmpty {typed, by}` or `held`.
     decision: Value,
     lines: Vec<String>,
     cursor: Value,
@@ -119,9 +119,9 @@ impl Read {
         )
     }
 
-    /// The count of the human's writes at which the box read empty, where it did.
-    fn read_empty(&self) -> Option<u64> {
-        self.decision["readEmpty"].as_u64()
+    /// What a paste over the count says, where the adapter decided one goes in.
+    fn read_empty(&self) -> Option<&Value> {
+        Some(&self.decision["readEmpty"]).filter(|read| read.is_object())
     }
 }
 
@@ -311,11 +311,11 @@ fn probe(rig: &Rig, install: &Installed, log: &Log) -> Result<Vec<Check>> {
                 last.decision
             ),
         ),
-        Some(typed) => {
+        Some(read_empty) => {
             let body = window.given(&format!(
                 "Reply with exactly the word {HANDED} and nothing else."
             ))?;
-            let sent = window.send_read_empty(&body, HANDED, typed)?;
+            let sent = window.send_read_empty(&body, HANDED, read_empty)?;
             if sent.written["ok"] != true {
                 Check::failed(who, WHAT, format!("refused: {}", sent.written))
             } else if sent.shown {

@@ -23,16 +23,13 @@ meant = "the_stand_in_agents_job_writes_its_process_whole_or_not_at_all"
 runs = ["pid-files-whole"]
 
 [[plant.edit]]
-file = "crates/cf-e2e/src/files.rs"
-find = '''
-    let mut writing = file.as_os_str().to_owned();
-    writing.push(".writing");
-    fs::write(&writing, text)?;
-    fs::rename(writing, file)'''
-replace = '''
-    let mut made = fs::File::create(file)?;
+file = "crates/cf-e2e/src/door/writes.rs"
+find = '''    write(&writing, text)?;
+    rename(&writing, file)'''
+replace = '''    let _ = &writing;
+    let mut made = fs::File::create(file).map_err(Error::file("create", file))?;
     std::thread::sleep(std::time::Duration::from_millis(300));
-    io::Write::write_all(&mut made, text.as_bytes())'''
+    std::io::Write::write_all(&mut made, text.as_bytes()).map_err(Error::file("write", file))'''
 
 [[plant]]
 name = "pid-files: the job's case reads its file as soon as it is there, and the job writes its process slowly"
@@ -56,16 +53,13 @@ replace = '''
     );'''
 
 [[plant.edit]]
-file = "crates/cf-e2e/src/files.rs"
-find = '''
-    let mut writing = file.as_os_str().to_owned();
-    writing.push(".writing");
-    fs::write(&writing, text)?;
-    fs::rename(writing, file)'''
-replace = '''
-    let mut made = fs::File::create(file)?;
+file = "crates/cf-e2e/src/door/writes.rs"
+find = '''    write(&writing, text)?;
+    rename(&writing, file)'''
+replace = '''    let _ = &writing;
+    let mut made = fs::File::create(file).map_err(Error::file("create", file))?;
     std::thread::sleep(std::time::Duration::from_millis(300));
-    io::Write::write_all(&mut made, text.as_bytes())'''
+    std::io::Write::write_all(&mut made, text.as_bytes()).map_err(Error::file("write", file))'''
 
 [[plant]]
 name = "pid-files: the browser's case reads its file as soon as it is there, and the browser writes its process slowly"
@@ -84,13 +78,10 @@ replace = '''
         .parse()?;'''
 
 [[plant.edit]]
-file = "crates/cf-e2e/src/files.rs"
-find = '''
-    let mut writing = file.as_os_str().to_owned();
-    writing.push(".writing");
-    fs::write(&writing, text)?;
-    fs::rename(writing, file)'''
-replace = '''
-    let mut made = fs::File::create(file)?;
+file = "crates/cf-e2e/src/door/writes.rs"
+find = '''    write(&writing, text)?;
+    rename(&writing, file)'''
+replace = '''    let _ = &writing;
+    let mut made = fs::File::create(file).map_err(Error::file("create", file))?;
     std::thread::sleep(std::time::Duration::from_millis(300));
-    io::Write::write_all(&mut made, text.as_bytes())'''
+    std::io::Write::write_all(&mut made, text.as_bytes()).map_err(Error::file("write", file))'''

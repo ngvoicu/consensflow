@@ -1166,10 +1166,15 @@ fn goes_on_after_the_restart(rig: &Rig, id: i64, brief: &Value) -> cf_e2e::Resul
 #[test]
 fn a_restart_of_the_daemon_leaves_what_waits_at_the_gate_there_and_passing_it_on_goes_on() -> Outcome
 {
-    // The chief takes a moment to write its answer once its work is done, as a
-    // window on a slow machine does (CI's Windows is one): the app is quit once
-    // it is written, as it is when the chief is at rest.
-    let rig = Rig::start(config().var("CF_TEST_ANSWER_MS", "1500"))?;
+    // The chief takes a moment to write its answer once its work is done, and a
+    // moment more to end its turn after it, as a window on a slow machine does
+    // (CI's Windows is one): the app is quit once the turn has ended in the
+    // record, as it is when the chief is at rest.
+    let rig = Rig::start(
+        config()
+            .var("CF_TEST_ANSWER_MS", "1500")
+            .var("CF_TEST_REST_MS", "4000"),
+    )?;
     let (id, brief, session) = {
         let project = gated_project(&rig)?;
         let chief = chief_window(&rig, &project)?;
@@ -1184,6 +1189,14 @@ fn a_restart_of_the_daemon_leaves_what_waits_at_the_gate_there_and_passing_it_on
         let session = session_of(&chief);
         rig.wait_for("the chief's answer to be written", secs(30), || {
             Ok(rig.transcript(&session).contains("\"text\":\"dispatched:"))
+        })?;
+        // And its turn to end in its record: the answer is there before the end of the
+        // turn is (Claude writes the stop hooks' summary a moment on, and the record of a
+        // turn without it reads as cut), so a quit between them cuts the turn.
+        rig.wait_for("the chief's turn to end in its record", secs(30), || {
+            Ok(rig
+                .transcript(&session)
+                .contains("\"subtype\":\"stop_hook_summary\""))
         })?;
         (project.id(), brief, session)
     };

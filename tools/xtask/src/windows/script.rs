@@ -203,6 +203,8 @@ pub enum Refusal {
     EnvNotAscii(String),
     #[error("--env {0} is given twice")]
     EnvTwice(String),
+    #[error("--env {0} says whether the machine is a test machine, which only the runner says, from the machine it runs on")]
+    EnvMarker(String),
     #[error("the script for the machine is {length} characters encoded, and its shell reads {ENCODED_LIMIT} at most: use a shorter --dir")]
     TooLong { length: usize },
 }
@@ -293,6 +295,12 @@ pub fn parse_env(entries: &[String]) -> Result<Vec<(String, String)>, Refusal> {
             .split_once('=')
             .filter(|(name, _)| is_name(name))
             .ok_or_else(|| Refusal::EnvForm(entry.clone()))?;
+        // The marker is the machine's own, given by the runner after these (T-2119 N1-b): a word
+        // of the caller's could mark an account that is its owner's. Windows reads a name in any
+        // case.
+        if name.eq_ignore_ascii_case(TEST_MACHINE) {
+            return Err(Refusal::EnvMarker(name.to_owned()));
+        }
         if !value.chars().all(|c| (' '..='~').contains(&c)) {
             return Err(Refusal::EnvNotAscii(name.to_owned()));
         }
@@ -383,6 +391,9 @@ pub struct Script<'a> {
     /// gives the command [`TEST_MACHINE`] with it, which is how a program on the machine
     /// knows it was started by this runner, on a machine that is the runner's to test on.
     pub machine: &'a str,
+    /// Whether the machine is a test machine, with an account and a login store of its own
+    /// ([`super::machine::Machine::marked`]): only then is the command given [`TEST_MACHINE`].
+    pub marked: bool,
     /// What the machine takes at once, if less than all it has ([`Limits`]).
     pub limits: Option<Limits>,
 }
@@ -479,8 +490,7 @@ pub fn run_script(script: &Script) -> String {
             ("in_job", IN_JOB),
             ("tarball", &upload_name(script.dir, script.id)),
             ("command_file", COMMAND_FILE),
-            ("test_machine", TEST_MACHINE),
-            ("machine", &quoted(script.machine)),
+            ("marker", &marker_of(script)),
             ("limits", &limits_of(script.limits)),
             ("steps", &steps.join(", ")),
             ("prepare", &prepare.join(", ")),
@@ -490,6 +500,22 @@ pub fn run_script(script: &Script) -> String {
             ("crlf", "\r\n"),
         ],
     )
+}
+
+/// The lines of the run script that say whether the machine is a test machine: on one
+/// ([`Script::marked`]) the command is given [`TEST_MACHINE`] with the machine's name; on any other
+/// the variable is taken away, where the account itself holds one, and the run says none.
+fn marker_of(script: &Script) -> String {
+    if script.marked {
+        format!(
+            "$env:{TEST_MACHINE} = {}\nWrite-Output \"== test machine: $env:{TEST_MACHINE}\"\n",
+            quoted(script.machine)
+        )
+    } else {
+        format!(
+            "Remove-Item Env:\\{TEST_MACHINE} -ErrorAction SilentlyContinue\nWrite-Output \"== test machine: none\"\n"
+        )
+    }
 }
 
 /// The lines of the run script that give the process what the machine takes at once: the jobs of

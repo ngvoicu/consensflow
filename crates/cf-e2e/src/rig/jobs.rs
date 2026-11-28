@@ -141,9 +141,9 @@ mod tests {
 
     #[test]
     fn the_jobs_of_a_label_are_those_with_a_process_id_written_and_what_they_wrote_is_read() {
-        let folder = tempfile::tempdir().unwrap();
+        let folder = crate::door::made("t-").unwrap();
         let write =
-            |name: &str, text: &str| std::fs::write(folder.path().join(name), text).unwrap();
+            |name: &str, text: &str| crate::door::write(folder.path().join(name), text).unwrap();
         write("job-4242-1.pid", "77\n");
         write("job-4242-1.released", "RELEASED\n");
         // Not yet written whole, not a number, another label, another kind of file.

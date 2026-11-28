@@ -452,7 +452,7 @@ fn playwright_writes_the_plants_report_to_the_run_beside_the_list_it_prints() {
             .collect();
         assert_eq!(retried(&command), None, "{asked:?}");
         assert_eq!(
-            playwright_words(&command, reporter),
+            playwright_words(&command, reporter, &checkout(root.path())),
             [
                 "node",
                 "cli.js",
@@ -476,7 +476,7 @@ fn playwright_writes_the_plants_report_to_the_run_beside_the_list_it_prints() {
             .map(|word| (*word).to_owned())
             .collect();
         assert_eq!(
-            playwright_words(&command, reporter),
+            playwright_words(&command, reporter, &checkout(root.path())),
             [
                 "node",
                 "cli.js",
@@ -926,6 +926,67 @@ fn the_threads_libtest_is_told_by_the_environment_are_the_threads_nextest_is_giv
     );
 }
 
+/// A run of Playwright's is as wide as the caller asked, and never as wide as Playwright
+/// picks by itself (half the cores): a page plant ran at that width on a Mac whose every
+/// heavy run is held to 4 (T-1901).
+#[test]
+fn a_playwright_run_is_given_its_width_as_workers() {
+    let root = tempfile::tempdir().unwrap();
+    let dir = root.path().join("app/src-tauri/target/plants-runs/run-7");
+    fs::create_dir_all(&dir).unwrap();
+    // The words of the run that say how many workers it has.
+    let widths = |own: &[&str], vars: &[(&str, &str)]| {
+        let command: Vec<&str> = ["node", "cli.js", "test"]
+            .iter()
+            .chain(own)
+            .chain(&["a.spec.mjs"])
+            .copied()
+            .collect();
+        let context = Context {
+            root: root.path().to_path_buf(),
+            env: Env::from_vars(vars.iter().copied()),
+        };
+        let invocation = Reporter::Playwright
+            .setup(&words(&command), &dir, &context, "")
+            .unwrap();
+        args(&invocation)
+            .into_iter()
+            .skip_while(|word| word != "test")
+            .skip(1)
+            .filter(|word| !word.starts_with("--reporter=") && !word.starts_with("--re"))
+            .filter(|word| word != "a.spec.mjs")
+            .collect::<Vec<_>>()
+    };
+    let asked = ("CF_PLANTS_TEST_THREADS", "2");
+    let machine = ("RUST_TEST_THREADS", "3");
+    // Nobody says: Playwright picks its own, as nextest does.
+    assert_eq!(widths(&[], &[]), Vec::<String>::new());
+    // The caller's, over the machine's and over the table's own, however it is written.
+    assert_eq!(widths(&[], &[asked, machine]), ["--workers=2"]);
+    for own in [
+        &["--workers=8"][..],
+        &["--workers", "8"],
+        &["-j", "8"],
+        &["-j8"],
+        &["-j=8"],
+        &["--workers=50%", "-j", "8"],
+    ] {
+        assert_eq!(widths(own, &[asked]), ["--workers=2"], "{own:?}");
+        // Not asked: the table's own stays as written.
+        assert_eq!(widths(own, &[machine]), own, "{own:?}");
+    }
+    // The machine's limit, where neither the caller nor the table says.
+    assert_eq!(widths(&[], &[machine]), ["--workers=3"]);
+    // A variable of no number of workers is none.
+    for none in ["", "many", "0", "-2", "4 "] {
+        assert_eq!(
+            widths(&[], &[("RUST_TEST_THREADS", none)]),
+            Vec::<String>::new(),
+            "{none:?}"
+        );
+    }
+}
+
 /// A checkout at `/checkout` whose environment asks for `threads` test threads.
 fn with_threads(threads: &str) -> Context {
     Context {
@@ -1117,10 +1178,11 @@ fn only_a_nextest_run_and_a_cargo_test_take_the_drivers_threads() {
     // its `--`): both take them.
     assert!(Reporter::Nextest.takes_threads(&words(&["cargo", "test", "-p", "x"])));
     assert!(Reporter::Status.takes_threads(&words(&["cargo", "test", "-p", "x"])));
-    // Anything else takes none: a Node or Playwright run, a command that says no more
-    // than its status (npm, a script), a cargo word that is no test.
+    // So does a run of Playwright's, as its workers.
+    assert!(Reporter::Playwright.takes_threads(&words(&["node", "cli.js", "test"])));
+    // Anything else takes none: a Node run, a command that says no more than its status
+    // (npm, a script), a cargo word that is no test.
     assert!(!Reporter::Node.takes_threads(&words(&["node", "--test", "a.test.mjs"])));
-    assert!(!Reporter::Playwright.takes_threads(&words(&["node", "cli.js", "test"])));
     assert!(!Reporter::Status.takes_threads(&words(&["npm", "test"])));
     assert!(!Reporter::Status.takes_threads(&words(&["./run.sh"])));
     assert!(!Reporter::Status.takes_threads(&words(&["cargo", "build"])));

@@ -5,17 +5,19 @@
 //! time, and the record read for a model Muse moved to by itself.
 
 use std::collections::BTreeMap;
-use std::fs;
-use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use cf_e2e::door::source::Source;
 use cf_e2e::live::{agents, machine, Log};
 use cf_e2e::process::Run;
-use portable_pty::{native_pty_system, CommandBuilder, PtySize};
 use serde_json::Value;
+
+/// A folder or file standing for the owner's, as a test makes one: read for `Guard`, never written.
+fn owned(path: impl AsRef<std::path::Path>) -> Source {
+    cf_e2e::door::source::Account::this().named(path, cf_e2e::door::source::Purpose::Guard)
+}
 
 pub type Outcome = Result<(), String>;
 
@@ -69,14 +71,17 @@ pub fn ran(
     } else {
         None
     };
-    let command = launch
-        .as_ref()
-        .map_or(program, |launch| launch.program.as_path());
-    let prefix = launch
-        .as_ref()
-        .map_or(&[][..], |launch| launch.prefix.as_slice());
-    let ran = Run::new(command)
-        .args(prefix)
+    // Muse is started through its launch (on a Mac its file sandbox), as a harness is; any other
+    // program as it is.
+    let start = match &launch {
+        Some(launch) => {
+            cf_e2e::muse::real_window_allowed("Muse's direct TUI case")
+                .map_err(|refused| refused.to_string())?;
+            launch.run()
+        }
+        None => Run::new(program),
+    };
+    let ran = start
         .args(args)
         .vars(env.iter())
         .cwd(cwd)
@@ -95,21 +100,33 @@ pub fn ran(
 
 /// The binary the owner's launcher runs.
 pub fn binary() -> Result<PathBuf, String> {
-    let bin = home().join(".local").join("bin");
-    let version = fs::read_to_string(bin.join(".muse-version"))
+    binary_in(&owned(home()).join(".local/bin"))
+}
+
+/// The binary the launcher in `bin` (the owner's `~/.local/bin`) runs.
+fn binary_in(bin: &Source) -> Result<PathBuf, String> {
+    let version = bin
+        .join(".muse-version")
+        .read_to_string()
         .map_err(|error| format!("no Muse here (.muse-version: {error})"))?;
-    let binary = bin.join(format!("muse-bin-{}", version.trim()));
-    if binary.is_file() {
-        Ok(binary)
+    let binary = bin.join(&format!("muse-bin-{}", version.trim()));
+    if binary.is_a_file() {
+        // A program the launcher runs, started by its name.
+        Ok(PathBuf::from(binary.to_argument()))
     } else {
-        Err(format!("{} is not there", binary.display()))
+        Err(format!("{binary} is not there"))
     }
 }
 
 /// The owner's files a run must leave as they were, each by a fingerprint.
 pub fn owner_files() -> BTreeMap<String, u64> {
-    let config = home().join(".config").join("muse");
-    let bin = home().join(".local").join("bin");
+    fingerprints(&owned(home()))
+}
+
+/// The fingerprints of the files of the owner `owner` (a home) a run must leave as they were.
+fn fingerprints(owner: &Source) -> BTreeMap<String, u64> {
+    let config = owner.join(".config/muse");
+    let bin = owner.join(".local/bin");
     [
         config.join("settings.json"),
         config.join("trust.json"),
@@ -118,8 +135,8 @@ pub fn owner_files() -> BTreeMap<String, u64> {
     ]
     .into_iter()
     .map(|file| {
-        let print = fs::read(&file).map_or(0, |bytes| fingerprint(&bytes));
-        (file.display().to_string(), print)
+        let print = file.read().map_or(0, |bytes| fingerprint(&bytes));
+        (file.name(), print)
     })
     .collect()
 }
@@ -196,10 +213,35 @@ pub fn write(file: &Path, text: &str) -> Outcome {
 
 fn copy_login(owner: &Path, root: &Path) -> Outcome {
     cf_e2e::live::guard::copy_muse_login(
-        &owner.join(".config/muse/auth.json"),
+        owned(owner.join(".config/muse/auth.json")),
         &root.join("config/muse/auth.json"),
     )
     .map_err(|error| format!("auth.json: {error}"))
+}
+
+/// T-2119 X1: the window's pty is opened for no account that is not a marked test machine's.
+#[cfg(test)]
+#[cfg(target_os = "macos")]
+#[test]
+fn a_muse_window_is_not_opened_off_a_marked_test_machine() {
+    if cf_e2e::live::renew::TestMachine::detect().is_some() {
+        return;
+    }
+    let model = agents::Model {
+        harness: cf_e2e::live::Harness::Muse,
+        name: "any".to_owned(),
+        effort: None,
+    };
+    let refused = Window::open(
+        Path::new("/no/muse"),
+        &BTreeMap::new(),
+        Path::new("/no/root"),
+        &model,
+        &[],
+    )
+    .err()
+    .expect("a window opened on an account that is not a test machine's");
+    assert!(refused.contains("marked as a test machine"), "{refused}");
 }
 
 #[cfg(test)]
@@ -208,9 +250,9 @@ fn tui_setup_copies_no_refresh_keys() {
     let root = cf_e2e::door::made("cf-muse-tui-login-").unwrap();
     let owner = root.path().join("owner");
     let run = root.path().join("run");
-    std::fs::create_dir_all(owner.join(".config/muse")).unwrap();
-    std::fs::create_dir_all(run.join("config/muse")).unwrap();
-    std::fs::write(
+    cf_e2e::door::make_dir(owner.join(".config/muse")).unwrap();
+    cf_e2e::door::make_dir(run.join("config/muse")).unwrap();
+    cf_e2e::door::write(
         owner.join(".config/muse/auth.json"),
         r#"{"access":"fake","refreshToken":"fake","nested":[{"REFRESH_key":"fake"}]}"#,
     )
@@ -245,14 +287,14 @@ pub fn set_up(root: &Path) -> Outcome {
         &root.join("config/muse/settings.json"),
         r#"{"schema_version":1,"context":{"foreign_personal_rules":false,"foreign_personal_skills":false}}"#,
     )?;
-    let gates = owner.join(".local/share/muse/feature-config");
+    let gates = owned(&owner).join(".local/share/muse/feature-config");
     copy_feature_config(&gates, &root.join("data/muse/feature-config"))?;
-    let catalog = owner.join(".local/share/muse/model-catalog");
+    let catalog = owned(&owner).join(".local/share/muse/model-catalog");
     copy_feature_config(&catalog, &root.join("data/muse/model-catalog"))?;
     write(&root.join("work/README.md"), "A throwaway project.\n")?;
     let git = ["/opt/homebrew/bin/git", "/usr/bin/git"]
         .into_iter()
-        .find(|git| Path::new(git).is_file())
+        .find(|git| cf_e2e::door::reads::is_file(git))
         .ok_or("no git")?;
     ran(
         Path::new(git),
@@ -263,14 +305,39 @@ pub fn set_up(root: &Path) -> Outcome {
     .map(|_| ())
 }
 
-fn copy_feature_config(gates: &Path, into: &Path) -> Outcome {
-    if fs::symlink_metadata(gates).is_ok_and(|meta| meta.file_type().is_symlink()) {
+fn copy_feature_config(gates: &Source, into: &Path) -> Outcome {
+    if gates.is_a_link() {
         return Ok(());
     }
-    if gates.is_dir() {
-        cf_e2e::door::copy_tree(gates, into, &|_| false).map_err(|error| error.to_string())?;
+    if gates.is_a_folder() {
+        gates
+            .copy_tree_into(into, &|_| false)
+            .map_err(|error| error.to_string())?;
     }
     Ok(())
+}
+
+/// The owner's launcher, version file and settings are read through sources: on a decoy owner the
+/// binary is found by the version file, and a changed file changes its fingerprint.
+#[cfg(test)]
+#[test]
+fn the_owners_muse_files_are_found_and_fingerprinted_through_sources() {
+    let root = cf_e2e::door::made("cf-muse-tui-owner-").unwrap();
+    let bin = root.path().join(".local/bin");
+    cf_e2e::door::make_dir(&bin).unwrap();
+    let owner = owned(root.path());
+    assert!(binary_in(&owner.join(".local/bin")).is_err());
+    cf_e2e::door::write(bin.join(".muse-version"), "1.4.14\n").unwrap();
+    assert!(binary_in(&owner.join(".local/bin")).is_err());
+    cf_e2e::door::write(bin.join("muse-bin-1.4.14"), "decoy").unwrap();
+    assert_eq!(
+        binary_in(&owner.join(".local/bin")).unwrap(),
+        bin.join("muse-bin-1.4.14")
+    );
+    let before = fingerprints(&owner);
+    assert_eq!(before.len(), 4);
+    cf_e2e::door::write(bin.join(".muse-version"), "1.4.15\n").unwrap();
+    assert_ne!(before, fingerprints(&owner));
 }
 
 #[cfg(test)]
@@ -278,13 +345,13 @@ fn copy_feature_config(gates: &Path, into: &Path) -> Outcome {
 #[test]
 fn kit_round3_muse_feature_config_skips_links_out() {
     let root = cf_e2e::door::made("cf-muse-feature-").unwrap();
-    let foreign = tempfile::tempdir().unwrap();
-    fs::write(foreign.path().join("login"), "fabricated refresh token").unwrap();
+    let foreign = cf_e2e::door::made("t-").unwrap();
+    cf_e2e::door::write(foreign.path().join("login"), "fabricated refresh token").unwrap();
     let source = root.path().join("features");
-    fs::create_dir(&source).unwrap();
-    std::os::unix::fs::symlink(foreign.path().join("login"), source.join("leak")).unwrap();
+    cf_e2e::door::make_dir(&source).unwrap();
+    cf_e2e::door::symlink(foreign.path().join("login"), source.join("leak")).unwrap();
     let target = root.path().join("copy");
-    copy_feature_config(&source, &target).unwrap();
+    copy_feature_config(&owned(&source), &target).unwrap();
     assert!(
         !target.join("leak").exists(),
         "a linked-out feature file was copied"
@@ -333,12 +400,13 @@ pub fn session_log(root: &Path) -> Option<(String, PathBuf)> {
     let mut found = Vec::new();
     let mut folders = vec![root.join("data/muse/sessions")];
     while let Some(folder) = folders.pop() {
-        let Ok(entries) = fs::read_dir(&folder) else {
+        let Ok(entries) = cf_e2e::door::reads::read_dir(&folder) else {
             continue;
         };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_dir() && path.file_name().is_some_and(|name| name != "subagent") {
+        for path in entries {
+            if cf_e2e::door::reads::is_dir(&path)
+                && path.file_name().is_some_and(|name| name != "subagent")
+            {
                 folders.push(path);
             } else if path.file_name().is_some_and(|name| name == "session.jsonl") {
                 found.push(path);
@@ -377,11 +445,11 @@ fn the_model_switch_check_compares_with_the_selected_model() {
     );
 }
 
-/// A window of Muse in a pty: its screen's bytes kept, its keys written.
+/// A window of Muse in a pty: its screen's bytes kept, its keys written. The pty is the door's
+/// ([`Run::terminal`]), and the program is started as Muse is: on the run's homes, in its file
+/// sandbox, with its update switch.
 pub struct Window {
-    child: Box<dyn portable_pty::Child + Send + Sync>,
-    writer: Box<dyn Write + Send>,
-    screen: Arc<Mutex<Vec<u8>>>,
+    terminal: cf_e2e::door::terminal::Terminal,
 }
 
 impl Window {
@@ -394,81 +462,50 @@ impl Window {
         model: &agents::Model,
         posture: &[&str],
     ) -> Result<Self, String> {
-        let pair = native_pty_system()
-            .openpty(PtySize {
-                rows: 50,
-                cols: 150,
-                pixel_width: 0,
-                pixel_height: 0,
-            })
-            .map_err(|error| error.to_string())?;
+        // The pty is this case's own, outside a rig: Muse's real window on a Mac runs only on a
+        // marked test machine, whoever calls this (T-2119 X1: no pty of the kit's own is open to
+        // an account that is its owner's).
+        cf_e2e::muse::real_window_allowed("Muse's direct TUI window")
+            .map_err(|refused| refused.to_string())?;
         let launch = cf_e2e::muse::isolated_command(binary, &[root.to_path_buf()], &[])
             .map_err(|error| error.to_string())?;
-        let mut command = CommandBuilder::new(&launch.program);
-        command.args(&launch.prefix);
-        command.args(["--trust-workspace", "--model", &model.name]);
+        let mut words: Vec<String> = vec![
+            "--trust-workspace".into(),
+            "--model".into(),
+            model.name.clone(),
+        ];
         if let Some(effort) = &model.effort {
-            command.args(["--reasoning-effort", effort]);
+            words.extend(["--reasoning-effort".into(), effort.clone()]);
         }
-        command.args(["--contributor-mode", "off"]);
-        command.args(posture);
-        command.args([
-            "-c",
-            "context.foreign_personal_rules=false",
-            "-c",
-            "context.foreign_personal_skills=false",
-            "-c",
-            "telemetry.enabled=false",
-            "-c",
-            "local_session_messaging.enabled=false",
-            "-c",
-            r#"run.reminder_roster={"agents":[]}"#,
-        ]);
-        command.env_clear();
-        for (name, value) in env {
-            command.env(name, value);
-        }
-        command.cwd(root.join("work"));
-        let child = pair
-            .slave
-            .spawn_command(command)
+        words.extend(["--contributor-mode".into(), "off".into()]);
+        words.extend(posture.iter().map(|word| (*word).to_owned()));
+        words.extend(
+            [
+                "-c",
+                "context.foreign_personal_rules=false",
+                "-c",
+                "context.foreign_personal_skills=false",
+                "-c",
+                "telemetry.enabled=false",
+                "-c",
+                "local_session_messaging.enabled=false",
+                "-c",
+                r#"run.reminder_roster={"agents":[]}"#,
+            ]
+            .map(str::to_owned),
+        );
+        let terminal = launch
+            .run()
+            .args(&words)
+            .vars(env)
+            .cwd(root.join("work"))
+            .terminal((50, 150))
             .map_err(|error| error.to_string())?;
-        let mut reader = pair
-            .master
-            .try_clone_reader()
-            .map_err(|error| error.to_string())?;
-        let writer = pair
-            .master
-            .take_writer()
-            .map_err(|error| error.to_string())?;
-        let screen = Arc::new(Mutex::new(Vec::new()));
-        let kept = Arc::clone(&screen);
-        thread::spawn(move || {
-            let mut chunk = [0_u8; 8192];
-            while let Ok(read) = reader.read(&mut chunk) {
-                if read == 0 {
-                    break;
-                }
-                let Ok(mut screen) = kept.lock() else {
-                    break;
-                };
-                screen.extend_from_slice(&chunk[..read]);
-                let len = screen.len();
-                if len > 200_000 {
-                    screen.drain(..len - 200_000);
-                }
-            }
-        });
-        Ok(Self {
-            child,
-            writer,
-            screen,
-        })
+        Ok(Self { terminal })
     }
 
     pub fn keys(&mut self, bytes: &[u8]) {
-        let _ = self.writer.write_all(bytes);
-        let _ = self.writer.flush();
+        self.terminal.keys(bytes);
     }
 
     /// Pastes `text`, bracketed, and sends it with Enter a moment after.
@@ -479,35 +516,32 @@ impl Window {
     }
 
     pub fn tail(&self) -> String {
-        let Ok(screen) = self.screen.lock() else {
-            return String::new();
-        };
-        let from = screen.len().saturating_sub(1500);
-        String::from_utf8_lossy(&screen[from..]).into_owned()
+        self.terminal.tail(1500)
     }
 
     /// Quits as a person does at rest, two Ctrl-Cs, and kills what is left. The two keys are
     /// typed through the door ([`cf_e2e::door::Door::quit_own_terminal`]): a say-only run says them
     /// and types none.
     pub fn close(mut self) {
+        let terminal = &mut self.terminal;
         let typed = cf_e2e::door::Door::of_run().quit_own_terminal("Muse's terminal", || {
-            self.keys(b"\x03");
+            terminal.keys(b"\x03");
             thread::sleep(Duration::from_secs(1));
-            self.keys(b"\x03");
+            terminal.keys(b"\x03");
         });
         if !typed {
             return;
         }
         let deadline = Instant::now() + Duration::from_secs(8);
         while Instant::now() < deadline {
-            if matches!(self.child.try_wait(), Ok(Some(_))) {
+            if self.terminal.ended() {
                 return;
             }
             thread::sleep(Duration::from_millis(200));
         }
-        let child = &mut self.child;
+        let terminal = &mut self.terminal;
         cf_e2e::door::Door::of_run().close_own_terminal("Muse's terminal", || {
-            let _ = child.kill();
+            terminal.kill();
         });
     }
 }

@@ -46,6 +46,21 @@ pub enum LedgerError {
     Sqlite(#[from] rusqlite::Error),
     #[error("{0}")]
     Json(#[from] serde_json::Error),
+    /// An operation failed and the rollback that should have undone it failed
+    /// too: what the operation failed with is first, and stays what it was.
+    #[error("{first}; its rollback failed too: {rollback}")]
+    Unrolled {
+        first: Box<LedgerError>,
+        rollback: rusqlite::Error,
+    },
+    /// A step after a failure failed too (the foreign keys put back on after a failed
+    /// migration): the failure is first, and stays what it was.
+    #[error("{first}; {what} failed too: {cause}")]
+    AlsoFailed {
+        first: Box<LedgerError>,
+        what: &'static str,
+        cause: rusqlite::Error,
+    },
 }
 
 impl LedgerError {
@@ -57,6 +72,24 @@ impl LedgerError {
     /// A refusal with its own status.
     pub fn refused_with(code: &'static str, message: impl Into<String>, status: u16) -> Self {
         LedgerError::Refused(Refusal::with_status(code, message, status))
+    }
+
+    /// Whether the ledger cannot be saved to: a rollback that did not take, a ledger left
+    /// in its transaction, or SQLite's own words for a disk that is full, failing, gone
+    /// or not writable. Not a file another ConsensFlow holds, which is waited out.
+    pub fn cannot_save(&self) -> bool {
+        use rusqlite::ErrorCode::{
+            CannotOpen, DiskFull, NotFound, PermissionDenied, ReadOnly, SystemIoFailure,
+        };
+        match self {
+            LedgerError::Unrolled { .. } | LedgerError::AlsoFailed { .. } => true,
+            LedgerError::Refused(refusal) => refusal.code == "ledger-broken",
+            LedgerError::Sqlite(rusqlite::Error::SqliteFailure(failure, _)) => matches!(
+                failure.code,
+                CannotOpen | DiskFull | NotFound | PermissionDenied | ReadOnly | SystemIoFailure
+            ),
+            _ => false,
+        }
     }
 
     /// The refusal's code, when it is one.

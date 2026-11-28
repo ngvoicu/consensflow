@@ -166,7 +166,7 @@ mod on_a_claude_config_of_the_cases_own {
     fn a_rig_whose_claude_windows_run_on_a_config_of_the_cases_own_writes_nothing_in_the_machines(
     ) -> Outcome {
         // The machine is a folder of the test's own, with a Claude folder of the person's.
-        let machine = tempfile::tempdir()?;
+        let machine = cf_e2e::door::made("t-")?;
         let persons = machine.path().join(".claude");
         cf_e2e::files::write(&persons.join("history.jsonl"), "{}\n")?;
         let kept = cf_e2e::door::made("cf-live-base-")?;
@@ -179,7 +179,7 @@ mod on_a_claude_config_of_the_cases_own {
             "the daemon and every window run on the case's folder"
         );
         let work = rig.workspace().join("live-folder");
-        std::fs::create_dir_all(&work)?;
+        cf_e2e::door::make_dir(&work)?;
         let project = Project::open(&rig, "chief", json!({ "directory": work }))?;
         let added = project.add_member("worker")?;
         let tier = added["member"]["tier"]
@@ -220,7 +220,7 @@ mod on_a_claude_config_of_the_cases_own {
     #[test]
     fn a_rig_that_ends_fails_with_what_its_claude_config_says_the_run_did_and_one_dropped_is_asked_once(
     ) -> Outcome {
-        let machine = tempfile::tempdir()?;
+        let machine = cf_e2e::door::made("t-")?;
         let kept = cf_e2e::door::made("cf-live-base-")?;
         let said = "the run touched the person's settings";
         let folder = Kept::new(kept.path().join("claude-config"), Some(said));
@@ -240,7 +240,7 @@ mod on_a_claude_config_of_the_cases_own {
     #[test]
     fn a_rig_whose_home_is_kept_is_told_to_keep_the_records_of_its_claude_config_in_the_home_before_it_is_asked_what_the_run_came_to(
     ) -> Outcome {
-        let machine = tempfile::tempdir()?;
+        let machine = cf_e2e::door::made("t-")?;
         let kept = cf_e2e::door::made("cf-live-base-")?;
         let folder = Kept::new(kept.path().join("claude-config"), None);
         let shims = cf_e2e::door::made("cf-live-base-")?;
@@ -256,7 +256,7 @@ mod on_a_claude_config_of_the_cases_own {
                 "finish".to_owned()
             ]
         );
-        std::fs::remove_dir_all(home)?;
+        cf_e2e::door::remove(home)?;
 
         // A rig that is dropped by a case that failed, its home kept, is told the same.
         let dropped = Kept::new(kept.path().join("another"), None);
@@ -269,13 +269,13 @@ mod on_a_claude_config_of_the_cases_own {
             "{:?}",
             dropped.asked()
         );
-        std::fs::remove_dir_all(home)?;
+        cf_e2e::door::remove(home)?;
         Ok(())
     }
 
     #[test]
     fn a_rig_whose_home_goes_with_it_is_told_to_keep_nothing() -> Outcome {
-        let machine = tempfile::tempdir()?;
+        let machine = cf_e2e::door::made("t-")?;
         let kept = cf_e2e::door::made("cf-live-base-")?;
         let folder = Kept::new(kept.path().join("claude-config"), None);
         let shims = cf_e2e::door::made("cf-live-base-")?;
@@ -287,10 +287,10 @@ mod on_a_claude_config_of_the_cases_own {
 
     #[test]
     fn a_claude_config_that_cannot_be_made_stops_the_rig_before_anything_starts() -> Outcome {
-        let machine = tempfile::tempdir()?;
+        let machine = cf_e2e::door::made("t-")?;
         // A folder that is a file's child cannot be made.
         let file = machine.path().join("a-file");
-        std::fs::write(&file, "")?;
+        cf_e2e::door::write(&file, "")?;
         let folder = Kept::new(file.join("claude-config"), None);
         let shims = cf_e2e::door::made("cf-live-base-")?;
         let Err(failed) = started(machine.path(), shims.path(), &folder) else {

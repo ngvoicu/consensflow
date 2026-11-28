@@ -76,7 +76,6 @@ mod machine {
     fn listed(program: &str, args: &[&str]) -> Result<String, String> {
         let ran = Run::new(program)
             .args(args)
-            .inheriting_env()
             .limit(LISTING)
             .run()
             .map_err(|failed| format!("{program} did not run: {failed}"))?;

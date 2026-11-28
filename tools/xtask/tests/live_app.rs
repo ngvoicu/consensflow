@@ -385,6 +385,17 @@ const RULES: [&str; 4] = [
     "crates/cf-e2e/src/door/rule.rs",
 ];
 
+/// The member guard's own files: the guard refuses `pkill` and `killall` in a member's window, and
+/// its cases name them to be refused, as a start the guard stops. They end nothing, so only the
+/// rule that reads words for an app by its name leaves them be.
+const REFUSING_THE_NAMES: [&str; 5] = [
+    "crates/cf-daemon/src/member_guard/tests.rs",
+    "crates/cf-e2e/tests/rig/member_guard.rs",
+    "crates/cf/tests/member_guard.rs",
+    "crates/cf/tests/member_guard_shells.rs",
+    "tests/plants/daemon/member-guard.toml",
+];
+
 /// The starts held to `cf_base::bundle`, whose tests hand a stand-in the very words they
 /// refuse: what they say below their tests' start is the refusal's, and is not read.
 const REFUSING: [&str; 3] = [
@@ -407,7 +418,7 @@ fn read_of<'a>(path: &str, text: &'a str) -> &'a str {
 /// The files of the tools and of the rig that start a program a caller names (std's
 /// `Command::new` of a value, not of a name written there), and what holds them to no app
 /// of the live app's identity: the gate each calls (`cf_base::bundle`), or what they start.
-const STARTERS: [(&str, &str); 5] = [
+const STARTERS: [(&str, &str); 6] = [
     (
         "tools/cf-publish/src/process.rs",
         "curl, gh and tar alone, which its callers name; it is built on serde_json and sha2 alone",
@@ -423,6 +434,10 @@ const STARTERS: [(&str, &str); 5] = [
     (
         "crates/cf-e2e/src/door/tests.rs",
         "the test's own program, started again as a child the door's cases end or leave",
+    ),
+    (
+        "crates/cf-e2e/src/door/identity_reds.rs",
+        "Windows' own cmd.exe, from SystemRoot, to make a junction in a folder of the test's",
     ),
     (
         "tools/cf-publish/tests/release_build.rs",
@@ -633,7 +648,9 @@ fn no_test_or_tool_reaches_an_app_by_its_name_or_its_identity() {
     }
     let found: Vec<String> = files
         .iter()
-        .filter(|(path, _)| !RULES.contains(&path.as_str()))
+        .filter(|(path, _)| {
+            !RULES.contains(&path.as_str()) && !REFUSING_THE_NAMES.contains(&path.as_str())
+        })
         .flat_map(|(path, text)| {
             reaching_by_name(read_of(path, text))
                 .into_iter()

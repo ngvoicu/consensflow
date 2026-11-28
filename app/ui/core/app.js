@@ -154,15 +154,23 @@ const RESTART_NOTE_MS = 30_000
 /**
  * The daemon's state, as the app tells it. `closing`: the cause says what the app is doing
  * (closing the windows of the daemon that stopped) and nothing follows it, since the app
- * is not starting the daemon yet. `notice`: said once, when the daemon is up again.
+ * is not starting the daemon yet. `ledger`: the cause is the whole message of a ledger that cannot be
+ * saved to, shown as it is. `notice`: said once, when the daemon is up again.
  */
-function daemonStatus({ available, cause, retrying, closing, notice }) {
+function daemonStatus({ available, cause, retrying, closing, ledger, notice }) {
   const wasDown = !daemonDown.hidden
   daemonDown.hidden = available
   if (available) {
     placeDaemonDown()
     if (wasDown) void act(readMissing)
     if (notice) say(notice, 'info', RESTART_NOTE_MS)
+    return
+  }
+  if (ledger) {
+    // ConsensFlow cannot save to its ledger: the daemon's words are the whole message (what
+    // to restore, to quit, to reopen, to check and to resume), with nothing of the page's own.
+    daemonDown.replaceChildren(cause)
+    placeDaemonDown()
     return
   }
   const next = retrying
@@ -385,6 +393,8 @@ const pageNonce = crypto.randomUUID()
 const terminals = new TerminalsView(stage, {
   // The dock's map: its windows in the row's order, which are in view, the way to each.
   map: $('#dock-map'),
+  // The host's notices of typing that may be missing: a line of their own under the command bar.
+  notices: $('#input-notices'),
   pageId,
   invoke: (command, args) => {
     if (command === 'pane_ack') ackObserver?.(args)
@@ -548,6 +558,8 @@ async function refresh() {
     return refreshing
   }
   refreshing = (async () => {
+    // Whether this read of the board began once the output subscription stood.
+    const sinceSubscribed = terminals.isSubscribed
     try {
       const { projects } = await daemon('projects.list')
       state.projects = projects
@@ -589,6 +601,8 @@ async function refresh() {
       report(cause)
     } finally {
       refreshing = null
+      // Whether it drew a board or not, the windows not shown may now be drawn again.
+      if (sinceSubscribed) terminals.refreshed()
       if (again) {
         again = false
         void refresh()
@@ -1171,9 +1185,14 @@ async function start() {
       terminals.output(message)
     }
     // Once, for the life of the page: a second subscription ends the first.
-    await invoke('subscribe_output', { pageId, onOutput: channel })
+    const subscribed = await invoke('subscribe_output', { pageId, onOutput: channel })
+    // Only now may a window's history be pulled: the subscription fixed where it ends.
+    if (subscribed?.ok === true) terminals.subscribed()
   }
   await boardRead
+  // The board was read after the subscription stood, or the board read that follows it will say so:
+  // a window not shown does not wait for a refresh nothing may ask for.
+  if (terminals.isSubscribed) terminals.refreshed()
   document.body.dataset.ready = 'true'
   // The board has loaded: what the host owes the person is asked for again, and on a timer.
   pullLosses = keepAskingForLosses()

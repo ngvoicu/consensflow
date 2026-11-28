@@ -43,7 +43,8 @@ pub(super) fn t(bindings: &Bindings, name: &str, nth: usize) -> String {
     )
 }
 
-/// `line` with each `{X}` or `{X#n}` written as the bound task's `T-<number>`.
+/// `line` with each `{X}` or `{X#n}` written as the bound task's `T-<number>`, `{m}` as the
+/// number the next message takes and `{q}` as the chief's oldest question's.
 pub(super) fn named(bindings: &Bindings, line: &str) -> String {
     let mut out = String::new();
     let mut rest = line;
@@ -60,6 +61,19 @@ pub(super) fn named(bindings: &Bindings, line: &str) -> String {
                 || format!("(no {name} task yet)"),
                 |(number, plus)| format!("T-{}", number + plus),
             ));
+            rest = &rest[open + close + 1..];
+            continue;
+        }
+        // `{m}`: the number the next message takes (the question a window is about to ask);
+        // `{q}`: the oldest question the chief's inbox holds.
+        if inner == "m" || inner == "q" {
+            out.push_str(&if inner == "m" {
+                bindings.next_message.max(1).to_string()
+            } else {
+                bindings
+                    .question
+                    .map_or_else(|| "(no question yet)".to_owned(), |id| id.to_string())
+            });
             rest = &rest[open + close + 1..];
             continue;
         }
@@ -362,6 +376,7 @@ mod tests {
     fn a_command_line_names_its_tasks_by_their_numbers_and_quotes_its_last_word_for_a_person() {
         let bound = Bindings {
             found: BTreeMap::from([("A", vec![3, 7]), ("B", vec![5])]),
+            ..Bindings::default()
         };
         assert_eq!(
             named(&bound, "task add --needs {A} --needs {B} :: x {A#1}"),
@@ -384,5 +399,37 @@ mod tests {
             asks(&bound, "task resume {A} :: Go on.\ntask cancel {B}"),
             "Run exactly `cf task resume T-3 \"Go on.\"`, then `cf task cancel T-5` in your shell, in this order, and tell me in one line what each answered."
         );
+    }
+
+    #[test]
+    fn a_line_names_the_question_a_window_is_about_to_ask_by_the_board_not_by_a_count() {
+        // The board's own notes (the one that tells the chief its staff's roles changed) take
+        // message numbers before the scenario's: the chief's inbox holds the note (m-1), the
+        // task's thread its brief (m-2), and the pause's question is the next, m-3.
+        let snapshot = Snapshot {
+            tasks: vec![serde_json::json!({"number": 1, "messages": [{"id": 2, "kind": "task"}]})],
+            chief_inbox: vec![serde_json::json!({"id": 1, "kind": "note"})],
+            lanes: Vec::new(),
+            events: Vec::new(),
+        };
+        let bound = Bindings::by(&snapshot, &[]);
+        assert_eq!(
+            named(&bound, "task pause {A} :: CF answer m-{m} :: TOLD"),
+            "task pause (no A task yet) :: CF answer m-3 :: TOLD"
+        );
+        assert_eq!(
+            named(&bound, "answer m-{q} :: x"),
+            "answer m-(no question yet) :: x"
+        );
+        let mut asked = snapshot;
+        asked
+            .chief_inbox
+            .push(serde_json::json!({"id": 3, "kind": "question"}));
+        asked
+            .chief_inbox
+            .push(serde_json::json!({"id": 5, "kind": "question"}));
+        let bound = Bindings::by(&asked, &[]);
+        assert_eq!(named(&bound, "answer m-{q} :: x"), "answer m-3 :: x");
+        assert_eq!(named(&bound, "answer m-{m} :: x"), "answer m-6 :: x");
     }
 }

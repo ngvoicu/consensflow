@@ -38,16 +38,13 @@ runs = ["live-wrapper"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/machine/wrapper.rs"
-find = '''
-                [
-                    STAND_IN_WORKER_MODEL,
-                    STAND_IN_CHIEF_MODEL,
-                    STAND_IN_MEMBER_MODEL
-                ]
-                .map(|model| format!("word === '{model}'"))'''
-replace = '''
-                [STAND_IN_WORKER_MODEL, STAND_IN_MEMBER_MODEL]
-                .map(|model| format!("word === '{model}'"))'''
+find = '''                stand_in_words(names)
+                    .iter()
+                    .map(|model| format!("word === '{model}'"))'''
+replace = '''                stand_in_words(names)
+                    .iter()
+                    .filter(|model| model.as_str() != "fake-chief")
+                    .map(|model| format!("word === '{model}'"))'''
 
 [[plant]]
 name = "windows live: the window's words go before the flags the wrapper adds"
@@ -207,8 +204,8 @@ runs = ["live-login"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/login.rs"
-find = '''                cf_base::file::stat(file).is_ok_and(|now| now == *was)'''
-replace = '''                cf_base::file::stat(file).is_ok_and(|now| now == *was || now != *was)'''
+find = '''                .is_ok_and(|now| now == *was),'''
+replace = '''                .is_ok_and(|now| now == *was || now != *was),'''
 
 # T-858: `live monitor-wait` and `live mcp` ran their MCP server on `python3`, which a Windows machine
 # may have only as the Store's alias (zeewin2: exit 9009), and whose `os.setsid` has no Windows. The

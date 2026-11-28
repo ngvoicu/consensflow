@@ -530,3 +530,146 @@ fn a_form_with_no_envs_is_not_read() {
     let unread = names_of(&Other { args: vec![] }).expect_err("no envs");
     assert!(unread.to_string().contains("envs"), "{unread}");
 }
+
+/// N17: the window's own end of the console's output is overlapped, so that the question
+/// whether it holds bytes answers while a thread waits for the output (on a pipe of
+/// `CreatePipe` it waited for that read, 2 s on Windows 11 26200, even on a duplicate of the
+/// handle). The wait takes nothing: what was written is read after it, whole.
+#[test]
+fn a_windows_output_pipe_is_waited_on_without_taking_and_asked_while_it_waits() {
+    use std::io::Write;
+
+    // Which console host this run's windows open through, for the record.
+    println!("console host: {:?}", super::host_library());
+    let (read, mut write) = super::output_pipe().expect("a pipe");
+    let watch = super::Watch {
+        event: super::event().expect("an event"),
+        file: read,
+    };
+    let asker = watch.try_clone().expect("a handle of its own");
+    let reading = watch.try_clone().expect("another");
+    let (done, waited) = mpsc::channel();
+    let waiter = std::thread::spawn(move || {
+        watch.wait();
+        done.send(()).unwrap();
+    });
+    assert!(
+        waited.recv_timeout(Duration::from_millis(300)).is_err(),
+        "it waits while the pipe holds nothing"
+    );
+    let asked = Instant::now();
+    assert!(!asker.holds_bytes(), "nothing waits");
+    assert!(
+        asked.elapsed() < Duration::from_millis(100),
+        "the question waited for the read: {:?}",
+        asked.elapsed()
+    );
+    write.write_all(b"abc").expect("write");
+    waited
+        .recv_timeout(Duration::from_secs(5))
+        .expect("the wait ends with bytes");
+    waiter.join().unwrap();
+    assert!(asker.holds_bytes(), "the wait took nothing");
+    let mut buffer = [0; 8];
+    let got = super::read_overlapped(&reading.file, &reading.event, &mut buffer).unwrap();
+    assert_eq!(&buffer[..got], b"abc");
+    assert!(!asker.holds_bytes());
+    // A writer that has gone ends the wait and answers behind: nothing is current over it.
+    drop(write);
+    reading.wait();
+    assert!(
+        asker.holds_bytes(),
+        "a broken pipe cannot be asked, and is behind"
+    );
+    assert_eq!(
+        super::read_overlapped(&reading.file, &reading.event, &mut buffer).unwrap(),
+        0,
+        "the end of the output"
+    );
+}
+
+/// N17: a read waiting on the console's output is waited to its end inside the call that
+/// started it, so its `OVERLAPPED`, event and buffer outlive it. It ends when the writer's end
+/// closes, and not before; nothing cancels it.
+#[test]
+fn a_read_waiting_on_the_output_ends_when_its_writers_end_closes() {
+    let (read, write) = super::output_pipe().expect("a pipe");
+    let event = super::event().expect("an event");
+    let (done, ended) = mpsc::channel();
+    let reader = std::thread::spawn(move || {
+        let mut buffer = vec![0u8; 64];
+        let got = super::read_overlapped(&read, &event, &mut buffer);
+        done.send(got.map_err(|error| error.to_string())).unwrap();
+    });
+    assert!(
+        ended.recv_timeout(Duration::from_millis(500)).is_err(),
+        "the read waits while the writer's end is open"
+    );
+    drop(write);
+    assert_eq!(ended.recv_timeout(CLOSE_BOUND).expect("it ends"), Ok(0));
+    reader.join().unwrap();
+}
+
+/// N17: a window closed while its reader waits for output. The reader's thread ends once the
+/// console, which holds the writer's end, is closed; its own end of the output, and what it
+/// reads into, are let go after that and not before.
+#[test]
+fn a_window_closed_with_its_reader_waiting_lets_the_reader_end_after_its_console() {
+    let _pty_guard = serial_pty_test();
+    let console = closes::upcoming();
+    let table = Arc::new(PaneTable::new());
+    let (key, output) = open(
+        &table,
+        &powershell("Write-Output 'READY#'; Start-Sleep 1000"),
+        &HashMap::new(),
+        1 << 20,
+    );
+    let deadline = Instant::now() + Duration::from_secs(60);
+    let mut seen = Vec::new();
+    while !String::from_utf8_lossy(&seen).contains("READY#") {
+        let left = deadline.saturating_duration_since(Instant::now());
+        let chunk = output.recv_timeout(left).expect("the window's output");
+        seen.extend_from_slice(&chunk.bytes);
+        take(&table, &key, &chunk);
+    }
+    // The program sleeps: the reader waits in its read of nothing.
+    std::thread::sleep(Duration::from_secs(1));
+    assert!(
+        !closes::of(console).contains(&Closed::Output),
+        "no end of the output goes while the window runs"
+    );
+    let closing = Arc::clone(&table);
+    let closing_key = key.clone();
+    within_the_bound("the close of a window whose reader waits", move || {
+        closing
+            .kill(&closing_key)
+            .map_err(|error| error.to_string())
+    })
+    .expect("close the window");
+    // The stream ends with the reader's thread.
+    within_the_bound(
+        "the reader's thread",
+        move || while output.recv().is_ok() {},
+    );
+    let deadline = Instant::now() + CLOSE_BOUND;
+    let (closed, console_at) = loop {
+        let closed = closes::of(console);
+        let console_at = closed.iter().position(|one| *one == Closed::Console);
+        if let Some(console_at) = console_at {
+            if closed[console_at..].contains(&Closed::Output) {
+                break (closed, console_at);
+            }
+        }
+        assert!(Instant::now() < deadline, "{closed:?}");
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    // Before the console: the master's end alone. The reader's goes after it.
+    assert_eq!(
+        closed[..console_at]
+            .iter()
+            .filter(|one| **one == Closed::Output)
+            .count(),
+        1,
+        "{closed:?}"
+    );
+}

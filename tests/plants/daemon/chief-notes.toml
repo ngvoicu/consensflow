@@ -256,10 +256,10 @@ runs = ["chief-notes-ledger"]
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/giving.rs"
 find = '''
-           taken_from_id = COALESCE(?, taken_from_id), paused_with_project = 0, held_until = NULL
+           taken_from_id = COALESCE(?, taken_from_id), paused_with_project = 0, held_until = NULL, retry_hold = NULL
 '''
 replace = '''
-           taken_from_id = COALESCE(?, taken_from_id), paused_with_project = 0
+           taken_from_id = COALESCE(?, taken_from_id), paused_with_project = 0, retry_hold = NULL
 '''
 
 [[plant]]
@@ -270,10 +270,10 @@ runs = ["chief-notes-ledger"]
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/pausing.rs"
 find = '''
-             paused_with_project = 0, held_until = NULL
+             paused_with_project = 0, held_until = NULL, retry_hold = NULL
 '''
 replace = '''
-             paused_with_project = 0
+             paused_with_project = 0, retry_hold = NULL
 '''
 
 [[plant]]

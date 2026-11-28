@@ -494,3 +494,243 @@ fn copy_folder(from: &Path, to: &Path) {
 
 mod looks;
 mod opening;
+
+/// A file the viewer has no copy of in `home`.
+fn copies_in(home: &Path) -> Vec<PathBuf> {
+    fn walk(folder: &Path, found: &mut Vec<PathBuf>) {
+        for entry in fs::read_dir(folder).into_iter().flatten().flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                walk(&path, found);
+            } else if path.extension().is_some_and(|ext| ext == "html") {
+                found.push(path);
+            }
+        }
+    }
+    let mut found = Vec::new();
+    walk(home, &mut found);
+    found
+}
+
+/// An `specs.open` that was admitted and read before the ledger broke does not copy and does
+/// not open after it, and does not say it worked.
+#[tokio::test]
+async fn an_open_that_finishes_after_the_break_neither_copies_nor_opens_and_says_so() {
+    LocalSet::new()
+        .run_until(async {
+            let halt: Arc<std::sync::OnceLock<Arc<crate::halt::Halt>>> = Arc::default();
+            let breaking = Arc::clone(&halt);
+            let asked = asked_with(
+                Value::Null,
+                &[(".specs/checkout/SPEC.html", "<p>hi</p>")],
+                move |specs| {
+                    specs.before_each_look(Arc::new(move || {
+                        if let Some(halt) = breaking.get() {
+                            halt.break_ledger();
+                        }
+                    }))
+                },
+            );
+            let _ = halt.set(Arc::clone(&asked.rig.page.halt));
+            let answer = asked.open("checkout/SPEC.html").await;
+            assert_eq!(answer["ok"], false, "{answer}");
+            assert!(
+                copies_in(asked.home.path()).is_empty(),
+                "a copy was made after the break"
+            );
+            assert!(
+                asked.opened.borrow().is_empty(),
+                "a file was opened after the break"
+            );
+            assert!(
+                answer["error"].as_str().unwrap().contains("ledger"),
+                "{answer}"
+            );
+        })
+        .await;
+}
+
+/// The break comes after the copy and before the opener: nothing is opened.
+#[tokio::test]
+async fn an_open_whose_copy_was_made_is_not_opened_after_the_break() {
+    LocalSet::new()
+        .run_until(async {
+            let halt: Arc<std::sync::OnceLock<Arc<crate::halt::Halt>>> = Arc::default();
+            let breaking = Arc::clone(&halt);
+            let asked = asked_with(
+                Value::Null,
+                &[(".specs/checkout/SPEC.html", "<p>hi</p>")],
+                move |specs| {
+                    specs.after_each_look(Arc::new(move || {
+                        if let Some(halt) = breaking.get() {
+                            halt.break_ledger();
+                        }
+                    }))
+                },
+            );
+            let _ = halt.set(Arc::clone(&asked.rig.page.halt));
+            let answer = asked.open("checkout/SPEC.html").await;
+            assert_eq!(answer["ok"], false, "{answer}");
+            assert!(
+                asked.opened.borrow().is_empty(),
+                "a file was opened after the break"
+            );
+        })
+        .await;
+}
+
+/// After the break the page's operations are refused before they begin, and one that was
+/// begun before it and succeeds after it does not say it worked.
+#[tokio::test]
+async fn after_the_break_no_page_answer_says_it_worked() {
+    LocalSet::new()
+        .run_until(async {
+            let halt: Arc<std::sync::OnceLock<Arc<crate::halt::Halt>>> = Arc::default();
+            let breaking = Arc::clone(&halt);
+            let asked = asked_with(
+                Value::Null,
+                &[(".specs/checkout/SPEC.html", "<p>hi</p>")],
+                move |specs| {
+                    specs.after_each_look(Arc::new(move || {
+                        if let Some(halt) = breaking.get() {
+                            halt.break_ledger();
+                        }
+                    }))
+                },
+            );
+            let _ = halt.set(Arc::clone(&asked.rig.page.halt));
+            // Read before the break, answered after it.
+            let read = asked.file("checkout/SPEC.html").await;
+            assert_eq!(read["ok"], false, "{read}");
+            // Asked after it.
+            let later = asked.present().await;
+            assert_eq!(later["ok"], false, "{later}");
+            // And a setting that writes a file is not written.
+            let settings = ask(&asked.app, "specs.set", json!({ "on": true })).await;
+            assert_eq!(settings["ok"], false, "{settings}");
+        })
+        .await;
+}
+
+/// The break comes while the file is being written into the copy, between the checkpoints
+/// of the look: nothing reaches the copies' folder, and the opener is not asked.
+#[tokio::test]
+async fn a_break_inside_the_copy_leaves_no_file_at_the_destination() {
+    LocalSet::new()
+        .run_until(async {
+            let halt: Arc<std::sync::OnceLock<Arc<crate::halt::Halt>>> = Arc::default();
+            let breaking = Arc::clone(&halt);
+            let asked = asked_with(
+                Value::Null,
+                &[(".specs/checkout/SPEC.html", "<p>hi</p>")],
+                move |specs| {
+                    specs.during_each_file(Arc::new(move || {
+                        if let Some(halt) = breaking.get() {
+                            halt.break_ledger();
+                        }
+                    }))
+                },
+            );
+            let _ = halt.set(Arc::clone(&asked.rig.page.halt));
+            let answer = asked.open("checkout/SPEC.html").await;
+            assert_eq!(answer["ok"], false, "{answer}");
+            assert!(
+                copies_in(asked.home.path()).is_empty(),
+                "a file reached its place"
+            );
+            assert!(asked.opened.borrow().is_empty());
+        })
+        .await;
+}
+
+/// The reaction the daemon's ledger tells, on this rig: the page's halt, its bridge and its
+/// ledger, the home's trace and log.
+fn reacting(asked: &Asked) {
+    let halt = Arc::clone(&asked.rig.page.halt);
+    let log = Rc::new(crate::files::Log::new(asked.home.path()));
+    let trace = Rc::new(crate::files::Trace::new(asked.home.path()));
+    let errors = Rc::new(crate::errors::Errors::new(log, trace));
+    let latch = crate::stop::Latch::over(halt);
+    let reaction = crate::broken::reaction(
+        &asked.home.path().join("consensflow.db"),
+        &errors,
+        &asked._daemon,
+        &latch,
+    );
+    asked.rig.kit.ledger.borrow_mut().on_broken(reaction);
+}
+
+/// A spec's copy is put at its name by one rename under the halt's hold (finding 8): a break
+/// that comes while the file worker is at the rename waits for it, so the app is told only
+/// once the copy is at its name, and no rename begins after.
+#[tokio::test]
+async fn the_app_is_not_told_of_the_break_while_a_copy_is_at_its_rename() {
+    LocalSet::new()
+        .run_until(async {
+            let inside = Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let (let_go, held) = std::sync::mpsc::channel::<()>();
+            let held = std::sync::Mutex::new(held);
+            let entered = Arc::clone(&inside);
+            let asked = asked_with(
+                Value::Null,
+                &[(".specs/checkout/SPEC.html", "<p>fixture</p>")],
+                move |specs| {
+                    specs.at_each_rename(Arc::new(move || {
+                        entered.store(true, std::sync::atomic::Ordering::SeqCst);
+                        // Let go by the test; never for longer than this, so a broken test ends.
+                        let _ = held
+                            .lock()
+                            .unwrap()
+                            .recv_timeout(std::time::Duration::from_secs(5));
+                    }))
+                },
+            );
+            reacting(&asked);
+            // What was at its name when the app heard of the break.
+            let heard: Rc<RefCell<Vec<bool>>> = Rc::default();
+            let (told, home) = (Rc::clone(&heard), asked.home.path().to_path_buf());
+            asked.app.on_event(crate::broken::EVENT, move |_| {
+                told.borrow_mut().push(named_copy(&home));
+            });
+            let opening = asked.app.request(
+                "specs.open",
+                json!({ "project": asked.project, "path": "checkout/SPEC.html" }),
+                None,
+            );
+            let opening = tokio::task::spawn_local(opening);
+            while !inside.load(std::sync::atomic::Ordering::SeqCst) {
+                tokio::time::sleep(std::time::Duration::from_millis(2)).await;
+            }
+            assert!(!named_copy(asked.home.path()), "held at the rename");
+            // Let go a moment after the break begins, well within the bound.
+            let released = std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_millis(60));
+                let _ = let_go.send(());
+            });
+            break_the_ledger_of(&asked);
+            let answer = opening.await.unwrap().unwrap();
+            released.join().unwrap();
+            assert_eq!(answer["ok"], false, "{answer}");
+            assert_eq!(
+                *heard.borrow(),
+                [true],
+                "told once, the copy at its name already"
+            );
+            assert!(asked.opened.borrow().is_empty(), "and nothing opened");
+        })
+        .await;
+}
+
+/// Whether a copy is at its name, and not still in its staging folder.
+fn named_copy(home: &Path) -> bool {
+    copies_in(home)
+        .iter()
+        .any(|copy| !copy.to_string_lossy().contains(".part"))
+}
+
+fn break_the_ledger_of(asked: &Asked) {
+    let mut ledger = asked.rig.kit.ledger.borrow_mut();
+    cf_ledger::refuse_next_rollback();
+    assert!(ledger.rename_project(99_999, "nowhere").is_err());
+    assert!(ledger.broken().is_some());
+}

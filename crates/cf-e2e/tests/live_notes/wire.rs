@@ -126,12 +126,12 @@ mod tests {
     }
 
     /// A home with the wire of a launch of Devin holding `lines`.
-    fn home_with(lines: &[Value]) -> tempfile::TempDir {
-        let home = tempfile::tempdir().unwrap();
+    fn home_with(lines: &[Value]) -> cf_e2e::door::Made {
+        let home = cf_e2e::door::made("t-").unwrap();
         let launch = home.path().join("integrations").join("devin").join("one");
-        std::fs::create_dir_all(&launch).unwrap();
+        cf_e2e::door::make_dir(&launch).unwrap();
         let text: String = lines.iter().map(|line| format!("{line}\n")).collect();
-        std::fs::write(launch.join("wire.jsonl"), text).unwrap();
+        cf_e2e::door::write(launch.join("wire.jsonl"), text).unwrap();
         home
     }
 
@@ -155,7 +155,7 @@ mod tests {
             "{}\n",
             json!({ "method": "session/prompt", "params": { "prompt": "[ConsensFlow m-2 · again]" } })
         ));
-        std::fs::write(launch.join("wire.jsonl"), text).unwrap();
+        cf_e2e::door::write(launch.join("wire.jsonl"), text).unwrap();
         watch.look(home.path(), &notes(), 70_000);
         let said = watch.said(&notes(), |id| Some(9_000 + id));
         assert_eq!(
@@ -180,7 +180,7 @@ mod tests {
                 "m-3 is named by no record of the wire"
             ]
         );
-        let nowhere = tempfile::tempdir().unwrap();
+        let nowhere = cf_e2e::door::made("t-").unwrap();
         let mut none = Watch::default();
         none.look(nowhere.path(), &notes(), 1);
         assert!(none.named.is_empty());

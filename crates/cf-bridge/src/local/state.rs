@@ -50,6 +50,12 @@ pub(super) struct Inner {
     after_read: Option<Rc<ReadHandler>>,
     next_id: Cell<u64>,
     closed: Cell<bool>,
+    /// Set when the daemon is ending: no frame the peer sends is admitted after
+    /// it but the answers to what this end asked.
+    fenced: Cell<bool>,
+    /// Set when the daemon's ledger cannot save: nothing more is asked of the peer (a
+    /// request is refused in words and never written), so no window is told a line.
+    asks_no_more: Cell<bool>,
     /// Why the bridge closed, which a request made after that is refused with.
     terminal: RefCell<Option<BridgeError>>,
     pending: RefCell<HashMap<String, Pending>>,
@@ -64,6 +70,22 @@ pub(super) struct Inner {
 }
 
 impl Inner {
+    pub(super) fn fence(&self) {
+        self.fenced.set(true);
+    }
+
+    pub(super) fn ask_no_more(&self) {
+        self.asks_no_more.set(true);
+    }
+
+    pub(super) fn asks_no_more(&self) -> bool {
+        self.asks_no_more.get()
+    }
+
+    pub(super) fn is_fenced(&self) -> bool {
+        self.fenced.get()
+    }
+
     pub(super) fn new(settings: Settings, queue: mpsc::UnboundedSender<Vec<u8>>) -> Self {
         Self {
             role: settings.role,
@@ -74,6 +96,8 @@ impl Inner {
             after_read: settings.after_read,
             next_id: Cell::new(0),
             closed: Cell::new(false),
+            fenced: Cell::new(false),
+            asks_no_more: Cell::new(false),
             terminal: RefCell::new(None),
             pending: RefCell::new(HashMap::new()),
             registry: Registry::default(),

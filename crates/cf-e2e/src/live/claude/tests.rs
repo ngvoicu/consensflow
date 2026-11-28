@@ -6,16 +6,15 @@ use super::*;
 #[cfg(unix)]
 #[test]
 fn kit_disclosure_claude_record_helpers_refuse_links_outside_the_run() {
-    use std::os::unix::fs::symlink;
+    use crate::door::symlink;
     let run = crate::door::made("cf-claude-records-").unwrap();
     let foreign = crate::standin_process::unowned_tempdir();
-    std::fs::write(
+    crate::standin_process::foreign_write(
         foreign.path().join("123.json"),
         r#"{"sessionId":"s","status":"idle"}"#,
-    )
-    .unwrap();
-    std::fs::create_dir(foreign.path().join("project")).unwrap();
-    std::fs::write(foreign.path().join("project/s.jsonl"), "{}\n").unwrap();
+    );
+    crate::standin_process::foreign_dir(foreign.path().join("project"));
+    crate::standin_process::foreign_write(foreign.path().join("project/s.jsonl"), "{}\n");
     symlink(foreign.path(), run.path().join("sessions")).unwrap();
     symlink(foreign.path(), run.path().join("projects")).unwrap();
     assert!(
@@ -282,6 +281,7 @@ fn the_processes_of_a_machines_table_that_hold_a_word_are_the_ones_whose_command
         ppid,
         command: command.to_owned(),
         exe: None,
+        link: crate::live::members::Link::Number,
     };
     let table = vec![
         running(

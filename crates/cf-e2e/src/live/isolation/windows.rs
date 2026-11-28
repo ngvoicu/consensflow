@@ -2,6 +2,7 @@
 // are path arithmetic over a profile laid out as Windows lays it, so a Mac holds them too. The
 // zeewin2 run of a live suite is what shows the harness reads them where the plans say.
 use super::*;
+use std::fs;
 
 /// What the owner's Devin files hold: never said anywhere, and never in the run's home but
 /// where a login is copied.
@@ -52,8 +53,8 @@ fn kit_round4_windows_devin_gets_generated_git_config() {
 }
 
 fn write(path: &Path, text: &str) {
-    fs::create_dir_all(path.parent().unwrap()).unwrap();
-    fs::write(path, text).unwrap();
+    crate::door::make_dir(path.parent().unwrap()).unwrap();
+    crate::door::write(path, text).unwrap();
 }
 
 /// Every file below `folder`, relative to it, sorted.
@@ -81,15 +82,15 @@ fn files_below(folder: &Path) -> Vec<String> {
 /// The owner's profile on Windows: `AppData\Roaming` and `AppData\Local` below it, Devin's files
 /// in both, another program's beside them, and the scratch folder the run's home is made in.
 struct Owner {
-    profile: tempfile::TempDir,
-    parent: tempfile::TempDir,
+    profile: crate::door::Made,
+    parent: crate::door::Made,
 }
 
 impl Owner {
     fn new() -> Self {
         let owner = Self {
-            profile: tempfile::tempdir().unwrap(),
-            parent: tempfile::tempdir().unwrap(),
+            profile: crate::door::made("t-").unwrap(),
+            parent: crate::door::made("t-").unwrap(),
         };
         for file in [
             "AppData/Roaming/devin/config.json",
@@ -118,7 +119,7 @@ impl Owner {
     /// Devin's, as the machine's `APPDATA` names the Roaming folder.
     fn devin(&self) -> Isolation {
         let mut made =
-            Isolation::devin_on_windows(self.profile.path(), &self.path("AppData/Roaming"));
+            Isolation::devin_on_windows(self.profile.path(), self.path("AppData/Roaming"));
         made.parent = self.parent.path().to_path_buf();
         made
     }
@@ -240,7 +241,7 @@ fn a_devin_run_on_windows_copies_its_login_and_config_to_the_roaming_folder_and_
 #[test]
 fn a_devin_login_that_is_not_there_stops_the_run_naming_the_file_before_anything_is_made() {
     let owner = Owner::new();
-    fs::remove_file(owner.path("AppData/Roaming/devin/credentials.toml")).unwrap();
+    crate::door::remove(owner.path("AppData/Roaming/devin/credentials.toml")).unwrap();
     let isolation = owner.devin();
     let said = isolation.made_at(NOW).unwrap_err().to_string();
     assert!(said.contains("devin's login is not in"), "{said}");
@@ -255,7 +256,7 @@ fn a_devin_login_that_is_not_there_stops_the_run_naming_the_file_before_anything
 #[test]
 fn a_devin_config_that_is_not_there_is_no_reason_to_stop() {
     let owner = Owner::new();
-    fs::remove_file(owner.path("AppData/Roaming/devin/config.json")).unwrap();
+    crate::door::remove(owner.path("AppData/Roaming/devin/config.json")).unwrap();
     let isolation = owner.devin();
     let home = isolation.made_at(NOW).unwrap();
     assert_eq!(
@@ -282,7 +283,7 @@ fn a_devin_run_on_windows_that_changes_a_file_of_the_owners_fails_naming_it() {
         "AppData/Roaming/devin/cli/trusted_workspaces.json",
     ] {
         let path = owner.path(file);
-        fs::write(&path, format!("{SENTINEL}-written-by-the-run")).unwrap();
+        crate::door::write(&path, format!("{SENTINEL}-written-by-the-run")).unwrap();
         let said = isolation.finish().unwrap_err().to_string();
         assert!(said.contains("DEVIN SETUP"), "{file}: {said}");
         assert!(
@@ -293,7 +294,7 @@ fn a_devin_run_on_windows_that_changes_a_file_of_the_owners_fails_naming_it() {
             !said.contains(SENTINEL),
             "nothing a file holds is said: {said}"
         );
-        fs::write(&path, SENTINEL).unwrap();
+        crate::door::write(&path, SENTINEL).unwrap();
     }
 }
 
@@ -425,7 +426,11 @@ fn on_windows_muse_watches_the_owners_login_settings_trust_and_session_index() {
     let data =
         var("XDG_DATA_HOME").map_or_else(|| home.join(".local").join("share"), PathBuf::from);
     assert_eq!(
-        made.plan.watched,
+        made.plan
+            .watched
+            .iter()
+            .map(|held| PathBuf::from(held.to_argument()))
+            .collect::<Vec<_>>(),
         [
             config.join("muse").join("auth.json"),
             config.join("muse").join("settings.json"),
@@ -451,13 +456,13 @@ fn the_homes_of_all_five_harnesses_on_one_windows_rig_set_no_variable_twice() {
         ),
         (
             "Codex".to_owned(),
-            Isolation::codex(profile, &profile.join(".codex")).vars_in(run),
+            Isolation::codex(profile, profile.join(".codex")).vars_in(run),
         ),
         (
             "Pi".to_owned(),
             Isolation::pi(
                 profile,
-                &profile.join(".pi").join("agent"),
+                profile.join(".pi").join("agent"),
                 "openai/gpt-5.6-luna",
                 Duration::from_secs(900),
             )
@@ -465,15 +470,15 @@ fn the_homes_of_all_five_harnesses_on_one_windows_rig_set_no_variable_twice() {
         ),
         (
             "Devin".to_owned(),
-            Isolation::devin_on_windows(profile, &profile.join("AppData").join("Roaming"))
+            Isolation::devin_on_windows(profile, profile.join("AppData").join("Roaming"))
                 .vars_in(run),
         ),
         (
             "Muse Code".to_owned(),
             Isolation::muse(
                 profile,
-                &profile.join(".config"),
-                &profile.join(".local").join("share"),
+                profile.join(".config"),
+                profile.join(".local").join("share"),
             )
             .vars_in(run),
         ),

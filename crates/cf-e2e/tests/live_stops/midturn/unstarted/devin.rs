@@ -177,16 +177,16 @@ mod tests {
 
     fn wire_in(folder: &Path, records: &[Value]) -> Wire {
         let launch = folder.join("integrations").join("devin").join("launch-1");
-        std::fs::create_dir_all(&launch).unwrap();
+        cf_e2e::door::make_dir(&launch).unwrap();
         let text: String = records.iter().map(|record| format!("{record}\n")).collect();
-        std::fs::write(launch.join("wire.jsonl"), text).unwrap();
+        cf_e2e::door::write(launch.join("wire.jsonl"), text).unwrap();
         Wire::open(folder).unwrap()
     }
 
     #[test]
     fn a_wire_that_names_its_conversation_says_so_and_one_that_names_none_says_what_devin_said_first(
     ) {
-        let folder = tempfile::tempdir().unwrap();
+        let folder = cf_e2e::door::made("t-").unwrap();
         let chunk = json!({ "update": { "sessionUpdate": "agent_message_chunk" } });
         let named = json!({
             "sessionId": "calm-river",
@@ -202,7 +202,7 @@ mod tests {
             ]
         );
         let hello = json!({ "method": "initialize" });
-        let other = tempfile::tempdir().unwrap();
+        let other = cf_e2e::door::made("t-").unwrap();
         let wire = wire_in(other.path(), &[hello.clone(), chunk.clone(), chunk]);
         let lines = wire_lines(&wire);
         assert_eq!(
@@ -287,7 +287,7 @@ mod tests {
     #[test]
     fn the_store_diagnostic_does_not_look_in_the_persons_home() {
         let run = cf_e2e::door::made("devin-store-diagnostic-").unwrap();
-        let person = tempfile::tempdir().unwrap();
+        let person = cf_e2e::standin_process::unowned_tempdir();
         let data = run.path().join("data");
         let at = |path: &Path| path.to_string_lossy().into_owned();
         let env = vec![
@@ -309,10 +309,10 @@ mod tests {
         #[cfg(unix)]
         {
             let other = person.path().join("sessions.db");
-            std::fs::write(&other, b"foreign").unwrap();
+            cf_e2e::standin_process::foreign_write(&other, b"foreign");
             let link = data.join("devin/cli/sessions.db");
-            std::fs::create_dir_all(link.parent().unwrap()).unwrap();
-            std::os::unix::fs::symlink(other, link).unwrap();
+            cf_e2e::door::make_dir(link.parent().unwrap()).unwrap();
+            cf_e2e::door::symlink(other, link).unwrap();
             assert!(store_files(&env, now).is_err());
         }
     }
@@ -323,15 +323,11 @@ mod tests {
         let roaming = folder.path().join("Roaming");
         let local = folder.path().join("Local");
         let store = roaming.join("devin").join("cli");
-        std::fs::create_dir_all(&store).unwrap();
-        std::fs::write(store.join("sessions.db"), b"12345").unwrap();
+        cf_e2e::door::make_dir(&store).unwrap();
+        cf_e2e::door::write(store.join("sessions.db"), b"12345").unwrap();
         // A time of whole seconds, which no file system rounds.
         let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_800_000_000);
-        std::fs::File::options()
-            .write(true)
-            .open(store.join("sessions.db"))
-            .unwrap()
-            .set_modified(now - Duration::from_secs(7))
+        cf_e2e::door::set_modified(store.join("sessions.db"), now - Duration::from_secs(7))
             .unwrap();
         let at = |path: &Path| path.to_string_lossy().into_owned();
         let env = vec![

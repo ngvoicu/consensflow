@@ -5,6 +5,7 @@ use std::fs;
 use std::time::Duration;
 
 use super::*;
+use crate::files;
 
 #[test]
 fn standin_isolation_muse_launcher_refuses_an_inherited_harness_home() {
@@ -37,7 +38,6 @@ fn standin_isolation_muse_launcher_refuses_an_inherited_harness_home() {
         "live::machine::tests::standin_isolation_muse_launcher_refuses_an_inherited_harness_home",
         std::time::Duration::from_secs(120),
     )
-    .inheriting_env()
     .arg("--nocapture")
     .var("CODEX_HOME", &codex)
     .var(CHILD, &codex)
@@ -176,13 +176,12 @@ fn t1700_login_only_needs_no_owner_configuration_mark() {
     }
     let root = crate::door::made("cf-parity-no-mark-").unwrap();
     let home = root.path().join("owner");
-    fs::create_dir(&home).unwrap();
+    crate::door::make_dir(&home).unwrap();
     let output = crate::process::case_of(
         std::env::current_exe().unwrap(),
         "live::machine::tests::t1700_login_only_needs_no_owner_configuration_mark",
         Duration::from_secs(30),
     )
-    .inheriting_env()
     .var(CHILD, "1")
     .var("HOME", &home)
     .var("USERPROFILE", &home)
@@ -220,8 +219,8 @@ fn a_harness_whose_version_leaves_a_process_holding_its_output_says_it_and_holds
     // holds its output for twenty seconds.
     let folder = crate::door::made("cf-test-").unwrap();
     let wrapper = folder.path().join("pi");
-    std::fs::write(&wrapper, "#!/bin/sh\necho 0.71.2\nsleep 20 &\n").unwrap();
-    std::fs::set_permissions(&wrapper, std::fs::Permissions::from_mode(0o755)).unwrap();
+    crate::door::write(&wrapper, "#!/bin/sh\necho 0.71.2\nsleep 20 &\n").unwrap();
+    crate::door::set_permissions(&wrapper, std::fs::Permissions::from_mode(0o755)).unwrap();
     let started = std::time::Instant::now();
     let said = Installed::at(Harness::Pi, &wrapper, "home").version();
     assert!(started.elapsed() < std::time::Duration::from_secs(15));
@@ -258,10 +257,10 @@ fn a_home_holds_a_login_when_it_holds_the_place_the_harness_keeps_it() {
     for harness in Harness::ALL.into_iter().filter(|h| *h != Harness::Codex) {
         assert!(!held(harness, home.path()), "{harness:?}");
     }
-    fs::write(home.path().join(".claude.json"), "{}").unwrap();
+    crate::door::write(home.path().join(".claude.json"), "{}").unwrap();
     assert!(held(Harness::Claude, home.path()));
     assert!(!held(Harness::Pi, home.path()));
-    fs::create_dir_all(home.path().join(".config").join("devin")).unwrap();
+    crate::door::make_dir(home.path().join(".config").join("devin")).unwrap();
     assert!(held(Harness::Devin, home.path()));
     // Codex's home is the folder itself: any folder that is there.
     assert!(held(Harness::Codex, home.path()));
@@ -273,14 +272,14 @@ fn devin_keeps_its_login_in_devin_under_appdata_on_windows_and_in_the_xdg_places
     // A Windows profile as zeewin has it: Devin's login, config and sessions are in
     // `AppData\Roaming\devin`, and `.config` and `.local` are not there at all.
     let windows = crate::door::made("cf-test-").unwrap();
-    fs::create_dir_all(windows.path().join("AppData/Roaming/devin/cli")).unwrap();
+    crate::door::make_dir(windows.path().join("AppData/Roaming/devin/cli")).unwrap();
     assert!(held(Harness::Devin, windows.path(), None, true));
     assert!(!held(Harness::Devin, windows.path(), None, false));
     // A Mac's or Linux's: the XDG places, either of them.
     for place in [".config/devin", ".local/share/devin"] {
         let unix = crate::door::made("cf-test-").unwrap();
         assert!(!held(Harness::Devin, unix.path(), None, false), "{place}");
-        fs::create_dir_all(unix.path().join(place)).unwrap();
+        crate::door::make_dir(unix.path().join(place)).unwrap();
         assert!(held(Harness::Devin, unix.path(), None, false), "{place}");
         assert!(!held(Harness::Devin, unix.path(), None, true), "{place}");
     }
@@ -292,12 +291,12 @@ fn where_windows_names_its_appdata_devin_is_looked_for_there_and_not_in_the_prof
     let redirected = crate::door::made("cf-test-").unwrap();
     let appdata = redirected.path().to_string_lossy().into_owned();
     let own = profile.path().join("AppData").join("Roaming").join("devin");
-    fs::create_dir_all(&own).unwrap();
+    crate::door::make_dir(&own).unwrap();
     let places =
         |appdata: Option<&str>| login_places(Harness::Devin, profile.path(), appdata, true);
     assert_eq!(places(Some(&appdata)), [redirected.path().join("devin")]);
     assert!(!held(Harness::Devin, profile.path(), Some(&appdata), true));
-    fs::create_dir_all(redirected.path().join("devin")).unwrap();
+    crate::door::make_dir(redirected.path().join("devin")).unwrap();
     assert!(held(Harness::Devin, profile.path(), Some(&appdata), true));
     // A machine that names none, or names it empty, has it in the profile's own.
     assert_eq!(places(None), std::slice::from_ref(&own));
@@ -342,51 +341,26 @@ fn a_machine_with_no_login_is_told_where_the_harness_keeps_it_and_what_to_do() {
     );
 }
 
+/// T-2000 finding 1: the person's home is where the project folders are below, and in no
+/// environment: no install gives its window a variable of the person's, the kit's own
+/// `CF_KIT_PROJECT_HOME` among them.
 #[test]
-fn a_window_reads_codexs_login_by_codex_home_and_every_others_by_the_machines_home() {
-    let nothing = |_: &str| None;
-    let codex = Installed::at(Harness::Codex, "bin/codex", "login");
-    assert_eq!(
-        codex.login(&nothing),
-        [("CODEX_HOME".to_owned(), "login".to_owned())]
-    );
-    let pi = Installed::at(Harness::Pi, "bin/pi", "machine");
-    let vars = pi.login(&nothing);
-    let var = |name: &str| {
-        vars.iter()
-            .rev()
-            .find(|(given, _)| given == name)
-            .map(|(_, value)| value.clone())
-    };
-    assert_eq!(var("HOME").as_deref(), Some("machine"));
-    let config = Path::new("machine").join(".config");
-    assert_eq!(
-        var("XDG_CONFIG_HOME").as_deref(),
-        Some(config.to_string_lossy().as_ref())
-    );
-    assert_eq!(var("XDG_DATA_HOME"), None, "the default is below the home");
-    assert_eq!(var("CODEX_HOME"), None);
-    // What the machine names for itself is what its windows read.
-    let machine = |name: &str| match name {
-        "XDG_CONFIG_HOME" => Some("/x/config".to_owned()),
-        "XDG_DATA_HOME" => Some("/x/data".to_owned()),
-        "XDG_CACHE_HOME" => Some(String::new()),
-        _ => None,
-    };
-    let vars = pi.login(&machine);
-    let var = |name: &str| {
-        vars.iter()
-            .rev()
-            .find(|(given, _)| given == name)
-            .map(|(_, value)| value.clone())
-    };
-    assert_eq!(var("XDG_CONFIG_HOME").as_deref(), Some("/x/config"));
-    assert_eq!(var("XDG_DATA_HOME").as_deref(), Some("/x/data"));
-    assert_eq!(
-        var("XDG_CACHE_HOME"),
-        None,
-        "a variable set to nothing is not set"
-    );
+fn no_install_gives_its_window_a_profile_variable_of_the_persons() {
+    for harness in Harness::ALL {
+        let install = Installed::at(harness, "bin/x", "/the/persons/home");
+        assert_eq!(
+            install.project_home(),
+            Path::new("/the/persons/home"),
+            "{harness:?}"
+        );
+        // A rig of Muse makes its launcher's folders, which a stand-in process holds to its own.
+        if harness == Harness::Muse {
+            continue;
+        }
+        let debug = format!("{:?}", rig(&[install], "/the/stand-in"));
+        assert!(!debug.contains("CF_KIT_PROJECT_HOME"), "{debug}");
+        assert!(!debug.contains("(\"HOME\", \"/the/persons/home"), "{debug}");
+    }
 }
 
 #[test]
@@ -471,28 +445,44 @@ fn an_install_on_a_home_of_the_runs_own_is_given_the_persons_home_and_none_of_th
             "{owners}: {debug}"
         );
     }
-    // Their home is the windows' all the same: the folders of the project are below it (Devin's
-    // window, opened below a folder of the rig's own, which macOS spells through the `/var` link
-    // of its temporary folder, showed no answer: 2026-10-27).
-    assert!(debug.contains("(\"HOME\", \"/home/me\")"), "{debug}");
+    // The person's home is where the project folders are below, as before (Devin's window,
+    // opened below a folder of the rig's own, which macOS spells through the `/var` link of its
+    // temporary folder, showed no answer: 2026-10-27), and the windows' own home is not it.
+    assert!(
+        debug.contains("project_home: Some(\"/home/me\")"),
+        "{debug}"
+    );
+    assert!(!debug.contains("CF_KIT_PROJECT_HOME"), "{debug}");
+    assert!(!debug.contains("(\"HOME\", \"/home/me"), "{debug}");
     // What the rig has instead of the rest: a home for each, asked for its variables when it starts.
     assert_eq!(debug.matches("Isolation {").count(), 2, "{debug}");
 }
 
 #[test]
-fn a_codex_on_a_home_of_the_runs_own_is_given_the_persons_home_not_its_codex_folder() {
+fn a_window_is_given_the_persons_home_only_as_where_its_project_is_never_as_its_own_home() {
     let codex = Installed::at(Harness::Codex, "/codex/bin/codex", "/home/me/.codex")
         .with_isolation(Arc::new(Isolation::codex(
             Path::new("/home/me"),
             Path::new("/home/me/.codex"),
         )));
     let debug = format!("{:?}", rig(&[codex], "/the/stand-in"));
-    // The project folders are below the windows' home: never in the owner's Codex folder.
-    assert!(debug.contains("(\"HOME\", \"/home/me\")"), "{debug}");
     assert!(
-        !debug.contains("(\"HOME\", \"/home/me/.codex\")"),
+        debug.contains("project_home: Some(\"/home/me\")"),
         "{debug}"
     );
+    assert!(!debug.contains("CF_KIT_PROJECT_HOME"), "{debug}");
+    for name in [
+        "HOME",
+        "USERPROFILE",
+        "XDG_CONFIG_HOME",
+        "XDG_DATA_HOME",
+        "CODEX_HOME",
+    ] {
+        assert!(
+            !debug.contains(&format!("(\"{name}\", \"/home/me")),
+            "{name} is the person's: {debug}"
+        );
+    }
 }
 
 #[test]
@@ -513,7 +503,7 @@ fn a_rig_for_several_harnesses_has_each_ones_folders_once_and_claude_without_its
     );
     assert!(debug.contains("unset: [\"CLAUDE_CONFIG_DIR\"]"), "{debug}");
     assert!(
-        debug.contains("(\"CODEX_HOME\", \"/machine/.codex\")"),
+        !debug.contains("(\"CODEX_HOME\", \"/machine/.codex\")"),
         "{debug}"
     );
     // A locale that draws the windows' screens, which no harness's own setup gives them.
@@ -595,11 +585,14 @@ fn the_user_whose_keychain_a_harness_asks_is_the_user_of_the_machine() {
     }
 }
 
+/// T-1997 finding 2: a Windows window has the machine's program folders and description, and
+/// never the caller's `APPDATA` or `LOCALAPPDATA`: those are homes, which the door gives below the
+/// rig's own home.
 #[test]
 fn a_windows_window_has_the_machines_folders_for_settings_and_programs_that_it_has_and_no_others() {
-    // Devin keeps its settings and sessions under APPDATA: a window without it has none.
     let machine = |name: &str| match name {
         "APPDATA" => Some(r"C:\Users\ngvoi\AppData\Roaming".to_owned()),
+        "LOCALAPPDATA" => Some(r"C:\Users\ngvoi\AppData\Local".to_owned()),
         "OS" => Some("Windows_NT".to_owned()),
         "ProgramFiles(x86)" => Some(r"C:\Program Files (x86)".to_owned()),
         "HOME" => Some("not a Windows variable".to_owned()),
@@ -610,10 +603,6 @@ fn a_windows_window_has_the_machines_folders_for_settings_and_programs_that_it_h
         windows_environment(&machine, true),
         [
             (
-                "APPDATA".to_owned(),
-                r"C:\Users\ngvoi\AppData\Roaming".to_owned()
-            ),
-            (
                 "ProgramFiles(x86)".to_owned(),
                 r"C:\Program Files (x86)".to_owned()
             ),
@@ -623,7 +612,7 @@ fn a_windows_window_has_the_machines_folders_for_settings_and_programs_that_it_h
     assert!(windows_environment(&|_: &str| None, true).is_empty());
     // Another machine's windows have none of them, whatever its environment holds.
     assert!(windows_environment(&machine, false).is_empty());
-    // What the rig and `process` pass every program is not said again here.
+    // What the rig and `process` pass every program is not said again here, and no home is.
     for passed in [
         "SystemRoot",
         "ComSpec",
@@ -632,16 +621,38 @@ fn a_windows_window_has_the_machines_folders_for_settings_and_programs_that_it_h
         "USERNAME",
         "TEMP",
         "TMP",
+        "APPDATA",
+        "LOCALAPPDATA",
     ] {
         assert!(!WINDOWS.contains(&passed), "{passed}");
     }
-    // And a rig has them from the machine's own environment on Windows only.
     let debug = format!("{:?}", rig(&[], "/the/stand-in"));
-    assert_eq!(
-        debug.contains("(\"APPDATA\", "),
-        cfg!(windows) && own_var("APPDATA").is_some(),
-        "{debug}"
-    );
+    assert!(!debug.contains("(\"APPDATA\", "), "{debug}");
+    assert!(!debug.contains("(\"LOCALAPPDATA\", "), "{debug}");
+}
+
+/// T-1997 finding 4, T-2000 finding 2: Muse's version is read from the file beside its launcher
+/// (`.muse-version`), as the product reads it, and no Muse is started for it: a start outside its
+/// file sandbox reaches the owner's stores.
+#[cfg(unix)]
+#[test]
+fn a_muse_version_is_read_from_its_version_file_and_no_muse_starts_for_it() {
+    let root = crate::door::made("muse-version-").unwrap();
+    let started = root.path().join("started");
+    let muse = root.path().join("muse");
+    crate::door::write_executable(
+        &muse,
+        format!("#!/bin/sh\n: > '{}'\necho 9.9.9\n", started.display()),
+    )
+    .unwrap();
+    crate::door::write(root.path().join(".muse-version"), "1.4.25-R9361.1\n").unwrap();
+    let install = Installed::at(Harness::Muse, &muse, root.path());
+    assert_eq!(install.version(), "1.4.25-R9361.1");
+    assert!(!started.exists(), "Muse was started for its version");
+    // With no version file there is no version, and still no start.
+    crate::door::remove(root.path().join(".muse-version")).unwrap();
+    assert_eq!(install.version(), "unknown");
+    assert!(!started.exists(), "Muse was started for its version");
 }
 
 // Windows makes the shim as a `.cmd` and a Node script, by what the product's code says a
@@ -704,8 +715,8 @@ fn a_live_test_has_a_folder_of_its_own_below_the_candidates_live_folder_one_name
     let home = crate::door::made("cf-test-").unwrap();
     // Another run's folder of the name the case asks for: it is not this case's.
     let live = live_root(home.path());
-    fs::create_dir_all(live.join("paste")).unwrap();
-    fs::write(live.join("paste").join("README.md"), "another run's").unwrap();
+    crate::door::make_dir(live.join("paste")).unwrap();
+    crate::door::write(live.join("paste").join("README.md"), "another run's").unwrap();
 
     let folder = live_folder_in(home.path(), "paste").unwrap();
     assert_eq!(folder.parent(), Some(live.as_path()));
@@ -756,7 +767,7 @@ fn a_claude_config_of_the_runs_own_is_seeded_with_the_live_folders_trusted_and_k
 {
     let home = crate::door::made("cf-test-").unwrap();
     let config = crate::door::made("consensflow-seed-test-").unwrap();
-    fs::write(
+    crate::door::write(
         config.path().join(".claude.json"),
         r#"{"hasCompletedOnboarding":true,"projects":{"/elsewhere":{"hasTrustDialogAccepted":false}}}"#,
     )
@@ -800,13 +811,12 @@ fn a_claude_config_this_run_did_not_make_is_not_written_through_the_trust_seed()
     // A synthetic folder outside the run's handed roots stays foreign to the
     // child, including when this test runs again under a say-only audit.
     let given = crate::standin_process::unowned_tempdir();
-    fs::write(given.path().join(".claude.json"), r#"{"projects":{}}"#).unwrap();
+    crate::standin_process::foreign_write(given.path().join(".claude.json"), r#"{"projects":{}}"#);
     let child = crate::process::case_of(
         std::env::current_exe().unwrap(),
         "live::machine::tests::a_claude_config_this_run_did_not_make_is_not_written_through_the_trust_seed",
         std::time::Duration::from_secs(120),
     )
-    .inheriting_env()
     .var(FOREIGN, given.path())
     .run()
     .unwrap();
@@ -817,7 +827,7 @@ fn a_claude_config_this_run_did_not_make_is_not_written_through_the_trust_seed()
         let home = crate::door::made("cf-test-").unwrap();
         let made = crate::door::made("consensflow-seed-test-").unwrap();
         let target = given.path().join("elsewhere.json");
-        fs::write(&target, "{}").unwrap();
+        crate::standin_process::foreign_write(&target, "{}");
         crate::door::symlink(&target, made.path().join(".claude.json")).unwrap();
         assert!(seed_claude_trust(made.path(), home.path()).is_err());
         assert_eq!(fs::read_to_string(&target).unwrap(), "{}");
@@ -881,7 +891,7 @@ fn the_live_root_is_trusted_on_windows_by_the_key_claude_code_looks_it_up_by() {
 fn the_owners_own_claude_config_is_never_seeded() {
     let home = crate::door::made("cf-test-").unwrap();
     let owners = home.path().join(".claude");
-    fs::create_dir_all(&owners).unwrap();
+    crate::door::make_dir(&owners).unwrap();
     for config in [home.path().to_path_buf(), owners.clone()] {
         assert!(
             seed_claude_trust(&config, home.path()).is_err(),
@@ -920,6 +930,23 @@ fn a_harness_the_machine_lacks_is_left_out_of_every_seat_with_why_unless_it_was_
     );
 }
 
+/// CLN-22: `--without` leaves a harness out of every seat, said, though the machine has it, and
+/// naming it too is the error; the rest are seated as before.
+#[test]
+fn a_harness_the_run_is_told_to_do_without_is_left_out_of_every_seat_though_the_machine_has_it() {
+    let (kept, said) = seated_without(&[], &[Harness::Pi, Harness::Muse], |_| None).unwrap();
+    assert_eq!(kept, [Harness::Claude, Harness::Devin, Harness::Codex]);
+    assert_eq!(
+        said,
+        [
+            "pi is left out of every seat: the run was told --without pi",
+            "muse is left out of every seat: the run was told --without muse"
+        ]
+    );
+    let both = seated_without(&[Harness::Pi], &[Harness::Pi], |_| None).unwrap_err();
+    assert!(both.contains("both asked for and left out"), "{both}");
+}
+
 /// T-931 P2-2: a run with no home to look for a login in cannot run a harness, as
 /// `installed` refuses it; it is not taken for one that can.
 #[test]
@@ -927,7 +954,7 @@ fn a_harness_with_no_home_to_log_in_at_is_one_the_machine_lacks() {
     let why = login_lacks(Harness::Muse, None, None, false).expect("lacking");
     assert!(why.contains("home"), "{why}");
     let home = crate::door::made("cf-test-").unwrap();
-    std::fs::create_dir_all(home.path().join(".config").join("muse")).unwrap();
+    crate::door::make_dir(home.path().join(".config").join("muse")).unwrap();
     assert_eq!(
         login_lacks(Harness::Muse, Some(home.path().to_path_buf()), None, false),
         None
@@ -961,8 +988,8 @@ fn a_rig_that_seats_muse_runs_it_through_the_rigs_own_launcher() {
 fn a_program_started_outside_a_rig_is_given_the_runs_own_home_and_never_the_persons() {
     let person = crate::door::made("cf-test-").unwrap();
     let theirs = person.path().join(".codex");
-    fs::create_dir_all(&theirs).unwrap();
-    fs::write(theirs.join("auth.json"), "{\"OPENAI_API_KEY\":\"a key\"}\n").unwrap();
+    crate::door::make_dir(&theirs).unwrap();
+    crate::door::write(theirs.join("auth.json"), "{\"OPENAI_API_KEY\":\"a key\"}\n").unwrap();
     let codex = Installed::at(Harness::Codex, "codex", &theirs).with_isolation(Arc::new(
         super::super::isolation::Isolation::codex(person.path(), &theirs),
     ));
@@ -979,6 +1006,48 @@ fn a_program_started_outside_a_rig_is_given_the_runs_own_home_and_never_the_pers
     assert!(bare.home_outside_a_rig().is_err());
 }
 
+/// A direct read of a harness's own CLI on `home_vars` (B16): a harness whose isolation is not
+/// made of variables (Muse's is the rig's own launcher; a bare install has none) gets no empty
+/// list that reads as "nothing to set" but a refusal that says why, before any program starts.
+#[test]
+fn a_direct_read_on_home_vars_is_refused_where_the_isolation_is_no_variables() {
+    let person = crate::door::made("cf-test-").unwrap();
+    let muse_home = person.path().join(".config");
+    let muse = Installed::at(Harness::Muse, "muse", person.path()).with_isolation(Arc::new(
+        super::super::isolation::Isolation::muse(person.path(), &muse_home, &muse_home),
+    ));
+    for bare in [
+        muse,
+        Installed::at(Harness::Muse, "muse", person.path()),
+        Installed::at(Harness::Claude, "claude", person.path()),
+        Installed::at(Harness::Pi, "pi", person.path()),
+    ] {
+        let harness = bare.harness().name();
+        let refusal = bare
+            .home_vars()
+            .expect_err(&format!(
+                "{harness}: an empty list read as 'nothing to set'"
+            ))
+            .to_string();
+        assert!(
+            refusal.contains(harness) && refusal.contains("no variables"),
+            "{harness}: {refusal}"
+        );
+    }
+    // One whose isolation is variables still answers with them.
+    let theirs = person.path().join(".codex");
+    crate::door::make_dir(&theirs).unwrap();
+    crate::door::write(theirs.join("auth.json"), "{\"OPENAI_API_KEY\":\"a key\"}\n").unwrap();
+    let codex = Installed::at(Harness::Codex, "codex", &theirs).with_isolation(Arc::new(
+        super::super::isolation::Isolation::codex(person.path(), &theirs),
+    ));
+    assert!(codex
+        .home_vars()
+        .unwrap()
+        .iter()
+        .any(|(name, _)| name == "CODEX_HOME"));
+}
+
 /// On Windows the rig's Muse is the stand-in program cargo builds beside the tests, one folder
 /// above the test program's own (T-1084).
 #[test]
@@ -990,4 +1059,57 @@ fn the_rig_s_muse_on_windows_is_the_stand_in_cargo_built_beside_the_tests() {
         muse_stand_in_beside(&test),
         Path::new("/t/target/debug").join(format!("muse-stand-in{exe}"))
     );
+}
+
+/// T-1957: a version read is given the machine's search path and system variables and the kit's
+/// own folders for every home, login and settings variable; the owner's are never its own.
+#[test]
+fn a_version_read_is_given_the_kits_folders_and_never_the_machines_homes() {
+    let machine = |name: &str| match name {
+        "PATH" => Some("/usr/bin".to_owned()),
+        "SystemRoot" => Some(r"C:\Windows".to_owned()),
+        "HOME"
+        | "USERPROFILE"
+        | "APPDATA"
+        | "LOCALAPPDATA"
+        | "CODEX_HOME"
+        | "XDG_DATA_HOME"
+        | "PI_CODING_AGENT_DIR"
+        | "CLAUDE_CONFIG_DIR" => Some(format!("/the-owners/{name}")),
+        _ => None,
+    };
+    let scratch = Path::new("/scratch/run");
+    let vars = probe_vars(&machine, scratch, None);
+    let get = |name: &str| {
+        vars.iter()
+            .find(|(k, _)| k == name)
+            .map(|(_, v)| Path::new(v))
+    };
+    assert_eq!(get("PATH"), Some(Path::new("/usr/bin")));
+    assert_eq!(get("SystemRoot"), Some(Path::new(r"C:\Windows")));
+    for name in [
+        "HOME",
+        "USERPROFILE",
+        "APPDATA",
+        "LOCALAPPDATA",
+        "CODEX_HOME",
+        "XDG_CONFIG_HOME",
+        "XDG_DATA_HOME",
+        "XDG_STATE_HOME",
+        "XDG_CACHE_HOME",
+        "PI_CODING_AGENT_DIR",
+        "PI_CODING_AGENT_SESSION_DIR",
+        "CFFIXED_USER_HOME",
+        "XDG_RUNTIME_DIR",
+        "CLAUDE_CONFIG_DIR",
+    ] {
+        let value = get(name).unwrap_or_else(|| panic!("{name} is not given: {vars:?}"));
+        assert!(value.starts_with(scratch), "{name} = {}", value.display());
+    }
+    // A run's own Claude config is the one it names.
+    let own = Path::new("/run/claude-config");
+    let with = probe_vars(&machine, scratch, Some(own));
+    assert!(with
+        .iter()
+        .any(|(k, v)| k == "CLAUDE_CONFIG_DIR" && Path::new(v) == own));
 }

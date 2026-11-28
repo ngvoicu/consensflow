@@ -90,7 +90,7 @@ pub(super) fn printed(uuid: &str, parent: &str, words: &str) -> Value {
 
 /// What a command printed, written as the system's record (`local_command`), a
 /// child of the command `parent`.
-fn printed_by_the_system(uuid: &str, parent: &str, words: &str) -> Value {
+pub(super) fn printed_by_the_system(uuid: &str, parent: &str, words: &str) -> Value {
     of_session(json!({
         "type": "system", "subtype": "local_command", "isMeta": false, "level": "info",
         "content": format!("<local-command-stdout>{words}</local-command-stdout>"),
@@ -681,5 +681,535 @@ fn a_command_that_is_a_prompt_prints_nothing_and_its_turn_ends_at_its_answer() {
         json!("end_turn"),
     );
     records.extend([answered, duration("d2", "a2")]);
+    assert_eq!(settlement_of(&records), Settlement::Settled);
+}
+
+/// A look that falls between a command and the output it prints (the two records are written
+/// apart): the turn reads in flight there, and the look after the output reads it at rest.
+#[test]
+fn a_look_between_a_command_and_its_output_does_not_keep_the_turn_open() {
+    let state = |reading: &str| {
+        serde_json::from_str::<Value>(reading).unwrap()["settlement"]
+            .as_str()
+            .unwrap()
+            .to_owned()
+    };
+    for (why, before, command, output) in [
+        (
+            "as Claude Code writes them",
+            vec![caveat("k1", "d1")],
+            typed_command("n1", "k1", "model", "haiku"),
+            printed("o1", "n1", "Set model to Haiku"),
+        ),
+        (
+            "as the stand-in writes them",
+            vec![],
+            typed_command("n1", "d1", "model", ""),
+            printed("o1", "n1", "Set model to Haiku"),
+        ),
+    ] {
+        let mut typed = before;
+        typed.push(command);
+        let read = looks(&[&at_rest(), &typed, &[output]]);
+        assert_eq!(
+            read.iter()
+                .map(|reading| state(reading))
+                .collect::<Vec<_>>(),
+            ["settled", "in-flight", "settled"],
+            "{why}"
+        );
+    }
+}
+
+/// What a command typed at an idle prompt leaves as the user's records, named `name`, its
+/// output written as a user's record (`system` false: `/model`, `/effort`, `/clear`) or as the
+/// system's (`/compact` with nothing to compact, `/reload-skills`).
+fn typed_line(name: &str, system: bool) -> Vec<Value> {
+    let mut records = at_rest();
+    let output = if system {
+        printed_by_the_system("o1", "n1", "Printed")
+    } else {
+        printed("o1", "n1", "Printed")
+    };
+    records.extend([
+        caveat("k1", "d1"),
+        typed_command("n1", "k1", name, ""),
+        output,
+    ]);
+    records
+}
+
+/// The reader's list of commands it ends at their output is closed (`QUIET_COMMAND`). A
+/// command outside it that Claude writes as a user's echo and output, whatever it prints, is
+/// read as the words of a prompt, whose turn the model's end alone ends: in flight at once,
+/// and for as long as it is looked at, with nothing after it (T-2330). The names here stand
+/// for any such command: what Claude Code 2.1.332 writes for `/usage`, `/help` and `/context`
+/// is recorded (`typed-line-*.jsonl`, T-2342) and is NOT this shape, as the tests after this
+/// one hold; `/cost`, `/status`, `/config` and `/doctor` are not recorded.
+#[test]
+fn a_command_outside_the_closed_list_stays_in_flight_for_as_long_as_it_is_looked_at() {
+    for name in [
+        "cost", "context", "status", "usage", "help", "config", "doctor",
+    ] {
+        for system in [false, true] {
+            let records = typed_line(name, system);
+            let mut stage = Stage::new();
+            stage.write(&records);
+            let mut says = Vec::new();
+            // At once, a minute after, a day after: no time ends it.
+            for now_ms in [0, 60_000, 86_400_000] {
+                match &*stage.reader.look(&Options::default(), now_ms) {
+                    Reading::Known(record) => says.push(record.settlement),
+                    other => panic!("/{name}: {other:?}"),
+                }
+            }
+            assert_eq!(
+                says,
+                [Settlement::InFlight; 3],
+                "/{name}, output as the {} record",
+                if system { "system's" } else { "user's" }
+            );
+        }
+    }
+}
+
+/// The same lines of a listed command, in the same shapes, end at their output: the closed
+/// list is the whole of the difference (a counter-case to the test above).
+#[test]
+fn the_listed_commands_in_the_same_shapes_are_at_rest_at_their_output() {
+    for name in ["clear", "compact", "effort", "model", "reload-skills"] {
+        for system in [false, true] {
+            assert_eq!(
+                settlement_of(&typed_line(name, system)),
+                Settlement::Settled,
+                "/{name}, system {system}"
+            );
+        }
+    }
+}
+
+/// What ends a turn a command outside the list left in flight: the model's turn that comes
+/// after it, as the next prompt of the person's begins and ends one.
+#[test]
+fn the_next_turn_ends_what_a_command_outside_the_list_left_in_flight() {
+    let mut records = typed_line("cost", false);
+    assert_eq!(settlement_of(&records), Settlement::InFlight);
+    records.extend([
+        user("u2", json!("o1"), json!("Hello again")),
+        assistant(
+            "a2",
+            "u2",
+            json!("m2"),
+            json!([text(json!("Hi"))]),
+            json!("end_turn"),
+        ),
+        duration("d2", "a2"),
+    ]);
+    assert_eq!(settlement_of(&records), Settlement::Settled);
+}
+
+/// A command that writes only the system's records (`/mcp`, `/plugin`: no user's echo) begins
+/// no turn at all: at rest before and after, so no look of any time can read it in flight.
+#[test]
+fn a_command_written_only_as_the_systems_records_is_never_in_flight() {
+    let mut stage = Stage::new();
+    let mut records = at_rest();
+    stage.write(&records);
+    let mut command = printed_by_the_system("n1", "d1", "x");
+    command["content"] = json!("<command-name>/mcp</command-name>");
+    records = vec![command];
+    stage.append(&records);
+    match &*stage.reader.look(&Options::default(), 0) {
+        Reading::Known(record) => assert_eq!(record.settlement, Settlement::Settled),
+        other => panic!("{other:?}"),
+    }
+}
+
+/// The records Claude Code 2.1.332 wrote for `line` typed at an idle prompt (a live run,
+/// T-2342; `tests/fixtures/claude/typed-line-<line>.jsonl`), after the turn of `at_rest`.
+fn recorded(line: &str) -> Vec<Value> {
+    let text = match line {
+        "usage" => include_str!("../../../../tests/fixtures/claude/typed-line-usage.jsonl"),
+        "context" => include_str!("../../../../tests/fixtures/claude/typed-line-context.jsonl"),
+        "help" => include_str!("../../../../tests/fixtures/claude/typed-line-help.jsonl"),
+        "shell" => include_str!("../../../../tests/fixtures/claude/typed-line-shell.jsonl"),
+        other => panic!("no recording of /{other}"),
+    };
+    let mut typed: Vec<Value> = text
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    for record in &mut typed {
+        record["sessionId"] = json!(SESSION);
+    }
+    typed[0]["parentUuid"] = json!("d1");
+    let mut records = at_rest();
+    records.extend(typed);
+    records
+}
+
+/// `/usage` and `/help`, as Claude Code 2.1.332 wrote them (T-2342): the echo and the output
+/// both the system's `local_command` records, nothing the user wrote and no model after. They
+/// begin no turn, so the window is at rest before them, after the echo and after the output,
+/// and no time makes it in flight, though `usage` and `help` are in no list.
+#[test]
+fn a_usage_or_a_help_typed_at_an_idle_prompt_never_leaves_the_window_in_flight() {
+    for line in ["usage", "help"] {
+        let records = recorded(line);
+        let at_rest_len = at_rest().len();
+        assert_eq!(
+            records.len(),
+            at_rest_len + 2,
+            "/{line}: the echo and the output"
+        );
+        assert!(records[at_rest_len..]
+            .iter()
+            .all(|record| record["type"] == "system" && record["subtype"] == "local_command"));
+        for upto in at_rest_len..=records.len() {
+            let mut stage = Stage::new();
+            stage.write(&records[..upto]);
+            for now_ms in [0, 86_400_000] {
+                match &*stage.reader.look(&Options::default(), now_ms) {
+                    Reading::Known(record) => {
+                        assert_eq!(record.settlement, Settlement::Settled, "/{line}, {upto}")
+                    }
+                    other => panic!("/{line}: {other:?}"),
+                }
+            }
+        }
+    }
+}
+
+/// `/context`, as Claude Code 2.1.332 wrote it (T-2342): the system's echo and output, then a
+/// `user` record (`isMeta`, `rowSource` `local`, a child of the output) holding the same
+/// report as markdown for the model's next turn. No assistant record follows: no model was
+/// called. That record asks nothing of the model, so it begins no turn: the window is at rest
+/// at every record of the line and at every time, and the next turn begins and ends as any.
+#[test]
+fn a_context_typed_at_an_idle_prompt_calls_no_model_and_is_at_rest() {
+    let records = recorded("context");
+    let typed = &records[at_rest().len()..];
+    assert_eq!(typed.len(), 3);
+    assert_eq!(typed[2]["type"], "user");
+    assert_eq!(typed[2]["isMeta"], true);
+    assert_eq!(typed[2]["rowSource"], "local");
+    assert!(records
+        .iter()
+        .all(|record| record["type"] != "assistant" || record["uuid"] == "a1"));
+    for upto in at_rest().len()..=records.len() {
+        let mut stage = Stage::new();
+        stage.write(&records[..upto]);
+        for now_ms in [0, 60_000, 86_400_000] {
+            match &*stage.reader.look(&Options::default(), now_ms) {
+                Reading::Known(record) => {
+                    assert_eq!(record.settlement, Settlement::Settled, "{upto} records")
+                }
+                other => panic!("{other:?}"),
+            }
+        }
+    }
+    let mut next = records;
+    next.push(user("u2", json!("n1"), json!("Hello again")));
+    assert_eq!(settlement_of(&next), Settlement::InFlight);
+    next.extend([
+        assistant(
+            "a2",
+            "u2",
+            json!("m2"),
+            json!([text(json!("Hi"))]),
+            json!("end_turn"),
+        ),
+        duration("d2", "a2"),
+    ]);
+    assert_eq!(settlement_of(&next), Settlement::Settled);
+}
+
+/// A report as the first thing a window has: no turn ended before it, so the transcript has
+/// no item and no turn. The report adds nothing the look reads: still no items (the adapter
+/// takes an empty transcript for a window at its prompt), nothing in flight, whatever the
+/// start: the recorded rows, a root echo with a null parent, or another command's pair first.
+#[test]
+fn a_report_as_the_first_thing_in_a_window_leaves_the_transcript_as_empty_as_it_was() {
+    let usage = recorded("usage");
+    let context = recorded("context");
+    let typed = |rows: &[Value]| rows[at_rest().len()..].to_vec();
+    let mut root = typed(&context);
+    root[0]["parentUuid"] = Value::Null;
+    let mut after_usage = typed(&usage);
+    after_usage.extend(typed(&context));
+    for (name, records) in [
+        ("as recorded", typed(&context)),
+        ("root echo", root),
+        ("usage first", after_usage),
+    ] {
+        for upto in 1..=records.len() {
+            let record = record_of(&records[..upto]);
+            assert!(record.items.is_empty(), "{name}, {upto} records");
+            assert_ne!(record.settlement, Settlement::InFlight, "{name}, {upto}");
+        }
+    }
+}
+
+/// A `/context` report that arrives while a turn is under way, with a piece of the model's
+/// answer between the command's output and its report: the report is still known by its
+/// parent, dropped, and the answer's end ends the turn. The two recordings are the
+/// repository's (`typed-line-shell.jsonl`, `typed-line-context.jsonl`); only their
+/// interleaving is constructed (nothing records a `/context` typed during a turn).
+#[test]
+fn a_report_under_way_through_a_turn_with_the_models_answer_between_leaves_the_turn_as_it_was() {
+    let shell = recorded("shell");
+    let context = recorded("context");
+    let at = at_rest().len();
+    let typed_shell = &shell[at..];
+    let answer = typed_shell
+        .iter()
+        .position(|record| record["type"] == "assistant")
+        .unwrap();
+    let mut records = shell[..at].to_vec();
+    records.extend_from_slice(&typed_shell[..answer]);
+    // The command's echo and output, then the answer's record, then the report.
+    records.extend_from_slice(&context[at..at + 2]);
+    assert_eq!(settlement_of(&records), Settlement::InFlight);
+    records.push(typed_shell[answer].clone());
+    assert_eq!(settlement_of(&records), Settlement::InFlight);
+    records.push(context[at + 2].clone());
+    records.extend_from_slice(&typed_shell[answer + 1..]);
+    assert_eq!(settlement_of(&records), Settlement::Settled);
+    let record = record_of(&records);
+    assert!(
+        record.items.iter().any(|item| item.role
+            == crate::shared::record::reading::Role::Assistant
+            && item.complete),
+        "the shell turn's answer completed"
+    );
+}
+
+/// The command records remembered are the last 64: the 65th forgets the first. A report whose
+/// parent was forgotten reads as it did before the rule (a prompt, in flight: the stated
+/// limit); one under any remembered record, the latest or not, is a report and at rest.
+#[test]
+fn a_report_is_known_by_its_parent_among_the_last_64_command_records() {
+    let at = at_rest().len();
+    let context = recorded("context");
+    let report_under = |parent: &str| {
+        let mut records = at_rest();
+        for n in 0..65 {
+            records.push(printed_by_the_system(&format!("cmd-{n}"), "d1", "x"));
+        }
+        let mut report = context[at + 2].clone();
+        report["parentUuid"] = json!(parent);
+        report["uuid"] = json!("report-1");
+        records.push(report);
+        settlement_of(&records)
+    };
+    assert_eq!(report_under("cmd-0"), Settlement::InFlight, "forgotten");
+    for n in [1, 2, 30, 63, 64] {
+        assert_eq!(
+            report_under(&format!("cmd-{n}")),
+            Settlement::Settled,
+            "cmd-{n}"
+        );
+    }
+}
+
+/// The `/context` report with its parent, its marks and its flags changed by `fields`, in
+/// place of the recorded one (the third record of the line).
+fn context_with(fields: Value) -> Vec<Value> {
+    let mut records = recorded("context");
+    let report = records.len() - 1;
+    records[report] = having(records[report].clone(), fields);
+    records
+}
+
+/// What the guard is made of: a `user` record that is a command's report held for the model's
+/// next turn has `isMeta` true, `rowSource` `local`, and the system's `local_command` output
+/// as its parent. Each part alone, taken away, gives a record that may ask the model
+/// something (a skill's text, the prompt of a scheduled task, a companion of a message), and
+/// that stays in flight, as before.
+#[test]
+fn a_meta_record_that_lacks_a_part_of_the_reports_shape_still_opens_a_turn() {
+    // 2.1.331 and before write no `rowSource` that is known to be on this record (none is
+    // recorded): today's reading holds.
+    let mut without_row_source = recorded("context");
+    let last = without_row_source.len() - 1;
+    without_row_source[last]
+        .as_object_mut()
+        .unwrap()
+        .remove("rowSource");
+    assert_eq!(settlement_of(&without_row_source), Settlement::InFlight);
+    // Another row source value (constructed variations on the recorded report).
+    for row_source in ["recorded", "harness"] {
+        assert_eq!(
+            settlement_of(&context_with(json!({ "rowSource": row_source }))),
+            Settlement::InFlight,
+            "{row_source}"
+        );
+    }
+    // Not meta.
+    assert_eq!(
+        settlement_of(&context_with(json!({ "isMeta": false }))),
+        Settlement::InFlight
+    );
+    // Only the parent changed (constructed): a child of a user's record.
+    let mut companion = recorded("context");
+    let n = companion.len();
+    companion[n - 1]["parentUuid"] = json!("u1");
+    assert_eq!(settlement_of(&companion), Settlement::InFlight);
+    // Only the parent changed (constructed): a child of a system record that is no command's
+    // output, the turn's duration.
+    let mut under_a_duration = recorded("context");
+    let n = under_a_duration.len();
+    under_a_duration[n - 1]["parentUuid"] = json!("d1");
+    assert_eq!(settlement_of(&under_a_duration), Settlement::InFlight);
+}
+
+/// A report of this shape that the model is called after (constructed: no recording shows a
+/// command that does it): the turn begins at the first record
+/// that shows the call, as for any other, and ends as any turn does. Until that record the
+/// reader reads rest (Claude's own status covers that gap, see the window tests).
+#[test]
+fn a_report_of_a_command_followed_by_the_model_is_in_flight_from_the_models_record() {
+    let mut records = recorded("context");
+    let report = records.last().unwrap()["uuid"].clone();
+    let report = report.as_str().unwrap().to_owned();
+    assert_eq!(settlement_of(&records), Settlement::Settled);
+    records.push(assistant(
+        "a2",
+        &report,
+        json!("m2"),
+        json!([{ "type": "tool_use", "id": "t1", "name": "Bash", "input": { "command": "ls" } }]),
+        json!("tool_use"),
+    ));
+    assert_eq!(settlement_of(&records), Settlement::InFlight);
+    records.push(user(
+        "r2",
+        json!("a2"),
+        json!([{ "type": "tool_result", "tool_use_id": "t1", "content": "x" }]),
+    ));
+    assert_eq!(settlement_of(&records), Settlement::InFlight);
+    records.extend([
+        assistant(
+            "a3",
+            "r2",
+            json!("m3"),
+            json!([text(json!("Done"))]),
+            json!("end_turn"),
+        ),
+        duration("d3", "a3"),
+    ]);
+    assert_eq!(settlement_of(&records), Settlement::Settled);
+}
+
+/// The kinds of meta `user` record that the model is asked after, each stays in flight from
+/// the record itself. **Constructed, not recorded:** the skill's text (`sourceToolUseID`, a
+/// child of the tool result that loaded it), the prompt a scheduled task fires (a child of
+/// the system's `scheduled_task_fire`) and the retry nudge are shapes no fixture of this
+/// repository shows; the words are made up. The caveat before a typed command is recorded in
+/// fixtures (`compact-cancelled.jsonl`, `v268-clear.jsonl`), but its `/plan` sequence here is
+/// assembled.
+#[test]
+fn the_meta_records_the_model_is_asked_after_stay_in_flight() {
+    // A skill's text, inside a turn under way (constructed, not recorded).
+    let mut skill = vec![
+        hello(),
+        assistant(
+            "a1",
+            "u1",
+            json!("m1"),
+            json!([{ "type": "tool_use", "id": "t1", "name": "Skill", "input": {} }]),
+            json!("tool_use"),
+        ),
+        user(
+            "r1",
+            json!("a1"),
+            json!([{ "type": "tool_result", "tool_use_id": "t1", "content": "Launching" }]),
+        ),
+    ];
+    skill.push(having(
+        user(
+            "s1",
+            json!("r1"),
+            json!("Helper notes for the model: the helper lives in /x"),
+        ),
+        json!({ "isMeta": true, "sourceToolUseID": "t1" }),
+    ));
+    assert_eq!(settlement_of(&skill), Settlement::InFlight);
+    skill.extend([answer("a2", "s1"), duration("d2", "a2")]);
+    assert_eq!(settlement_of(&skill), Settlement::Settled);
+    // A scheduled task's prompt, at rest before it (constructed, not recorded).
+    let mut fired = at_rest();
+    fired.push(of_session(json!({
+        "type": "system", "subtype": "scheduled_task_fire", "uuid": "f1", "parentUuid": "d1",
+    })));
+    fired.push(having(
+        user(
+            "p1",
+            json!("f1"),
+            json!("Look at the board and report what moved"),
+        ),
+        json!({ "isMeta": true, "rowSource": "recorded" }),
+    ));
+    assert_eq!(settlement_of(&fired), Settlement::InFlight);
+    // The nudge after a call that was no call (constructed, not recorded).
+    let mut retry = at_rest();
+    retry.push(having(
+        user(
+            "p1",
+            json!("d1"),
+            json!("Your last call was not understood. Call again."),
+        ),
+        json!({ "isMeta": true }),
+    ));
+    assert_eq!(settlement_of(&retry), Settlement::InFlight);
+    // The caveat and a command outside the list that is a prompt (`/plan <words>`).
+    let mut prompt = at_rest();
+    prompt.extend([
+        caveat("k1", "d1"),
+        typed_command("n1", "k1", "plan", "a plan"),
+    ]);
+    assert_eq!(settlement_of(&prompt), Settlement::InFlight);
+}
+
+/// `!echo hi`, as Claude Code 2.1.332 wrote it (T-2342, run 4): two `user` records
+/// (`rowSource` "local", no `isMeta`: `<bash-input>` and `<bash-stdout>`, the second a child of
+/// the first, which is a child of the turn before), then a turn of the model's own: the shell
+/// line's output is sent to the model, which answered (`assistant`, `end_turn`), followed by the
+/// stop hooks' summary and `turn_duration`. So it IS a turn: in flight from the first record to
+/// the model's end, settled after it, and the record is never held open.
+#[test]
+fn a_shell_line_is_a_turn_the_model_answers_and_ends() {
+    let records = recorded("shell");
+    let typed = &records[at_rest().len()..];
+    let kinds: Vec<&str> = typed
+        .iter()
+        .map(|record| record["type"].as_str().unwrap())
+        .collect();
+    assert!(kinds.contains(&"assistant"), "{kinds:?}");
+    assert_eq!(
+        typed
+            .iter()
+            .filter(|record| record["type"] == "user")
+            .count(),
+        2
+    );
+    for record in typed.iter().filter(|record| record["type"] == "user") {
+        assert_eq!(record["rowSource"], "local");
+        assert!(record.get("isMeta").is_none());
+    }
+    let upto = |kind: &str| {
+        let at = typed
+            .iter()
+            .rposition(|record| record["type"] == kind)
+            .unwrap();
+        at_rest().len() + at + 1
+    };
+    assert_eq!(
+        settlement_of(&records[..upto("user")]),
+        Settlement::InFlight
+    );
+    assert_eq!(
+        settlement_of(&records[..upto("assistant")]),
+        Settlement::InFlight
+    );
     assert_eq!(settlement_of(&records), Settlement::Settled);
 }

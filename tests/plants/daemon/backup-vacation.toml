@@ -233,8 +233,8 @@ meant = "a_typed_busy_hold_survives_reopening_and_is_cleared_only_with_the_hold"
 runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "backup_vacation", "a_typed_busy_hold_survives_reopening_and_is_cleared_only_with_the_hold"]]
 [[plant.edit]]
 file = "crates/cf-ledger/src/staff/quota.rs"
-find = "params![until, since, kind.map(HoldKind::as_str), member.id],"
-replace = "params![until, since, None::<&str>, member.id],"
+find = "params![until, since, kind.map(HoldKind::as_str), stored, member.id],"
+replace = "params![until, since, None::<&str>, stored, member.id],"
 
 [[plant]]
 name = "bkv ledger: a human can have a backup"

@@ -99,8 +99,8 @@ runs = ["harness-lib-devin"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/devin/adapter.rs"
-find = '''        if drawn && due {'''
-replace = '''        if due {'''
+find = """Found::Empty(licence) if drawn && due => {"""
+replace = """Found::Empty(licence) if due => {"""
 
 [[plant]]
 name = "devin resume: /bypass is never pasted again while the wire says the normal mode"
@@ -122,8 +122,8 @@ runs = ["harness-lib-devin"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/devin/adapter.rs"
-find = '''            if switch.pasted.is_some() && switch.entered.is_none() {'''
-replace = '''            if false {'''
+find = """Found::Command if drawn && due => {"""
+replace = """Found::Command if false => {"""
 
 [[plant]]
 name = "devin resume: an Enter the host did not take counts as pressed"
@@ -132,34 +132,18 @@ runs = ["harness-lib-devin"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/devin/adapter.rs"
-find = '''                if pane::write_keys(host, pane, &[ENTER]).await.is_ok() {'''
-replace = '''                if pane::write_keys(host, pane, &[ENTER]).await.is_ok() || true {'''
-
-# The window as it is once the host answered the look at its screen: what the human did
-# meanwhile is what it is.
-
-[[plant]]
-name = "devin resume: the mode read before the look at the screen decides"
-meant = "what_the_human_did_while_the_screen_was_looked_at_is_what_the_window_is_and_nothing_goes_in_for_what_it_was"
-runs = ["harness-lib-devin"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/devin/adapter.rs"
-find = '''            if wants_bypass(now.mode.as_deref()) {'''
-replace = '''            if wants_bypass(said.mode.as_deref()) {'''
-
-# Round 5 (Astra 4): a prompt already on the wire at readiness's first read, read since
-# the engine's look found the window at rest.
+find = """                    if pane::enter(host, pane, &at).await.ok {"""
+replace = """                    if pane::enter(host, pane, &at).await.ok || true {"""
 
 [[plant]]
 name = "devin resume: another conversation opened while the screen was looked at is not seen"
-meant = "what_the_human_did_while_the_screen_was_looked_at_is_what_the_window_is_and_nothing_goes_in_for_what_it_was"
+meant = "a_silent_window_nobody_typed_into_is_given_its_delivery_behind_bypass_and_a_key_that_comes_later_holds_it"
 runs = ["harness-lib-devin"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/devin/adapter.rs"
-find = '''            if let Some(held) = self.shows_another(&now) {'''
-replace = '''            if let Some(held) = None::<Held> {'''
+find = """            if let Some(held) = self.shows_another(&now) {"""
+replace = """            if let Some(held) = None::<Held> {"""
 
 [[plant]]
 name = "devin resume: a conversation the window is followed to inherits the time of the one before"
@@ -449,14 +433,12 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-harness/src/devin/adapter.rs"
-find = '''                    session.as_deref(),
+find = """                    session.as_deref(),
                     channel::Guard::Configured,
-                    BYPASS,'''
-replace = '''                    session.as_deref().filter(|_| false),
-                    channel::Guard::Configured,
-                    BYPASS,'''
-
-# The diagnostic launch without the owner's hooks (Sol 6): hook by hook, not entry by entry.
+                    BYPASS,"""
+replace = '''                        session.as_deref().filter(|_| false),
+                        channel::Guard::Configured,
+                        BYPASS,'''
 
 [[plant]]
 name = "devin resume: an owner's hook that says the words of ConsensFlow's stays in a launch without the owner's"
@@ -496,9 +478,12 @@ runs = ["e2e-lib-descent"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/members/descent.rs"
-find = '''                && process.identity.started >= parent.started
-'''
-replace = ""
+find = '''    if child.identity.started < parent.identity.started {
+        return Made::No;
+    }'''
+replace = '''    if child.identity.started == u64::MAX {
+        return Made::No;
+    }'''
 
 [[plant]]
 name = "devin resume: the window's number is taken for the window it was"
@@ -507,8 +492,8 @@ runs = ["e2e-lib-descent"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/members/descent.rs"
-find = '''    if !all.iter().any(|process| process.identity == root) {'''
-replace = '''    if false {'''
+find = '''    let Some(first) = all.iter().find(|process| process.identity == root) else {'''
+replace = '''    let Some(first) = all.iter().find(|process| process.identity.pid == root.pid) else {'''
 
 [[plant]]
 name = "devin resume: a process is ended by the number chosen, whichever process has it now"
@@ -517,31 +502,8 @@ runs = ["e2e-lib-descent"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/members/descent.rs"
-find = '''        Ok(Some(started)) if started == identity.started => match act(&*held) {'''
-replace = '''        Ok(Some(_)) => match act(&*held) {'''
-
-# Round 5 (Astra, P1): Windows' process table is read as JSON, where a command line of
-# many lines is one string; read as lines, an argument made up a process of the window.
-
-[[plant]]
-name = "devin resume: Windows' process table is read as lines"
-meant = "windows_process_table_is_read_as_json_and_a_command_line_of_many_lines_is_one_process"
-runs = ["e2e-lib-descent"]
-
-[[plant.edit]]
-file = "crates/cf-e2e/src/live/members/descent.rs"
-find = '''}} }} | ConvertTo-Json -Compress"'''
-replace = '''}} }} | ForEach-Object {{ \"$($_.pid) $($_.ppid) $($_.command)\" }}"'''
-
-[[plant]]
-name = "devin resume: a command line of many lines is read to its first"
-meant = "windows_process_table_is_read_as_json_and_a_command_line_of_many_lines_is_one_process"
-runs = ["e2e-lib-descent"]
-
-[[plant.edit]]
-file = "crates/cf-e2e/src/live/members/descent.rs"
-find = '''                command: entry["command"].as_str().unwrap_or_default().to_owned(),'''
-replace = '''                command: entry["command"].as_str().unwrap_or_default().lines().next().unwrap_or_default().to_owned(),'''
+find = '''        Ok(Some(started)) if started == process.identity.started => {}'''
+replace = '''        Ok(Some(_)) => {}'''
 
 # Round 5 (Astra 5): the relay waits on the helper only until its deadline.
 
@@ -659,12 +621,12 @@ runs = ["e2e-lib-descent"]
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/members/descent.rs"
 find = '''
-        match end_one(holds, process.identity) {
+        match end_one(holds, process) {
             Outcome::Ended => said.ended.push(process.clone()),
             Outcome::Gone => said.gone.push(process.clone()),
             Outcome::Failed(why) => said.failed.push((process.clone(), why)),'''
 replace = '''
-        match end_one(holds, process.identity) {
+        match end_one(holds, process) {
             Outcome::Ended => said.ended.push(process.clone()),
             Outcome::Gone => said.gone.push(process.clone()),
             Outcome::Failed(_) => said.gone.push(process.clone()),'''
@@ -741,8 +703,8 @@ runs = ["e2e-lib-descent"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/members/descent.rs"
-find = '''            Ok(Some(created)) if created.abs_diff(process.identity.started) < TABLE_GRAIN => {'''
-replace = '''            Ok(Some(created)) => {'''
+find = '''            Ok(Some(opened)) if opened.created == process.identity.started => {'''
+replace = '''            Ok(Some(opened)) => {'''
 
 # Round 7 (Astra and Sol on round 6): the guard refuses the machine's own end and a `kill`
 # program started by its name.
@@ -767,8 +729,8 @@ runs = ["harness-lib-devin"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/devin/adapter.rs"
-find = '''        if now - since >= BYPASS_WITHIN_MS {'''
-replace = '''        if false && now - since >= BYPASS_WITHIN_MS {'''
+find = """if switch.ran >= BYPASS_WITHIN_MS {"""
+replace = """if false && switch.ran >= BYPASS_WITHIN_MS {"""
 
 [[plant]]
 name = "devin resume: the mode of a conversation's configuration is not read"

@@ -11,7 +11,7 @@ use tauri::{AppHandle, Emitter};
 
 use crate::daemon::{
     connect_daemon, stop_daemon, Daemon, DaemonStarter, DaemonStatus, DAEMON_READY_TIMEOUT,
-    DAEMON_RESTART, DAEMON_STATUS_EVENT,
+    DAEMON_RESTART, DAEMON_STATUS_EVENT, LEDGER_BROKEN_EVENT,
 };
 use crate::daemon_command::daemon_command;
 use cf_bridge::BridgeBuilder;
@@ -66,6 +66,8 @@ pub struct AppRuntime {
 impl AppRuntime {
     pub fn start(app: &AppHandle) -> Self {
         let panes = Arc::new(PaneTable::new());
+        // Each window keeps a journal of its output and sizes, which a reloaded page replays.
+        panes.keep_journals();
         let output = Arc::new(OutputHub::new());
         let arbiter = Arc::new(InputArbiter::new(ENTER));
         let inputs = Arc::new(InputQueue::new(Arc::clone(&panes), Arc::clone(&arbiter)));
@@ -82,6 +84,7 @@ impl AppRuntime {
             let output = Arc::clone(&output);
             let inputs = Arc::clone(&inputs);
             let login = daemon.login();
+            let hears_broken = daemon.hears_broken();
             Arc::new(move |closed| {
                 let command = daemon_command(&app, &login)?;
                 let mut builder = BridgeBuilder::new(Role::Host, MAX_FRAME_BYTES);
@@ -99,6 +102,8 @@ impl AppRuntime {
                     Arc::clone(&output),
                     Arc::clone(&inputs),
                 );
+                let hear = Arc::clone(&hears_broken);
+                builder.on_event(LEDGER_BROKEN_EVENT, move |body| hear(body));
                 builder.on_error(|error| eprintln!("consensflow bridge: {error}"));
                 builder.on_close(closed);
                 connect_daemon(command, builder, DAEMON_READY_TIMEOUT)
