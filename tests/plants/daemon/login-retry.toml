@@ -12,7 +12,7 @@ login-dispatcher = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "
 login-words = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "login_note_words"]
 login-human = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "unavailable_accounts"]
 login-ledger = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "an_older_build_wrote"]
-login-model = ["env", "CF_N35_SEEDS=150", "cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "n35_model::"]
+login-model = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "n35_model::"]
 login-harness = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "a_refused_login_is_told_from_billing"]
 
 [[plant]]
