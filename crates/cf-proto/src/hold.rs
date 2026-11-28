@@ -49,6 +49,15 @@ pub const BILLING_CODES: [&str; 4] = [
     "requires_more_credits",
 ];
 
+/// How a note says an account hold: the form's own words ([`HoldForm::words`]), and where the
+/// reason is no account's refusal (no form), "its account is unavailable". Made of literals only.
+pub fn account_words(form: Option<HoldForm>) -> String {
+    form.map_or_else(
+        || "its account is unavailable".to_owned(),
+        |form| form.words(),
+    )
+}
+
 /// An account hold's kind, status and code: each a literal of this file. **The fields are
 /// private and there is no other constructor than [`HoldForm::checked`]**: nothing outside this
 /// file can make a form whose value is not a literal of the lists (T-2353).
@@ -81,6 +90,24 @@ impl HoldForm {
     /// The provider's error type, one of [`CODES`], where the refusal named one.
     pub const fn code(&self) -> Option<&'static str> {
         self.code
+    }
+
+    /// The form said in words: "its login was refused (401, authentication_error)", the kind
+    /// alone where the refusal carried no status and no code. Made only of the form's literals,
+    /// so no word of a harness's can be in it: the one way a note, a card or a try says an
+    /// account hold.
+    pub fn words(&self) -> String {
+        let named: Vec<String> = self
+            .status
+            .map(|status| status.to_string())
+            .into_iter()
+            .chain(self.code.map(str::to_owned))
+            .collect();
+        if named.is_empty() {
+            format!("its {} was refused", self.kind)
+        } else {
+            format!("its {} was refused ({})", self.kind, named.join(", "))
+        }
     }
 
     /// The form of `kind`, `status` and `code` as the lists name them: the lists' own literals

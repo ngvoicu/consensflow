@@ -82,3 +82,47 @@ async fn a_role_in_the_table_alone_is_in_the_pages_list_in_its_place() {
         })
         .await;
 }
+
+/// `harnesses.missing` sends the staff the release ships as `suggestedStaff`, read from the
+/// file the daemon carries; the page reads it as it reads `roles`.
+#[tokio::test]
+async fn harnesses_missing_sends_the_suggested_staff_the_release_ships() {
+    LocalSet::new()
+        .run_until(async {
+            let rig = rig();
+            let (daemon, app) = bridge_pair_over(&rig.spawn);
+            register(&daemon, &rig.page, &rig.spawn);
+            let answer = ask(&app, "harnesses.missing", json!({})).await;
+            assert_eq!(answer["ok"], true, "{answer}");
+            let staff = &answer["suggestedStaff"];
+            let file: Value =
+                serde_json::from_str(include_str!("../suggested-staff.json")).unwrap();
+            assert_eq!(staff, &file);
+            assert!(
+                staff["members"].as_array().is_some_and(|m| m.len() == 7),
+                "{staff}"
+            );
+        })
+        .await;
+}
+
+/// A file that breaks the rule reaches the page as `null` through the daemon's real bridge: the
+/// field of the `harnesses.missing` answer is the checked one, never the file as it stands.
+#[tokio::test]
+async fn harnesses_missing_answers_null_for_a_shipped_file_that_breaks_the_rule() {
+    LocalSet::new()
+        .run_until(async {
+            let file: Value =
+                serde_json::from_str(include_str!("../suggested-staff.json")).unwrap();
+            let mut bad = file.clone();
+            bad["members"][0]["roles"] = json!(["janitor"]);
+            let _put = crate::page::suggested_staff::seam::put(&bad.to_string());
+            let rig = rig();
+            let (daemon, app) = bridge_pair_over(&rig.spawn);
+            register(&daemon, &rig.page, &rig.spawn);
+            let answer = ask(&app, "harnesses.missing", json!({})).await;
+            assert_eq!(answer["ok"], true, "{answer}");
+            assert_eq!(answer["suggestedStaff"], Value::Null, "{answer}");
+        })
+        .await;
+}

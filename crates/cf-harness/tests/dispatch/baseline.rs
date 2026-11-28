@@ -20,7 +20,7 @@ pub const SITES: &[(&str, &str, Kind, usize)] = &[
 
     // The engine's seam names the Claude and Codex computer-use types, and a page names a harness by its id.
     // Harness models' (a2-m, T-1190): Devin's exact id for an effort, Pi's thinking, and a harness's label in a handle, written before this list (T-1187, T-1202).
-    ("crates/cf-daemon/src/page/staff.rs", "picked", Kind::Eq, 1),
+    ("crates/cf-daemon/src/page/staff.rs", "draws_images", Kind::Eq, 1),
     // Harness models' (a2-m, T-1190): Devin's exact id for an effort, Pi's thinking, and a harness's label in a handle, written before this list (T-1187, T-1202).
     ("crates/cf-engine/src/chief_model.rs", "ChiefRuns::picked", Kind::IdMatch, 1),
     ("crates/cf-engine/src/computer_use.rs", "Dispatcher::tell_computer_use_once", Kind::IdEq, 1),

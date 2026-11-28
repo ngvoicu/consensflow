@@ -79,7 +79,7 @@ fn holds_the_task_with_its_window_for_no_reset_and_tells_the_requester_and_the_h
         .is_some_and(|until| until.starts_with("9999-")));
     assert_match(
         tiers.notes("chief").last().unwrap(),
-        r"^T-1 waits with @zeus-amber-pine: its account is unavailable \(Muse refused: the account has no allowance; set up billing at accountscenter\.meta\.com/muse_code\), and nothing resets that; it goes on when the human says the account works again\.$",
+        r"^T-1 waits with @zeus-amber-pine: its billing was refused, and nothing resets that; it goes on when the human says the account works again\.$",
     );
     // The first note of a hold is typed (RS-25), and T-1's line says the hold as well.
     assert_eq!(
@@ -89,15 +89,16 @@ fn holds_the_task_with_its_window_for_no_reset_and_tells_the_requester_and_the_h
     );
     assert_eq!(
         tiers.task(1).task.aside,
-        Some(format!(
-            "waits with @zeus-amber-pine: its account is unavailable ({BECAUSE}) until the human says it works"
-        ))
+        Some(
+            "waits with @zeus-amber-pine: its billing was refused until the human says it works"
+                .to_owned()
+        )
     );
     let told = human_notes(&tiers);
     assert_eq!(told.len(), 1, "{told:?}");
     assert_match(
         &told[0],
-        r"^@zeus-amber-pine's account is unavailable: Muse refused: the account has no allowance; .* Nothing is sent to it until you say it works again: press Try again now on @zeus once it does\.$",
+        r"^@zeus-amber-pine's account is unavailable: its billing was refused\. Nothing is sent to it until you say it works again: press Try again now on @zeus once it does\.$",
     );
     // Hours later, passes and a window that still shows the refusal change nothing, and
     // nobody is told again.
@@ -308,7 +309,9 @@ fn member_outs(context: &Context, tiers: &Tiers) -> Vec<serde_json::Value> {
 
 /// Zeus refused for `because`, and `then` looking at what it left.
 fn zeus_refused(because: &str, then: impl FnOnce(&Context, &Tiers)) {
-    let context = Context::new();
+    // Held at the first refusal: what the hold keeps is the point here, not the tries a refused
+    // login gets first (`login_retries`).
+    let context = Context::tries_off();
     let tiers = Tiers::new(&context, &["zeus", "diana"]);
     tiers.open();
     context.pass().unwrap();

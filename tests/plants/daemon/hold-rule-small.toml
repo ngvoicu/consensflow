@@ -9,7 +9,7 @@ runs = ["hold-rule-small"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/dispatcher.rs"
-find = "        } else {\n            self.seams\n                .ledger\n                .borrow_mut()\n                .mark_back(member.id, \"by @human\")?\n        };\n"
+find = "        } else {\n            self.seams\n                .ledger\n                .borrow_mut()\n                .mark_back_by_person(member.id, \"by @human\")?\n        };\n"
 replace = "        } else {\n            member.clone()\n        };\n"
 
 [[plant]]
@@ -29,7 +29,7 @@ runs = ["hold-rule-small"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/staff.rs"
-find = "            quota::mark_back(store, member.id, \"by @human\")?;\n"
+find = "            quota::mark_back_by(store, member.id, \"by @human\", true)?;\n"
 replace = "            let _ = &member;\n"
 
 [[plant]]

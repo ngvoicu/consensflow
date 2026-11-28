@@ -170,6 +170,19 @@ pub(crate) fn mark_back(
     participant_id: i64,
     because: &str,
 ) -> Result<ParticipantView, LedgerError> {
+    mark_back_by(store, participant_id, because, false)
+}
+
+/// The same, where `by_person`: the human's Try again now, or an edit that lifts the hold. That
+/// is a person's action on every task the member's windows hold, so the tries of each start
+/// again in this same write (a refused login that used both tries must not leave the next
+/// ordinary failure with none).
+pub(crate) fn mark_back_by(
+    store: &mut Store,
+    participant_id: i64,
+    because: &str,
+    by_person: bool,
+) -> Result<ParticipantView, LedgerError> {
     model::require_text(because, "because", 1000)?;
     store.write(|store| {
         let member = store.participant_row(participant_id)?;
@@ -191,6 +204,14 @@ pub(crate) fn mark_back(
            AND assignee_id IN (SELECT id FROM participant WHERE id = ? OR member_id = ?)",
             params![now, now, member.id, member.id],
         )?;
+        if by_person {
+            store.db.execute(
+                "UPDATE task SET turn_retries = 0
+                 WHERE turn_retries != 0
+                   AND assignee_id IN (SELECT id FROM participant WHERE id = ?1 OR member_id = ?1)",
+                [member.id],
+            )?;
+        }
         store.log(
             member.project_id,
             "member.back",

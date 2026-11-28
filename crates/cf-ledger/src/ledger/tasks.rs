@@ -298,6 +298,17 @@ impl Ledger {
         tasks::hold_task_for_retry(&mut self.store, project_id, number, because, fact, plan)
     }
 
+    /// The member `member` is held for its account (until `until`, no time of its own): each
+    /// task of its windows still waiting in a retry hold waits for the login instead, no try
+    /// coming. Returns each (number, requester, window's handle) for its one note.
+    pub fn end_retry_holds_for_account(
+        &mut self,
+        member: i64,
+        until: &str,
+    ) -> Result<Vec<(i64, String, String)>, LedgerError> {
+        tasks::end_retry_holds_for_account(&mut self.store, member, until)
+    }
+
     /// The daemon resumes a held task at its time: with the words that resume it, unless a
     /// question of its window has no answer, which leaves it waiting with no words.
     pub fn resume_held_task(

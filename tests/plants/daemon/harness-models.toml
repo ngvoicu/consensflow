@@ -140,10 +140,10 @@ runs = ["hm-daemon-members"]
 [[plant.edit]]
 file = "crates/cf-daemon/src/page/staff.rs"
 find = '''
-    if designer && harness != Harness::Codex {
+    if designer && !draws_images(harness) {
 '''
 replace = '''
-    if designer && harness != Harness::Codex && false {
+    if designer && !draws_images(harness) && false {
 '''
 
 [[plant]]

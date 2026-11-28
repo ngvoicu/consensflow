@@ -19,11 +19,14 @@ pub(super) static ENVELOPE: LazyLock<Regex> =
 /// then its message and its arguments. A closed list, of the commands Claude
 /// Code's own records show it does by itself, with no turn after what they
 /// printed: `/compact`, `/model`, `/effort` (2.1.222 to 2.1.304), `/clear` and
-/// `/reload-skills` (2.1.219). Another command may go on to ask the model what
+/// `/reload-skills` (2.1.219), and `/recap` (2.1.332: the caveat, the echo and the
+/// system's `local_command` output, no model after; T-2388, the chief's window on
+/// 2026-11-27). The general rule, for any typed command, is being built; this name
+/// is the stopgap until it lands. Another command may go on to ask the model what
 /// it printed (2.1.303's `/plan <description>`, a skill, a command of the user's
 /// own), and its turn ends as a prompt's does.
 pub(super) static QUIET_COMMAND: LazyLock<Regex> = LazyLock::new(|| {
-    compile(r"^<command-name>/(?:clear|compact|effort|model|reload-skills)</command-name>")
+    compile(r"^<command-name>/(?:clear|compact|effort|model|recap|reload-skills)</command-name>")
 });
 
 /// What Claude Code writes, as a user's record or as the system's
@@ -71,6 +74,7 @@ mod tests {
             "<command-name>/model</command-name><command-args>haiku</command-args>".to_owned(),
             "<command-name>/effort</command-name>".to_owned(),
             "<command-name>/reload-skills</command-name>".to_owned(),
+            "<command-name>/recap</command-name>\n            <command-message>recap</command-message>".to_owned(),
         ] {
             assert!(QUIET_COMMAND.is_match(&command), "{command:?}");
         }
@@ -81,6 +85,7 @@ mod tests {
             " <command-name>/compact</command-name>",
             "<command-name>/compacted</command-name>",
             "<command-name>/plan</command-name><command-args>a plan</command-args>",
+            "<command-name>/recapitulate</command-name>",
             "<command-name>/review</command-name>",
             "<command-name>/my-skill</command-name>",
             "<command-message>review</command-message><command-name>/review</command-name>",
