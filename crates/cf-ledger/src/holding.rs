@@ -554,6 +554,7 @@ pub(crate) fn retract_brief(store: &mut Store, brief: i64) -> Result<(), LedgerE
             )?.query_map(params![window, current.task_id, current.first_brief, run], |row| row.get(0))?
                 .collect::<rusqlite::Result<_>>()?;
             for question in questions {
+                follow_its_decider(store, question, task)?;
                 store.db.execute(
                     "UPDATE question_binding SET task_id = ?2, first_brief_id = ?3 WHERE question_id = ?1",
                     params![question, task, first],
@@ -605,6 +606,73 @@ pub(crate) fn retract_brief(store: &mut Store, brief: i64) -> Result<(), LedgerE
     store.db.execute(
         "UPDATE question_handover SET previous_closed = -1 WHERE brief_id = ?",
         [brief],
+    )?;
+    Ok(())
+}
+
+/// A question a called-off hand-over moves back to the window's earlier holding (`task`, None
+/// for a taskless one) is put to that holding's decider where it differs from its recipient: in
+/// the same write while no window has had it (queued or at the gate, not read early); one
+/// already read stays answerable by who read it, and the new decider is told its words in one
+/// note. With one chief every decider is the chief, and nothing moves.
+fn follow_its_decider(
+    store: &mut Store,
+    question: i64,
+    task: Option<i64>,
+) -> Result<(), LedgerError> {
+    let Some(asked) = store.message(question)? else {
+        return Ok(());
+    };
+    let decider = crate::deciders::question_recipient(store, asked.project_id, task)?;
+    let decider = store.participant_by_handle(asked.project_id, &decider)?;
+    if decider.id == asked.recipient_id {
+        return Ok(());
+    }
+    let read_early: bool = store
+        .db
+        .prepare(
+            "SELECT 1 FROM question_reminder WHERE question_id = ? AND first_read_at IS NOT NULL",
+        )?
+        .exists([question])?;
+    let exposed = !matches!(asked.state.as_str(), "queued" | "gated")
+        || read_early
+        || asked.receipt.get("readEarly").is_some();
+    if !exposed {
+        store.db.execute(
+            "UPDATE message SET recipient_id = ?2 WHERE id = ?1",
+            params![question, decider.id],
+        )?;
+        store.log(
+            asked.project_id,
+            "message.readdressed",
+            serde_json::json!({ "message": question, "from": asked.recipient, "to": decider.handle }),
+        )?;
+        return Ok(());
+    }
+    let number: Option<i64> = match task {
+        Some(task) => Some(store.db.query_row(
+            "SELECT number FROM task WHERE id = ?",
+            [task],
+            |r| r.get(0),
+        )?),
+        None => None,
+    };
+    let about = number.map_or_else(|| "no task".to_owned(), |number| format!("T-{number}"));
+    let body = format!(
+        "@{}'s question m-{question} is about {about} now, which is yours to decide; @{} has it and answers it. Its words:\n{}",
+        asked.sender.as_deref().unwrap_or("ConsensFlow"),
+        asked.recipient,
+        asked.body
+    );
+    crate::messages::note(
+        store,
+        asked.project_id,
+        &crate::messages::NewNote {
+            from: None,
+            to: decider.handle,
+            body,
+            task: number,
+        },
     )?;
     Ok(())
 }
@@ -779,16 +847,51 @@ fn earlier_turn(store: &Store, window: i64, task: Option<i64>) -> Result<LedgerE
     })
 }
 
-/// Bind every new ordinary member question to its window's actual holding.
-pub(crate) fn bind(store: &Store, question: i64, window: i64) -> Result<(), LedgerError> {
-    // A question may discuss a different task. Its delivery still belongs to
-    // the task actually handed to the asking window, not the topic it names.
-    let holding = of(store, window)?;
-    let (task, first) = match holding {
-        Some(h) if h.active && matches(store, window, Some(h.task_id), Some(h.first_brief))? => {
-            (Some(h.task_id), Some(h.first_brief))
+/// The holding a member's question belongs to, resolved before the question is written: its
+/// recipient, its gate and its reminder are taken from it (the leads design, section 3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Bound {
+    /// The task actually handed to the asking window, by the first brief of that holding.
+    Task { task: i64, first_brief: i64 },
+    /// No task: an idle window's question, or one whose holding has moved on.
+    Taskless,
+}
+
+impl Bound {
+    /// The task it is bound to, if any.
+    pub(crate) fn task(self) -> Option<i64> {
+        match self {
+            Bound::Task { task, .. } => Some(task),
+            Bound::Taskless => None,
         }
-        _ => (None, None),
+    }
+}
+
+/// The window's actual holding, as a question asked now is bound to it. A question may discuss
+/// a different task; its delivery still belongs to the task actually handed to the asking
+/// window, not the topic it names.
+pub(crate) fn bound_now(store: &Store, window: i64) -> Result<Bound, LedgerError> {
+    Ok(match of(store, window)? {
+        Some(h) if h.active && matches(store, window, Some(h.task_id), Some(h.first_brief))? => {
+            Bound::Task {
+                task: h.task_id,
+                first_brief: h.first_brief,
+            }
+        }
+        _ => Bound::Taskless,
+    })
+}
+
+/// Bind a new ordinary member question to the holding it was resolved to.
+pub(crate) fn bind(
+    store: &Store,
+    question: i64,
+    window: i64,
+    bound: Bound,
+) -> Result<(), LedgerError> {
+    let (task, first) = match bound {
+        Bound::Task { task, first_brief } => (Some(task), Some(first_brief)),
+        Bound::Taskless => (None, None),
     };
     store.db.execute("INSERT INTO question_binding (question_id, participant_id, task_id, first_brief_id, run_id) VALUES (?1, ?2, ?3, ?4, ?5)", params![question, window, task, first, store.question_run])?;
     Ok(())

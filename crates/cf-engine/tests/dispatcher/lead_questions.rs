@@ -73,7 +73,11 @@ fn a_question_a_turn_ends_on_goes_to_the_lead_that_gave_the_task_and_the_chief_h
         context.pass().unwrap();
         context.adapter.answer("zeus", said);
         context.pass().unwrap();
-        assert_eq!(context.task(project.id, number).task.state, "waiting", "{said}");
+        assert_eq!(
+            context.task(project.id, number).task.state,
+            "waiting",
+            "{said}"
+        );
         assert_eq!(
             (
                 questions(&context, project.id, &lead),
@@ -95,9 +99,10 @@ fn the_chiefs_task_whose_last_words_wait_for_a_lead_by_name_has_them_as_its_resu
     let number = gives(&context, project.id, "chief", "Parser");
     context.pass().unwrap();
     context.pass().unwrap();
-    context
-        .adapter
-        .answer("zeus", "The parser is done. Waiting for @lead-1's decision to go on.");
+    context.adapter.answer(
+        "zeus",
+        "The parser is done. Waiting for @lead-1's decision to go on.",
+    );
     context.pass().unwrap();
     assert_eq!(context.task(project.id, number).task.state, "done");
     assert_eq!(
@@ -110,7 +115,8 @@ fn the_chiefs_task_whose_last_words_wait_for_a_lead_by_name_has_them_as_its_resu
 }
 
 #[test]
-fn a_question_a_turn_ends_on_for_the_chiefs_or_the_humans_task_goes_to_the_chief_with_a_lead_there() {
+fn a_question_a_turn_ends_on_for_the_chiefs_or_the_humans_task_goes_to_the_chief_with_a_lead_there()
+{
     for requester in ["chief", "human"] {
         let context = Context::new();
         let project = context.with_staff(&["zeus"]);
@@ -121,7 +127,11 @@ fn a_question_a_turn_ends_on_for_the_chiefs_or_the_humans_task_goes_to_the_chief
         context.pass().unwrap();
         context.adapter.answer("zeus", QUESTION);
         context.pass().unwrap();
-        assert_eq!(context.task(project.id, number).task.state, "waiting", "{requester}");
+        assert_eq!(
+            context.task(project.id, number).task.state,
+            "waiting",
+            "{requester}"
+        );
         assert_eq!(
             (
                 questions(&context, project.id, "chief"),

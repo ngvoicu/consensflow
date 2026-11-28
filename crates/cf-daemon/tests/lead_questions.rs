@@ -95,7 +95,6 @@ async fn got(c: &Context, path: &str, auth: &str) -> (u16, Value) {
     post(c, r).await
 }
 
-
 /// The ledger's own clock, in ms, at its latest event.
 fn latest(c: &Context) -> i64 {
     let at: String = c
@@ -223,7 +222,11 @@ async fn a_members_question_on_a_leads_task_by_cf_ask_and_by_its_question_tool_i
             asked(&auth, "Which grammar?", None)
         };
         let (code, body) = post(&c, request).await;
-        assert_eq!((code, stored(&body)), (201, Some(task)), "native={native}: {body}");
+        assert_eq!(
+            (code, stored(&body)),
+            (201, Some(task)),
+            "native={native}: {body}"
+        );
         let q = body["message"]["id"].as_i64().unwrap();
         assert_eq!(recipient(&c, q), lead, "native={native}");
         assert_eq!(questions_of(&c, lead_id).len(), 1, "native={native}");
@@ -242,7 +245,11 @@ async fn a_members_question_on_the_chiefs_or_the_humans_task_is_the_chiefs_with_
         let (c, _dir) = into_context(w);
         let auth = issued(&c, p, window);
         let (code, body) = post(&c, asked(&auth, "Which grammar?", None)).await;
-        assert_eq!((code, stored(&body)), (201, Some(task)), "{requester}: {body}");
+        assert_eq!(
+            (code, stored(&body)),
+            (201, Some(task)),
+            "{requester}: {body}"
+        );
         let q = body["message"]["id"].as_i64().unwrap();
         assert_eq!(recipient(&c, q), "chief", "{requester}");
         assert!(questions_of(&c, lead_id).is_empty(), "{requester}");
@@ -271,8 +278,16 @@ async fn an_idle_windows_question_after_a_leads_task_was_accepted_is_the_chiefs(
 }
 
 /// The window held a lead's task, and the chief's follow-up is on its way into it.
-async fn moving_from_a_leads_task_to_the_chiefs(
-) -> (Context, tempfile::TempDir, String, i64, i64, i64, String, i64) {
+async fn moving_from_a_leads_task_to_the_chiefs() -> (
+    Context,
+    tempfile::TempDir,
+    String,
+    i64,
+    i64,
+    i64,
+    String,
+    i64,
+) {
     let mut w = world();
     let lead = with_a_lead(&mut w);
     let (old, session, b) = given_by(&mut w, &lead, false);
@@ -300,7 +315,11 @@ async fn a_question_stamped_in_the_leads_holding_while_the_chiefs_brief_is_hande
     let (code, body) = post(&c, asked(&auth, "From the lead's turn", Some(asking))).await;
     assert_eq!((code, stored(&body)), (201, Some(old)), "{body}");
     let q = body["message"]["id"].as_i64().unwrap();
-    assert_eq!(recipient(&c, q), lead, "the recipient follows the bound task");
+    assert_eq!(
+        recipient(&c, q),
+        lead,
+        "the recipient follows the bound task"
+    );
 }
 
 #[tokio::test]
@@ -316,19 +335,37 @@ async fn a_hand_over_called_off_moves_an_unread_question_to_the_leads_and_leaves
             l.question_brief_handed_over(brief).unwrap();
         }
         let (code, body) = post(&c, asked(&auth, "Asked during the send", None)).await;
-        assert_eq!((code, stored(&body)), (201, Some(next)), "read={read}: {body}");
+        assert_eq!(
+            (code, stored(&body)),
+            (201, Some(next)),
+            "read={read}: {body}"
+        );
         let q = body["message"]["id"].as_i64().unwrap();
-        assert_eq!(recipient(&c, q), "chief", "read={read}: the chief's task, the chief's");
+        assert_eq!(
+            recipient(&c, q),
+            "chief",
+            "read={read}: the chief's task, the chief's"
+        );
         if read {
             let mut l = c.ledger.borrow_mut();
             l.begin_delivery(q).unwrap();
-            l.confirm_delivery(q, Some(&json!({"test":"received"}))).unwrap();
+            l.confirm_delivery(q, Some(&json!({"test":"received"})))
+                .unwrap();
         }
         c.ledger.borrow_mut().question_brief_refused(brief).unwrap();
         let held = c.ledger.borrow().question_holding(worker).unwrap().unwrap();
         assert!(held.active && held.task_number == old, "read={read}");
-        let lead_id = c.ledger.borrow().project(c_project(&c)).unwrap().unwrap()
-            .participants.iter().find(|p| p.handle == lead).unwrap().id;
+        let lead_id = c
+            .ledger
+            .borrow()
+            .project(c_project(&c))
+            .unwrap()
+            .unwrap()
+            .participants
+            .iter()
+            .find(|p| p.handle == lead)
+            .unwrap()
+            .id;
         let told: Vec<String> = c
             .ledger
             .borrow()
@@ -339,21 +376,42 @@ async fn a_hand_over_called_off_moves_an_unread_question_to_the_leads_and_leaves
             .map(|m| m.body)
             .collect();
         if read {
-            assert_eq!(recipient(&c, q), "chief", "a read question stays with its reader");
+            assert_eq!(
+                recipient(&c, q),
+                "chief",
+                "a read question stays with its reader"
+            );
             assert_eq!(told.len(), 1, "the lead is told its words once: {told:?}");
             assert!(told[0].contains(&format!("m-{q}")), "{told:?}");
             // The reader answers it.
-            let chief = c.ledger.borrow().project(c_project(&c)).unwrap().unwrap()
-                .participants.iter().find(|p| p.handle == "chief").unwrap().id;
-            let a = c.ledger.borrow_mut()
+            let chief = c
+                .ledger
+                .borrow()
+                .project(c_project(&c))
+                .unwrap()
+                .unwrap()
+                .participants
+                .iter()
+                .find(|p| p.handle == "chief")
+                .unwrap()
+                .id;
+            let a = c
+                .ledger
+                .borrow_mut()
                 .answer(q, chief, Some(&json!("Use PEG")), None)
                 .unwrap();
             assert_eq!(a.task_number, Some(old));
         } else {
-            assert_eq!(recipient(&c, q), lead, "an unread question goes to the lead");
+            assert_eq!(
+                recipient(&c, q),
+                lead,
+                "an unread question goes to the lead"
+            );
             assert!(told.is_empty(), "{told:?}");
             assert_eq!(questions_of(&c, lead_id).len(), 1);
-            let a = c.ledger.borrow_mut()
+            let a = c
+                .ledger
+                .borrow_mut()
                 .answer(q, lead_id, Some(&json!("Use PEG")), None)
                 .unwrap();
             assert_eq!(a.task_number, Some(old));
@@ -362,8 +420,12 @@ async fn a_hand_over_called_off_moves_an_unread_question_to_the_leads_and_leaves
 }
 
 fn c_project(c: &Context) -> i64 {
-    c.ledger.borrow().sqlite()
-        .query_row("SELECT id FROM project ORDER BY id LIMIT 1", [], |r| r.get(0))
+    c.ledger
+        .borrow()
+        .sqlite()
+        .query_row("SELECT id FROM project ORDER BY id LIMIT 1", [], |r| {
+            r.get(0)
+        })
         .unwrap()
 }
 
@@ -380,11 +442,24 @@ async fn with_approval_a_question_on_a_leads_task_waits_at_the_gate_for_the_lead
     assert_eq!((code, stored(&body)), (201, Some(task)), "{body}");
     let q = body["message"]["id"].as_i64().unwrap();
     let gated = c.ledger.borrow().message(q).unwrap().unwrap();
-    assert_eq!((gated.state.as_str(), gated.recipient.as_str()), ("gated", lead.as_str()));
+    assert_eq!(
+        (gated.state.as_str(), gated.recipient.as_str()),
+        ("gated", lead.as_str())
+    );
     c.ledger.borrow_mut().approve_message(q, "human").unwrap();
     let released = c.ledger.borrow().message(q).unwrap().unwrap();
-    assert_eq!((released.state.as_str(), released.recipient.as_str()), ("queued", lead.as_str()));
-    assert_eq!(c.ledger.borrow().next_delivery(lead_id).unwrap().map(|m| m.id), Some(q));
+    assert_eq!(
+        (released.state.as_str(), released.recipient.as_str()),
+        ("queued", lead.as_str())
+    );
+    assert_eq!(
+        c.ledger
+            .borrow()
+            .next_delivery(lead_id)
+            .unwrap()
+            .map(|m| m.id),
+        Some(q)
+    );
 }
 
 #[tokio::test]
@@ -398,10 +473,100 @@ async fn a_question_its_codex_window_posts_twice_on_a_reconnect_goes_twice_to_th
     let auth = issued(&c, p, window);
     let mut asked_to = Vec::new();
     for _ in 0..2 {
-        let (code, body) =
-            post(&c, req("/api/questions", &auth, json!({ "questions": options() }))).await;
+        let (code, body) = post(
+            &c,
+            req("/api/questions", &auth, json!({ "questions": options() })),
+        )
+        .await;
         assert_eq!((code, stored(&body)), (201, Some(task)), "{body}");
         asked_to.push(recipient(&c, body["message"]["id"].as_i64().unwrap()));
     }
     assert_eq!(asked_to, [lead.clone(), lead]);
+}
+
+/// A member's note whose body comes after its window was handed the chief's next task: filed on
+/// the task it held at the request's arrival where the two tasks have different deciders (the
+/// lead's), and as today where both are the chief's.
+#[tokio::test]
+async fn a_late_note_across_a_hand_over_between_two_deciders_is_filed_on_the_task_held_at_arrival()
+{
+    for first_giver in ["lead", "chief"] {
+        let mut w = world();
+        let lead = with_a_lead(&mut w);
+        let giver = if first_giver == "lead" {
+            lead.clone()
+        } else {
+            "chief".to_owned()
+        };
+        let (old, session, b) = given_by(&mut w, &giver, false);
+        w.deliver(b);
+        let (p, worker) = (w.project, w.id(&session));
+        let (c, _dir) = into_context(w);
+        let auth = issued(&c, p, worker);
+        let (send, words) = tokio::sync::oneshot::channel::<bytes::Bytes>();
+        let request = Request::new(
+            Method::POST,
+            "/api/notes",
+            Some(format!("Bearer {auth}")),
+            Body::new(futures_util::stream::once(async move {
+                Ok(words.await.expect("the body"))
+            })),
+        )
+        .unwrap();
+        let caller = caller_of(&c, &request).unwrap();
+        let route = recognize(&request.method, &request.path).unwrap();
+        let noted = dispatch(&c, &caller, route, request);
+        let next = async {
+            let next = {
+                let mut l = c.ledger.borrow_mut();
+                l.record_result(p, old, "Result").unwrap();
+                l.create_task(
+                    p,
+                    &NewTask {
+                        from: "chief".into(),
+                        to: Some(session.clone()),
+                        body: "The next task".into(),
+                        ..NewTask::default()
+                    },
+                )
+                .unwrap()
+            };
+            let brief = next.message.unwrap().id;
+            take(&c, brief);
+            assert_eq!(
+                c.ledger
+                    .borrow()
+                    .task_in_hand(worker)
+                    .unwrap()
+                    .map(|t| t.task.number),
+                Some(next.task.number)
+            );
+            send.send(bytes::Bytes::from(
+                json!({ "body": "Late words" }).to_string(),
+            ))
+            .unwrap();
+            next.task.number
+        };
+        let (answered, next) = tokio::join!(noted, next);
+        let answered = answered.unwrap_or_else(|e| e.answer());
+        let Content::Json(body) = answered.content else {
+            panic!("expected JSON")
+        };
+        assert_eq!(answered.status, 201, "{first_giver}: {body}");
+        let id = body["message"]["id"].as_i64().unwrap();
+        let filed = c.ledger.borrow().message(id).unwrap().unwrap();
+        if first_giver == "lead" {
+            assert_eq!(
+                (filed.recipient.as_str(), filed.task_number),
+                (lead.as_str(), Some(old)),
+                "filed on the task held at arrival"
+            );
+        } else {
+            assert_eq!(
+                (filed.recipient.as_str(), filed.task_number),
+                ("chief", Some(next)),
+                "one decider: filed as today"
+            );
+        }
+    }
 }

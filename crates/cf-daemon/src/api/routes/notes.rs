@@ -1,5 +1,6 @@
 //! `POST /api/notes`: a note, from the chief to the human or from a member to
-//! whoever gave it its task. It reads its body first, and wakes the dispatcher
+//! whoever gave it its task (the task it held when the request arrived, where its window was
+//! handed another task with another decider before the body came). It reads its body first, and wakes the dispatcher
 //! once it is written.
 
 use cf_ledger::NewNote;
@@ -14,11 +15,28 @@ pub(super) async fn handle(
     caller: &Caller,
     mut request: Request,
 ) -> Result<Answer, Failure> {
+    // The task in hand when the request arrived: a note whose body comes after its window
+    // was handed another task is filed on this one where the two have different deciders.
+    let arrived = context
+        .ledger
+        .borrow()
+        .task_in_hand(caller.participant.id)
+        .ok()
+        .flatten();
     let body = request.json().await?;
     let active = context
         .ledger
         .borrow()
         .task_in_hand(caller.participant.id)?;
+    let active = match (arrived, active) {
+        (Some(arrived), Some(now))
+            if arrived.task.id != now.task.id
+                && deciders_differ(context, caller.project.id, &arrived, &now)? =>
+        {
+            Some(arrived)
+        }
+        (_, active) => active,
+    };
     let chief = caller.participant.seat().coordinates();
     if active.is_none() && !chief {
         refuse_cancelled(context, caller)?;
@@ -57,6 +75,18 @@ pub(super) async fn handle(
     Ok(Answer::created(
         json!({ "message": value(&MessageSummary::from(&noted))? }),
     ))
+}
+
+/// Whether two tasks have different deciders: with one chief every decider is the chief.
+fn deciders_differ(
+    context: &Context,
+    project: i64,
+    one: &cf_ledger::TaskThread,
+    other: &cf_ledger::TaskThread,
+) -> Result<bool, Failure> {
+    let ledger = context.ledger.borrow();
+    Ok(ledger.task_decider(project, one.task.number)?
+        != ledger.task_decider(project, other.task.number)?)
 }
 
 #[cfg(test)]

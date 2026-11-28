@@ -1,0 +1,106 @@
+# Leads step 4 (T-2438): a question's placing. A member's question is bound to its window's
+# holding first; its recipient (and with it the gate and the reminder) is that holding's decider;
+# a hand-over called off moves an unread question to the restored task's decider and tells the
+# decider of a read one; last words read for a lead by its handle; a late note across two deciders
+# is filed on the task held at its arrival. Each plant is a bug the test it names was written for.
+#
+# Every name holds `leads questions`, so `cargo xtask plants daemon "leads questions"` runs them.
+
+[[plant]]
+name = "leads questions: the chief decides every task"
+meant = "a_members_question_on_a_leads_task_by_cf_ask_and_by_its_question_tool_is_the_leads"
+runs = [["cargo", "test", "--offline", "-p", "cf-daemon", "--test", "lead_questions"], ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "lead_questions::"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/deciders.rs"
+find = " && requester.left_at.is_none()\n"
+replace = " && requester.left_at.is_none() && false\n"
+
+[[plant]]
+name = "leads questions: the chief is not the human's task's decider"
+meant = "a_members_question_on_the_chiefs_or_the_humans_task_is_the_chiefs_with_a_lead_there"
+runs = [["cargo", "test", "--offline", "-p", "cf-daemon", "--test", "lead_questions"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/deciders.rs"
+find = "    if requester.seat().coordinates() && !requester.seat().is_chief()"
+replace = "    if (requester.seat().coordinates() || requester.handle == \"human\") && !requester.seat().is_chief()"
+
+[[plant]]
+name = "leads questions: the recipient is the window's holding of the arrival, not the bound one"
+meant = "a_question_stamped_in_the_leads_holding_while_the_chiefs_brief_is_handed_is_the_leads"
+runs = [["cargo", "test", "--offline", "-p", "cf-daemon", "--test", "lead_questions"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages.rs"
+find = "                    let held = match bound {\n                        Some(held) => held,\n"
+replace = "                    let held = match bound.filter(|_| false) {\n                        Some(held) => held,\n"
+
+[[plant]]
+name = "leads questions: a called-off hand-over leaves an unread question with the other task's decider"
+meant = "a_hand_over_called_off_moves_an_unread_question_to_the_leads_and_leaves_a_read_one_with_its_reader"
+runs = [["cargo", "test", "--offline", "-p", "cf-daemon", "--test", "lead_questions"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/holding.rs"
+find = "                follow_its_decider(store, question, task)?;\n"
+replace = ""
+
+[[plant]]
+name = "leads questions: a called-off hand-over moves a question its reader has read"
+meant = "a_hand_over_called_off_moves_an_unread_question_to_the_leads_and_leaves_a_read_one_with_its_reader"
+runs = [["cargo", "test", "--offline", "-p", "cf-daemon", "--test", "lead_questions"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/holding.rs"
+find = "    let exposed = !matches!(asked.state.as_str(), \"queued\" | \"gated\")\n"
+replace = "    let exposed = false && !matches!(asked.state.as_str(), \"queued\" | \"gated\")\n"
+
+[[plant]]
+name = "leads questions: the new decider of a read question is not told its words"
+meant = "a_hand_over_called_off_moves_an_unread_question_to_the_leads_and_leaves_a_read_one_with_its_reader"
+runs = [["cargo", "test", "--offline", "-p", "cf-daemon", "--test", "lead_questions"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/holding.rs"
+find = "    crate::messages::note(\n        store,\n        asked.project_id,\n"
+replace = "    let _ = (\n        store,\n        asked.project_id,\n"
+
+[[plant]]
+name = "leads questions: last words are read for the chief alone on a lead's task"
+meant = "a_question_a_turn_ends_on_goes_to_the_lead_that_gave_the_task_and_the_chief_hears_none"
+runs = [["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "lead_questions::"], ["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "turn_end::asks::"]]
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end/asks.rs"
+find = "                    || giver.is_some_and(|giver| waits_for_giver(after_the(after), giver)))"
+replace = "                    || giver.is_some_and(|_| false))"
+
+[[plant]]
+name = "leads questions: the turn's end names the chief as the giver of every task"
+meant = "a_question_a_turn_ends_on_goes_to_the_lead_that_gave_the_task_and_the_chief_hears_none"
+runs = [["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "lead_questions::"]]
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = "            .filter(|giver| giver.seat().coordinates() && !giver.seat().is_chief())\n"
+replace = "            .filter(|giver| giver.seat().is_chief())\n"
+
+[[plant]]
+name = "leads questions: the turn's end asks the chief by name"
+meant = "a_question_a_turn_ends_on_goes_to_the_lead_that_gave_the_task_and_the_chief_hears_none"
+runs = [["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "lead_questions::"]]
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = "                &QuestionTo::TaskGiver,\n            )?;"
+replace = "                &QuestionTo::Named(\"chief\".to_owned()),\n            )?;"
+
+[[plant]]
+name = "leads questions: a late note is filed on the task held when its body came"
+meant = "a_late_note_across_a_hand_over_between_two_deciders_is_filed_on_the_task_held_at_arrival"
+runs = [["cargo", "test", "--offline", "-p", "cf-daemon", "--test", "lead_questions"]]
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/routes/notes.rs"
+find = "            Some(arrived)\n        }\n"
+replace = "            Some(now)\n        }\n"
+
+[[plant]]
+name = "leads questions: a late note is refiled across two tasks of one decider"
+meant = "a_late_note_across_a_hand_over_between_two_deciders_is_filed_on_the_task_held_at_arrival"
+runs = [["cargo", "test", "--offline", "-p", "cf-daemon", "--test", "lead_questions"]]
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/routes/notes.rs"
+find = "                && deciders_differ(context, caller.project.id, &arrived, &now)? =>\n"
+replace = "                && (deciders_differ(context, caller.project.id, &arrived, &now)? || true) =>\n"

@@ -33,6 +33,7 @@ mod fixture;
 mod gate;
 mod handed;
 mod hold_table;
+mod lead_questions;
 mod legacy;
 mod moved_answer_contract;
 mod no_lead;

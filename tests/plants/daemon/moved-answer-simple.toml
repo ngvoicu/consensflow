@@ -6,8 +6,8 @@ meant = "t1803_finding_07_a_question_about_another_task_follows_the_asking_windo
 runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "t1803_finding_07_a_question_about_another_task_follows_the_asking_windows_holding"]]
 [[plant.edit]]
 file = "crates/cf-ledger/src/holding.rs"
-find = "            (Some(h.task_id), Some(h.first_brief))"
-replace = "            (None::<i64>, None::<i64>)"
+find = "            Bound::Task {\n                task: h.task_id,\n                first_brief: h.first_brief,\n            }"
+replace = "            Bound::Taskless"
 
 [[plant]]
 name = "moved answer simple: a queued brief is mistaken for a previous holding"

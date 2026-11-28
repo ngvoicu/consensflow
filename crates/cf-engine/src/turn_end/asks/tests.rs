@@ -313,3 +313,47 @@ fn no_words_and_the_words_of_no_answer_are_no_question() {
     does_not_ask("(the agent ended its turn without a written answer)");
     does_not_ask("```\nonly code\n```");
 }
+
+/// The words of a lead's task, read for its giver `lead-1` (the leads design, section 3).
+fn asks_lead(words: &str) -> bool {
+    super::asks_the_giver(words, Some("lead-1"))
+}
+
+#[test]
+fn on_a_leads_task_a_wait_for_the_lead_by_its_handle_is_a_question() {
+    for words in [
+        "The parser is half done. Waiting for @lead-1's decision to go on.",
+        "Waiting for @lead-1.",
+        "I'm waiting on lead-1 before I touch the grammar.",
+        "Awaiting @lead-1's go.",
+        "Waiting for the @lead-1's answer.",
+        // Today's words stand on a lead's task too.
+        "Waiting for your go.",
+        "Should I continue with the live runs, or stop here?",
+    ] {
+        assert!(asks_lead(words), "taken for a result: {words:?}");
+    }
+}
+
+#[test]
+fn on_a_leads_task_what_names_another_or_takes_the_wait_back_is_no_question() {
+    for words in [
+        "Waiting for @lead-10's go.",
+        "Waiting for @lead-2's go.",
+        "Nothing is waiting for @lead-1's answer.",
+        "Waiting for @lead-1's review of the parser.",
+        "The parser is done; `waiting for @lead-1` is what the old text said.",
+    ] {
+        assert!(!asks_lead(words), "taken for a question: {words:?}");
+    }
+}
+
+#[test]
+fn on_the_chiefs_or_the_humans_task_a_wait_for_a_lead_by_name_is_no_question() {
+    for words in [
+        "The parser is half done. Waiting for @lead-1's decision to go on.",
+        "Waiting for @lead-1.",
+    ] {
+        assert!(!asks_the_chief(words), "taken for a question: {words:?}");
+    }
+}

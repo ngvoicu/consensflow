@@ -44,9 +44,9 @@ runs = ["qnr-engine"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/turn_end.rs"
-find = '''        if asks_the_chief(&words_of(&answers.final_run)) {
+find = '''        if asks_the_giver(&words_of(&answers.final_run), giver) {
 '''
-replace = '''        if false && asks_the_chief(&words_of(&answers.final_run)) {
+replace = '''        if false && asks_the_giver(&words_of(&answers.final_run), giver) {
 '''
 
 [[plant]]
@@ -57,9 +57,9 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-engine/src/turn_end.rs"
-find = '''        if asks_the_chief(&words_of(&answers.final_run)) {
+find = '''        if asks_the_giver(&words_of(&answers.final_run), giver) {
 '''
-replace = '''        if false && asks_the_chief(&words_of(&answers.final_run)) {
+replace = '''        if false && asks_the_giver(&words_of(&answers.final_run), giver) {
 '''
 
 [[plant]]
@@ -81,9 +81,9 @@ runs = ["qnr-engine"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/turn_end.rs"
-find = '''        if asks_the_chief(&words_of(&answers.final_run)) {
+find = '''        if asks_the_giver(&words_of(&answers.final_run), giver) {
 '''
-replace = '''        if asks_the_chief(&words) {
+replace = '''        if asks_the_giver(&words, giver) {
 '''
 
 [[plant]]
@@ -261,7 +261,7 @@ runs = ["qnr-lib"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/turn_end/asks.rs"
-find = '''    !paragraph.is_empty() && (waits(&paragraph) || asks_what_next(&paragraph))
+find = '''    !paragraph.is_empty() && (waits(&paragraph, giver.as_deref()) || asks_what_next(&paragraph))
 '''
 replace = '''    !paragraph.is_empty() && asks_what_next(&paragraph)
 '''
@@ -273,9 +273,9 @@ runs = ["qnr-lib"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/turn_end/asks.rs"
-find = '''    !paragraph.is_empty() && (waits(&paragraph) || asks_what_next(&paragraph))
+find = '''    !paragraph.is_empty() && (waits(&paragraph, giver.as_deref()) || asks_what_next(&paragraph))
 '''
-replace = '''    !paragraph.is_empty() && waits(&paragraph)
+replace = '''    !paragraph.is_empty() && waits(&paragraph, giver.as_deref())
 '''
 
 [[plant]]
@@ -491,8 +491,8 @@ runs = ["qnr-lib"]
 [[plant.edit]]
 file = "crates/cf-engine/src/turn_end/asks.rs"
 find = '''            starts_a_word(paragraph, at)
-                && waits_for_who(after.trim_start())'''
-replace = "            waits_for_who(after.trim_start())"
+                && (waits_for_who(after)'''
+replace = "            (waits_for_who(after)"
 
 [[plant]]
 name = "questions not results: a negation takes nothing back from a wait"

@@ -598,16 +598,38 @@ impl Ledger {
         messages::ask(&mut self.store, project_id, question)
     }
 
+    /// The handle of T-`number`'s decider: its requester while that is a lead still in the
+    /// project, else the chief.
+    pub fn task_decider(&self, project: i64, number: i64) -> Result<String, LedgerError> {
+        let task = self.store.task_row(project, number)?;
+        Ok(crate::deciders::decider_of(&self.store, &task)?.handle)
+    }
+
+    /// [`Ledger::ask`] put to `to`: with [`crate::QuestionTo::TaskGiver`], a member's question
+    /// goes to the decider of the task its window holds now (`question.to` is not read).
+    pub fn ask_to(
+        &mut self,
+        project_id: i64,
+        question: &NewQuestion,
+        to: &crate::QuestionTo,
+    ) -> Result<MessageView, LedgerError> {
+        Ok(messages::ask_placed(&mut self.store, project_id, question, to, None)?.0)
+    }
+
     /// Place a window request and choose its holding in the same transaction.
     /// `asked_at` is when the asking process began (ms on the ledger's clock),
     /// and binds the question to the window's holding of that moment; without
     /// it the question is the holding's at its arrival. `idle_generation` is the
-    /// last brief of a holding the asking token was made beside and not given.
+    /// last brief of a holding the asking token was made beside and not given. The holding
+    /// chosen is the question's binding, and with [`crate::QuestionTo::TaskGiver`] its recipient
+    /// is that holding's decider (`question.to` is then not read).
+    #[allow(clippy::too_many_arguments)]
     pub fn ask_from_window(
         &mut self,
         project: i64,
         window: i64,
         question: &NewQuestion,
+        to: &crate::QuestionTo,
         observed: Option<crate::WindowHolding>,
         launch_task: Option<(i64, i64)>,
         stamp: crate::QuestionStamp,
@@ -668,16 +690,14 @@ impl Ledger {
             if let Some((task, _)) = replaced {
                 placed.task = Some(store.db.query_row("SELECT number FROM task WHERE id = ?", [task], |r| r.get(0))?);
             }
-            let message = messages::ask(store, project, &placed)?;
-            if let Some((task, first)) = replaced {
-                store.db.execute(
-                    "UPDATE question_binding SET task_id = ?2, first_brief_id = ?3 WHERE question_id = ?1",
-                    rusqlite::params![message.id, task, first],
-                )?;
-            } else if selected.is_none() {
-                store.db.execute("UPDATE question_binding SET task_id = NULL, first_brief_id = NULL WHERE question_id = ?", [message.id])?;
-            }
-            Ok(message)
+            // The holding is resolved before the question is written: its binding, and its
+            // recipient, are that holding's.
+            let bound = match (replaced, selected) {
+                (Some((task, first_brief)), _) => crate::holding::Bound::Task { task, first_brief },
+                (None, Some(_)) => crate::holding::bound_now(store, window)?,
+                (None, None) => crate::holding::Bound::Taskless,
+            };
+            Ok(messages::ask_placed(store, project, &placed, to, Some(bound))?.0)
         })
     }
 

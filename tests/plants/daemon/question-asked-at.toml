@@ -55,8 +55,8 @@ meant = "q1_a_question_in_a_refused_hand_overs_attempt_goes_back_to_the_holding_
 runs = [["cargo", "test", "--offline", "-p", "cf-daemon", "--test", "question_asked_at"]]
 [[plant.edit]]
 file = "crates/cf-ledger/src/ledger/messages.rs"
-find = "                    rusqlite::params![message.id, task, first],"
-replace = "                    rusqlite::params![message.id, rusqlite::types::Null, first],"
+find = "                (Some((task, first_brief)), _) => crate::holding::Bound::Task { task, first_brief },"
+replace = "                (Some(_), _) => crate::holding::Bound::Taskless,"
 
 [[plant]]
 name = "question asked at: the daemon drops the stamp"

@@ -32,6 +32,7 @@ use cf_proto::ledger::{MessageView, Question};
 use rusqlite::{params, OptionalExtension};
 use serde_json::{json, Value};
 
+use crate::holding::Bound;
 use crate::model::{self, require_active, LedgerError, FINISHED_TASK_STATES, MAX_BODY};
 use crate::questions::{render_choices, render_questions, require_choices, require_questions};
 use crate::queue::{queue, send, withdraw, Queued, Sent};
@@ -207,6 +208,35 @@ pub(crate) fn ask_naming(
     project_id: i64,
     question: &NewQuestion,
 ) -> Result<(MessageView, Vec<MessageView>), LedgerError> {
+    ask_placed(
+        store,
+        project_id,
+        question,
+        &QuestionTo::Named(question.to.clone()),
+        None,
+    )
+}
+
+/// Whom a question is put to: the decider of the task it is bound to (a member's own question,
+/// by `cf ask`, its harness's question tool or last words that ask), or the participant named.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum QuestionTo {
+    /// The decider of the task the question is bound to; bound to none, the chief.
+    TaskGiver,
+    /// The participant of this handle.
+    Named(String),
+}
+
+/// [`ask_naming`] put to `to`. `bound` is the holding a window's question was resolved to
+/// before it reached here; None resolves a member's to its window's holding now. The binding,
+/// the recipient (and with it the gate and the reminder) are made from that one holding.
+pub(crate) fn ask_placed(
+    store: &mut Store,
+    project_id: i64,
+    question: &NewQuestion,
+    to: &QuestionTo,
+    bound: Option<Bound>,
+) -> Result<(MessageView, Vec<MessageView>), LedgerError> {
     let Some(from) = question.from.as_deref() else {
         return Err(LedgerError::refused(
             "unknown-participant",
@@ -219,7 +249,27 @@ pub(crate) fn ask_naming(
         .map(require_questions)
         .transpose()?;
     store.write(|store| {
-        if store.participant_by_handle(project_id, &question.to)?.role == "human" {
+        // A member's own question is bound first; its recipient is that holding's decider.
+        let mut bound = bound;
+        let recipient = match to {
+            QuestionTo::Named(handle) => handle.clone(),
+            QuestionTo::TaskGiver => {
+                let asker = store.participant_by_handle(project_id, from)?;
+                let held = if !question.urgent && asker.seat().is_member() {
+                    let held = match bound {
+                        Some(held) => held,
+                        None => crate::holding::bound_now(store, asker.id)?,
+                    };
+                    bound = Some(held);
+                    held.task()
+                } else {
+                    None
+                };
+                crate::deciders::question_recipient(store, project_id, held)?
+            }
+        };
+        let question_to = recipient.as_str();
+        if store.participant_by_handle(project_id, question_to)?.role == "human" {
             return Err(LedgerError::refused_with(
                 "ask-in-your-terminal",
                 "the human is asked in the chief's terminal, not on the board",
@@ -319,7 +369,7 @@ pub(crate) fn ask_naming(
             project_id,
             &Sent {
                 from: Some(from),
-                to: &question.to,
+                to: question_to,
                 body: &body,
                 task: question.task,
                 kind: "question",
@@ -332,7 +382,11 @@ pub(crate) fn ask_naming(
         if !question.urgent {
             let asker = store.participant_by_handle(project_id, from)?;
             if asker.seat().is_member() {
-                crate::holding::bind(store, message.id, asker.id)?;
+                let bound = match bound {
+                    Some(bound) => bound,
+                    None => crate::holding::bound_now(store, asker.id)?,
+                };
+                crate::holding::bind(store, message.id, asker.id, bound)?;
             }
         }
         if let Some(row) = asking {

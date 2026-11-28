@@ -1,11 +1,11 @@
-//! `POST /api/questions`: a member's question for the chief, which the member's
-//! task waits on. The chief asks the human in its own terminal, and is refused
+//! `POST /api/questions`: a member's question for the decider of the task its window holds
+//! (the chief, or the lead that gave it), which the member's task waits on. The chief asks the human in its own terminal, and is refused
 //! here before the body is read. The door waiting for the answer is
 //! [`super::door`]. A window the pause has not stopped yet is still on its
 //! task, and its question is about it, born with its door shut when the turn
 //! that asks is an old one.
 
-use cf_ledger::NewQuestion;
+use cf_ledger::{NewQuestion, QuestionTo};
 use serde_json::{json, Value};
 
 use super::{Answer, Caller, Context, Failure, Request};
@@ -39,12 +39,14 @@ pub(super) async fn ask(
         caller.participant.id,
         &NewQuestion {
             from: Some(caller.participant.handle.clone()),
-            to: "chief".to_owned(),
+            // Not read: the question goes to its bound task's decider.
+            to: String::new(),
             body: body.get("body").and_then(Value::as_str).map(str::to_owned),
             task: None,
             questions: body.get("questions").cloned(),
             urgent: false,
         },
+        &QuestionTo::TaskGiver,
         caller.question_holding,
         caller.question_launch_task,
         cf_ledger::QuestionStamp {

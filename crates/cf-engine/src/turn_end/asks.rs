@@ -141,9 +141,19 @@ const AFTER_QUESTION: [char; 8] = [' ', '"', '\'', '`', ')', ']', '*', '_'];
 
 /// Whether the last paragraph of a worker's words asks the chief what to do, or says it
 /// waits for the chief's answer.
+#[cfg(test)]
 pub(crate) fn asks_the_chief(words: &str) -> bool {
+    asks_the_giver(words, None)
+}
+
+/// Whether the last paragraph of a worker's words asks the one that gave its task what to do,
+/// or says it waits for that one's answer: "the chief" or "you", as for every task, and also
+/// the giver's own handle (`@lead-1`, `lead-1`) where `giver` is the lead that gave it. A
+/// chief's or the human's task (`giver` None) is read with those words alone.
+pub(crate) fn asks_the_giver(words: &str, giver: Option<&str>) -> bool {
     let paragraph = plain(&last_paragraph(&without_blocks(words)));
-    !paragraph.is_empty() && (waits(&paragraph) || asks_what_next(&paragraph))
+    let giver = giver.map(str::to_lowercase);
+    !paragraph.is_empty() && (waits(&paragraph, giver.as_deref()) || asks_what_next(&paragraph))
 }
 
 /// The words without their fenced code, table rows and block quotes: what is not the
@@ -274,21 +284,42 @@ fn without_quotes(text: &str) -> String {
     kept
 }
 
-/// Whether the paragraph says its writer waits for the chief.
-fn waits(paragraph: &str) -> bool {
-    waits_for_the_chief(paragraph) || goes_on_when_answered(paragraph)
+/// Whether the paragraph says its writer waits for the chief (or the lead `giver`).
+fn waits(paragraph: &str, giver: Option<&str>) -> bool {
+    waits_for_the_chief(paragraph, giver) || goes_on_when_answered(paragraph)
 }
 
-/// "Waiting for your go", "awaits the chief's word", "waiting on you".
-fn waits_for_the_chief(paragraph: &str) -> bool {
+/// "Waiting for your go", "awaits the chief's word", "waiting on you", and for a lead's task
+/// "waiting for @lead-1's decision to go on".
+fn waits_for_the_chief(paragraph: &str, giver: Option<&str>) -> bool {
     WAIT_STEMS.iter().any(|stem| {
         paragraph.match_indices(stem).any(|(at, _)| {
-            let after = &paragraph[at + stem.len()..];
+            let after = paragraph[at + stem.len()..].trim_start();
             starts_a_word(paragraph, at)
-                && waits_for_who(after.trim_start())
+                && (waits_for_who(after)
+                    || giver.is_some_and(|giver| waits_for_giver(after_the(after), giver)))
                 && !negated(&paragraph[..at])
         })
     })
+}
+
+/// What follows a wait without the article before a name: "the @lead-1's word".
+fn after_the(after: &str) -> &str {
+    after.strip_prefix("the ").unwrap_or(after)
+}
+
+/// Whether what follows a wait names the lead `giver` (`@lead-1`, `lead-1`) as the chief is
+/// named: alone, or with what it gives ("@lead-1's go", "lead-1's decision to go on").
+fn waits_for_giver(after: &str, giver: &str) -> bool {
+    let after = after.strip_prefix('@').unwrap_or(after);
+    let Some(rest) = after.strip_prefix(giver) else {
+        return false;
+    };
+    match rest.chars().next() {
+        Some('\'') => rest.strip_prefix("'s").is_some_and(gives),
+        Some(next) => !(next.is_alphanumeric() || next == '-'),
+        None => true,
+    }
 }
 
 /// Whether what follows a wait ("you …", "the chief …") is a wait for the chief's answer.

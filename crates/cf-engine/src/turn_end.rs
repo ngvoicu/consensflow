@@ -85,7 +85,8 @@ use cf_base::{js, time};
 use cf_harness::contract::Observed;
 use cf_harness::records::{Command, Item, Monitor, Pending, Reading, Role, Source};
 use cf_ledger::{
-    NewNote, NewQuestion, ParticipantView, ProjectView, TaskThread, TURN_ON_OPEN_QUESTION,
+    NewNote, NewQuestion, ParticipantView, ProjectView, QuestionTo, TaskThread,
+    TURN_ON_OPEN_QUESTION,
 };
 use cf_proto::ledger::MessageView;
 use serde_json::Value;
@@ -97,7 +98,7 @@ use crate::record::Record;
 use crate::role_change::{answers_to_the_task, Run};
 use crate::seams::{CommandsSeen, EngineError};
 
-use self::asks::asks_the_chief;
+use self::asks::asks_the_giver;
 use self::earlier_turns::with_earlier;
 use self::waits::{ends_to_wait, go_on_note, go_on_told};
 
@@ -762,18 +763,27 @@ impl Dispatcher {
         record.held.borrow_mut().reset();
         // Its last words ask the chief, or wait for its answer: they are a question, not
         // the work done. The task waits for the chief's `cf answer`, as for any question
-        // its window asks; its window stays (T-1119).
-        if asks_the_chief(&words_of(&answers.final_run)) {
+        // its window asks; its window stays (T-1119). A lead's task is asked of the lead by
+        // its handle too; the question goes to the decider of the task its window holds.
+        let giver = project
+            .participants
+            .iter()
+            .find(|giver| giver.handle == thread.task.requester)
+            .filter(|giver| giver.seat().coordinates() && !giver.seat().is_chief())
+            .map(|giver| giver.handle.as_str());
+        if asks_the_giver(&words_of(&answers.final_run), giver) {
             let body = with_finish_line(words, &participant.handle, thread.task.number);
-            self.seams.ledger.borrow_mut().ask(
+            self.seams.ledger.borrow_mut().ask_to(
                 project.id,
                 &NewQuestion {
                     from: Some(participant.handle.clone()),
-                    to: "chief".to_owned(),
+                    // Not read: the question goes to its bound task's decider.
+                    to: String::new(),
                     body: Some(body),
                     task: Some(thread.task.number),
                     ..NewQuestion::default()
                 },
+                &QuestionTo::TaskGiver,
             )?;
             self.changed();
             return Ok(Turn::Asked);
